@@ -17,7 +17,12 @@ const probeTimeout = 15 * time.Second
 type LookPathFunc func(name string) (string, error)
 
 // Gatherer collects Facts about the host.
+//
+// OS and Arch default to the running binary's platform; tests pin them so the
+// macOS-only probes behave the same on a Linux CI runner.
 type Gatherer struct {
+	OS       string
+	Arch     string
 	Runner   runner.Runner
 	LookPath LookPathFunc
 }
@@ -29,7 +34,7 @@ func Gather(ctx context.Context, r runner.Runner) Facts {
 
 // Gather collects host facts using the configured runner and path lookup.
 func (g Gatherer) Gather(ctx context.Context) Facts {
-	f := Facts{OS: runtime.GOOS, Arch: runtime.GOARCH}
+	f := Facts{OS: g.os(), Arch: g.arch()}
 	f.HasBrew = g.has("brew")
 	f.HasLima = g.has("limactl")
 	if f.OS != "darwin" {
@@ -54,4 +59,18 @@ func (g Gatherer) output(ctx context.Context, name string, args ...string) strin
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func (g Gatherer) os() string {
+	if g.OS != "" {
+		return g.OS
+	}
+	return runtime.GOOS
+}
+
+func (g Gatherer) arch() string {
+	if g.Arch != "" {
+		return g.Arch
+	}
+	return runtime.GOARCH
 }

@@ -191,6 +191,7 @@ func TestPrepareAndDoctorWiring(t *testing.T) {
 	home := t.TempDir()
 	build := func(out io.Writer) (*app.App, error) {
 		return app.New(fake, config.Paths{Home: home, LimaHome: "/tmp/lima"}, out,
+			app.WithPlatform("darwin", "arm64"),
 			app.WithLookPath(func(string) (string, error) { return "/usr/local/bin/x", nil })), nil
 	}
 	out := &bytes.Buffer{}

@@ -63,7 +63,9 @@ func prepareApp(t *testing.T, handler runner.FakeHandler, hasLima bool, opts ...
 		}
 		return "/usr/local/bin/" + name, nil
 	}
-	opts = append([]Option{WithLookPath(lookPath), WithEnvd(fakeEnvd)}, opts...)
+	// Pin the platform so the suite behaves identically on Linux CI runners
+	// and on the Apple Silicon Macs cracklet actually targets.
+	opts = append([]Option{WithPlatform("darwin", "arm64"), WithLookPath(lookPath), WithEnvd(fakeEnvd)}, opts...)
 	return New(fake, paths, out, opts...), fake, out, paths
 }
 
@@ -203,6 +205,20 @@ func TestDoctorReportsInstanceState(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Apple M4 Pro") || !strings.Contains(out.String(), "Running") {
 		t.Errorf("unexpected doctor output:\n%s", out.String())
+	}
+}
+
+func TestDoctorRejectsUnsupportedPlatform(t *testing.T) {
+	app, fake, out, _ := prepareApp(t, hostHandler("Running", agent.Checksum()), true, WithPlatform("linux", "amd64"))
+	err := app.Doctor(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "not ready") {
+		t.Fatalf("Doctor must fail on linux/amd64, got %v", err)
+	}
+	if !strings.Contains(out.String(), "linux/amd64") {
+		t.Errorf("output should name the offending platform, got:\n%s", out.String())
+	}
+	if fake.Called("sw_vers -productVersion") {
+		t.Errorf("macOS probes must not run on a non-darwin platform:\n%s", fake.Dump())
 	}
 }
 

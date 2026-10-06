@@ -1,0 +1,20 @@
+# Lima template rendered by cracklet. The instance hosts Firecracker microVMs and
+# therefore needs nested virtualization (Apple M3+ with macOS 15+).
+# No host directories are mounted: cracklet streams what it needs over limactl shell.
+minimumLimaVersion: 2.0.0
+
+base:
+- template:_images/ubuntu-24.04
+
+vmType: vz
+nestedVirtualization: true
+
+cpus: {{.CPUs}}
+memory: "{{.MemoryGiB}}GiB"
+disk: "{{.DiskGiB}}GiB"
+
+mounts: []
+
+containerd:
+  system: false
+  user: false

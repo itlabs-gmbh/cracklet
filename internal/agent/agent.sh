@@ -31,7 +31,7 @@ readonly INPUT_CHAIN=CRACKLET-INPUT    # guest -> the Lima VM itself
 # rejected so they cannot reach the LAN or the Mac's own LAN address.
 readonly PRIVATE_NETS=(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16 127.0.0.0/8)
 readonly BASE_DISK_SIZE=2G
-readonly ROOTFS_REV=5                  # bump whenever customize_rootfs changes
+readonly ROOTFS_REV=7                  # bump whenever customize_rootfs changes
 readonly GOLDEN_REV=1                  # bump whenever build_golden changes
 readonly ENVD_BIN=$CRACKLET_ROOT/cracklet-envd   # guest identity daemon, pushed by cracklet prepare
 readonly GOLDEN_INDEX=0                # the golden VM boots as 172.16.0.2 on tap cracklet0
@@ -288,6 +288,49 @@ customize_rootfs() { # root
   rm -f "$root"/etc/systemd/system/*/fcnet.service "$root"/etc/systemd/system/fcnet.service
   trim_boot "$root"
   install_envd "$root"
+  install_motd "$root"
+}
+
+# install_motd replaces Ubuntu's login banner (Landscape and Pro adverts, the
+# "system has been minimized" notice) with a short cracklet greeting. pam_motd
+# runs the script on every login, so it can show the IP and uptime that a VM
+# restored from the golden snapshot only receives from cracklet-envd.
+install_motd() { # root
+  local root=$1
+  rm -f "$root"/etc/update-motd.d/* "$root/etc/motd"
+  : > "$root/etc/legal"
+  install -d -m 0755 "$root/etc/update-motd.d"
+  cat > "$root/etc/update-motd.d/00-cracklet" <<'MOTD'
+#!/bin/sh
+# cracklet login banner. Every value is best effort so a broken guest still
+# logs in; pam_motd captures the output, so colours are emitted unconditionally.
+O=$(printf '\033[38;5;208m') D=$(printf '\033[2m') B=$(printf '\033[1m') R=$(printf '\033[0m')
+host=$(hostname 2>/dev/null || echo '?')
+ip=$(hostname -I 2>/dev/null | cut -d' ' -f1)
+cpus=$(nproc 2>/dev/null || echo '?')
+mem=$(awk '/^MemTotal:/ { printf "%d MiB", $2 / 1024 }' /proc/meminfo 2>/dev/null)
+up=$(awk '{ s = int($1); d = int(s / 86400); h = int(s % 86400 / 3600); m = int(s % 3600 / 60)
+  if (d) printf "%dd %dh", d, h; else if (h) printf "%dh %dm", h, m
+  else if (m) printf "%dm %ds", m, s % 60; else printf "%ds", s }' /proc/uptime 2>/dev/null)
+disk=$(df -h / 2>/dev/null | awk 'NR == 2 { print $3 " of " $2 }')
+load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null)
+kernel=$(uname -r 2>/dev/null)
+printf '%s' "$O"
+cat <<'LOGO'
+                    __    __    __
+  ___________ _____/ /__ / /__ / /_
+ / __/ __/ _ `/ __/  '_// / -_) __/
+ \__/_/  \_,_/\__/_/\_\/_/\__/\__/
+LOGO
+printf '%s  %s⚡ cracklet · Firecracker microVM on macOS%s\n\n' "$R" "$D" "$R"
+row() { printf "  ${D}%-7s${R} ${B}%-18s${R} ${D}%-7s${R} ${B}%s${R}\n" "$1" "$2" "$3" "$4"; }
+row host   "$host"      ip     "${ip:-?}"
+row vcpus  "$cpus"      memory "${mem:-?}"
+row uptime "${up:-?}"   kernel "${kernel:-?}"
+row disk   "${disk:-?}" load   "${load:-?}"
+printf '\n  %soutbound internet only · no LAN · Ctrl-D to leave%s\n\n' "$D" "$R"
+MOTD
+  chmod 0755 "$root/etc/update-motd.d/00-cracklet"
 }
 
 # install_envd adds the guest identity daemon that applies IP, hostname and

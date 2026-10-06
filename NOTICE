@@ -1,0 +1,13 @@
+cracklet
+Copyright 2026 IT-Labs GmbH
+
+This product includes software developed at IT-Labs GmbH (https://www.it-labs.de).
+
+cracklet downloads and runs the following third-party components at
+`cracklet prepare` time. They are not part of this repository and keep their
+own licenses:
+
+- Firecracker (Apache-2.0) — https://github.com/firecracker-microvm/firecracker
+- Linux guest kernel from the Firecracker CI artifacts (GPL-2.0)
+- Ubuntu 24.04 cloud image (various licenses, see https://ubuntu.com/legal)
+- Lima (Apache-2.0) — https://github.com/lima-vm/lima

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>cracklet – Firecracker microVMs on your Mac</title>
+  <meta name="description" content="cracklet runs real, unmodified Firecracker microVMs on Apple Silicon. A fresh Linux VM is up in about 200 ms and answers SSH in about 3 seconds. Open source.">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#232323" media="(prefers-color-scheme: dark)">
+  <meta property="og:title" content="cracklet – Firecracker microVMs on your Mac">
+  <meta property="og:description" content="Real, unmodified Firecracker on Apple Silicon. A fresh Linux microVM in about 200 ms, SSH in about 3 seconds. Open source.">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="cracklet">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="container site-header">
+    <a class="brand" href="./" aria-current="page">cracklet</a>
+    <nav class="site-nav" aria-label="Main navigation">
+      <a href="https://github.com/itlabs-gmbh/cracklet#readme">Docs</a>
+      <a href="https://github.com/itlabs-gmbh/cracklet">GitHub</a>
+      <a href="https://github.com/itlabs-gmbh/cracklet/issues">Issues</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="container hero" style="border-top:0">
+      <span class="badge">open source</span>
+      <h1>Firecracker microVMs on your Mac</h1>
+      <p class="lead">Real, unmodified Firecracker on Apple Silicon. A fresh Linux microVM is up about 200 ms after you hit enter and answers SSH in about 3 seconds. One Go binary, open source.</p>
+
+      <div class="cmd" data-copy="cracklet new dev">
+        <span class="prompt" aria-hidden="true">$</span>
+        <span class="text">cracklet new dev</span>
+        <button type="button" aria-label="Copy cracklet new dev to the clipboard"></button>
+      </div>
+
+      <div style="max-width:100%">
+        <p class="hint">Needs an M3 or newer, macOS 15+, Homebrew and Go 1.26+. Check with <code>cracklet doctor</code>.</p>
+        <div class="cmd" data-copy="go install github.com/itlabs-gmbh/cracklet/cmd/cracklet@latest &amp;&amp; cracklet prepare">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">go install github.com/itlabs-gmbh/cracklet/cmd/cracklet@latest &amp;&amp; cracklet prepare</span>
+          <button type="button" aria-label="Copy the install command to the clipboard"></button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="container section section--center">
+        <h2>A microVM in one command</h2>
+        <p class="intro">No boot to wait for. <code>cracklet new</code> hands you a running Ubuntu 24.04 with root SSH, its own kernel, disk, IP and hostname.</p>
+        <div class="term">$ cracklet new dev
+dev is running at 172.16.1.2
+<span class="dim">  cracklet ssh dev</span>
+<span class="dim">  ssh dev.cracklet</span>
+$ cracklet ssh dev uname -a
+<span class="dim">Linux dev 6.1.186 #1 SMP aarch64 GNU/Linux</span></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="container section">
+        <h2>A sandbox per agent</h2>
+        <p class="intro">Coding agents want root, a package manager and the freedom to run whatever they just wrote. Give each one its own microVM instead of your Mac. Create it per task, let the agent work, throw it away.</p>
+        <div class="grid grid--3" style="margin-top:2.5rem">
+          <div class="card">
+            <h3 class="small">Run the agent inside</h3>
+            <p>Start a VM, install your agent CLI over SSH and point it at a repo. It can <code>apt install</code>, run tests and open ports without ever touching your home directory or keychain.</p>
+            <div class="cmd" data-copy="cracklet new task-42 -p 3000">
+              <span class="prompt" aria-hidden="true">$</span>
+              <span class="text">cracklet new task-42 -p 3000</span>
+              <button type="button" aria-label="Copy cracklet new task-42 -p 3000 to the clipboard"></button>
+            </div>
+          </div>
+          <div class="card">
+            <h3 class="small">Many agents, side by side</h3>
+            <p>Each VM has its own kernel, filesystem and IP, and the firewall drops traffic between them. Run several agents on different branches at once; none of them can see the others.</p>
+            <div class="cmd" data-copy="for n in a b c; do cracklet new agent-$n; done">
+              <span class="prompt" aria-hidden="true">$</span>
+              <span class="text">for n in a b c; do cracklet new agent-$n; done</span>
+              <button type="button" aria-label="Copy the loop that creates three agent VMs to the clipboard"></button>
+            </div>
+          </div>
+          <div class="card">
+            <h3 class="small">Execute untrusted code</h3>
+            <p>Let the agent run the script it generated, a dependency you do not trust or a repo you just cloned. The VM only has internet. If anything goes wrong, <code>cracklet rm</code> and start over.</p>
+            <div class="cmd" data-copy="ssh task-42.cracklet 'cd app &amp;&amp; npm test'">
+              <span class="prompt" aria-hidden="true">$</span>
+              <span class="text">ssh task-42.cracklet 'cd app &amp;&amp; npm test'</span>
+              <button type="button" aria-label="Copy the remote test command to the clipboard"></button>
+            </div>
+          </div>
+        </div>
+        <p class="intro" style="max-width:48rem;margin-top:2.5rem">Because every VM is a plain SSH host, anything that speaks SSH works unchanged: VS Code Remote, <code>rsync</code> for the repo, <code>scp</code> for the results, or your agent framework's remote executor. Forwarded ports bring the agent's dev server to <code>localhost</code> on your Mac.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="container section">
+        <h2>Size it as you need</h2>
+        <p class="intro">Defaults are 2 vCPUs, 1 GiB RAM and a 2 GiB disk. Pass <code>--vcpus</code>, <code>--mem</code> and <code>--disk</code> to change them; a bigger disk grows the root filesystem on first boot.</p>
+        <div class="grid grid--2">
+          <div class="card">
+            <h3>Default</h3>
+            <p>2 vCPUs, 1 GiB RAM, 2 GiB disk.</p>
+            <div class="cmd" data-copy="cracklet new">
+              <span class="prompt" aria-hidden="true">$</span>
+              <span class="text">cracklet new</span>
+              <button type="button" aria-label="Copy cracklet new to the clipboard"></button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Bigger</h3>
+            <p>4 vCPUs, 2 GiB RAM, 8 GiB disk. The disk grows on first boot.</p>
+            <div class="cmd" data-copy="cracklet new dev --vcpus 4 --mem 2048 --disk 8G">
+              <span class="prompt" aria-hidden="true">$</span>
+              <span class="text">cracklet new dev --vcpus 4 --mem 2048 --disk 8G</span>
+              <button type="button" aria-label="Copy the sized create command to the clipboard"></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="container section grid grid--2" style="margin-top:0">
+        <div class="card">
+          <h2>Find your microVMs</h2>
+          <p>List every microVM with its state, IP, size, port forwards and the SSH destination to use.</p>
+          <div class="cmd" data-copy="cracklet ls">
+            <span class="prompt" aria-hidden="true">$</span>
+            <span class="text">cracklet ls</span>
+            <button type="button" aria-label="Copy cracklet ls to the clipboard"></button>
+          </div>
+          <div class="term">NAME  STATE    IP          VCPUS  MEM    PORTS  SSH
+dev   running  172.16.1.2  2      1024M  -      ssh dev.cracklet
+web   running  172.16.2.2  2      1024M  8080   ssh web.cracklet</div>
+          <p>Stop keeps the disk, start brings it back, rm deletes it.</p>
+          <div class="cmd" data-copy="cracklet stop dev">
+            <span class="prompt" aria-hidden="true">$</span>
+            <span class="text">cracklet stop dev</span>
+            <button type="button" aria-label="Copy cracklet stop dev to the clipboard"></button>
+          </div>
+          <div class="cmd" data-copy="cracklet rm dev">
+            <span class="prompt" aria-hidden="true">$</span>
+            <span class="text">cracklet rm dev</span>
+            <button type="button" aria-label="Copy cracklet rm dev to the clipboard"></button>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Plain ssh, scp, rsync, your IDE</h2>
+          <p>Add one line to <code>~/.ssh/config</code> and every microVM is reachable as <code>NAME.cracklet</code>. No port forwarding and no sudo needed on macOS.</p>
+          <div class="cmd" data-copy="Include ~/.cracklet/ssh_config">
+            <span class="prompt" aria-hidden="true">+</span>
+            <span class="text">Include ~/.cracklet/ssh_config</span>
+            <button type="button" aria-label="Copy the ssh config Include line to the clipboard"></button>
+          </div>
+          <div class="cmd" data-copy="ssh dev.cracklet">
+            <span class="prompt" aria-hidden="true">$</span>
+            <span class="text">ssh dev.cracklet</span>
+            <button type="button" aria-label="Copy ssh dev.cracklet to the clipboard"></button>
+          </div>
+          <p>Forward guest ports to <code>localhost</code> on the Mac. Forwards survive stop and start and go away with the VM.</p>
+          <div class="cmd" data-copy="cracklet new web -p 8080:80 -p 3000">
+            <span class="prompt" aria-hidden="true">$</span>
+            <span class="text">cracklet new web -p 8080:80 -p 3000</span>
+            <button type="button" aria-label="Copy the port forward example to the clipboard"></button>
+          </div>
+          <div class="cmd" data-copy="cracklet forward web 5432">
+            <span class="prompt" aria-hidden="true">$</span>
+            <span class="text">cracklet forward web 5432</span>
+            <button type="button" aria-label="Copy cracklet forward web 5432 to the clipboard"></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="container section">
+        <h2>Isolated by default</h2>
+        <div class="grid grid--3" style="margin-top:2.5rem">
+          <div class="card">
+            <h3 class="small">Real Firecracker</h3>
+            <p>The upstream binary, API and CI kernels, untouched. No fork, no patched hypervisor. Firecracker runs on KVM, exactly as it does on Linux.</p>
+          </div>
+          <div class="card">
+            <h3 class="small">Internet only</h3>
+            <p>microVMs reach the internet through NAT and nothing else: not each other, not your Mac, not your LAN. Anti-spoofing rules and no IPv6 on the taps close the side doors.</p>
+          </div>
+          <div class="card">
+            <h3 class="small">Locked-down processes</h3>
+            <p>Each Firecracker runs in a transient systemd unit with NoNewPrivileges, PrivateTmp, ProtectHome, a device allow-list and a memory cap. A failed create rolls itself back.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+        <section>
+      <div class="container section" style="padding-top:4rem;padding-bottom:4rem">
+        <div class="narrow">
+          <h2>Open source</h2>
+          <p>cracklet is developed in the open by IT-Labs GmbH. Source, issues and the full documentation live on <a class="link" href="https://github.com/itlabs-gmbh/cracklet">github.com/itlabs-gmbh/cracklet</a>.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <a href="./" aria-current="page">cracklet</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/itlabs-gmbh/cracklet">GitHub</a>
+      <span aria-hidden="true">·</span>
+      <a href="impressum.html">Impressum</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://www.it-labs.de">IT-Labs GmbH</a>
+    </div>
+  </footer>
+
+  <script src="copy.js" defer></script>
+</body>
+</html>

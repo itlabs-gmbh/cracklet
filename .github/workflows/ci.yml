@@ -42,6 +42,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Build without embedded daemon (go install path)
+        run: go build ./... && go test ./internal/envdbin/ ./internal/app/
       - name: Test
         run: make test
       - name: Build CLI

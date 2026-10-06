@@ -8,6 +8,7 @@ import (
 	"os/exec"
 
 	"github.com/itlabs-gmbh/cracklet/internal/config"
+	"github.com/itlabs-gmbh/cracklet/internal/envdbin"
 	"github.com/itlabs-gmbh/cracklet/internal/host"
 	"github.com/itlabs-gmbh/cracklet/internal/lima"
 	"github.com/itlabs-gmbh/cracklet/internal/runner"
@@ -22,7 +23,12 @@ type App struct {
 	lookPath host.LookPathFunc
 	probe    PortProbe
 	portBusy PortCheck
+	envd     EnvdSource
 }
+
+// EnvdSource yields the linux/arm64 cracklet-envd binary that Prepare ships
+// into the Lima VM.
+type EnvdSource func(ctx context.Context) ([]byte, error)
 
 // PortProbe reports whether 127.0.0.1:port on the Mac accepts connections,
 // waiting a little for Lima to expose a freshly forwarded port.
@@ -50,10 +56,16 @@ func WithPortCheck(c PortCheck) Option {
 	return func(a *App) { a.portBusy = c }
 }
 
+// WithEnvd overrides where the guest daemon binary comes from (used by tests).
+func WithEnvd(src EnvdSource) Option {
+	return func(a *App) { a.envd = src }
+}
+
 // New wires an App.
 func New(r runner.Runner, paths config.Paths, out io.Writer, opts ...Option) *App {
 	a := &App{r: r, lima: lima.NewClient(r, config.Instance), paths: paths, out: out,
 		lookPath: exec.LookPath, probe: waitForHostPort, portBusy: hostPortBusy}
+	a.envd = a.loadEnvd
 	for _, opt := range opts {
 		opt(a)
 	}
@@ -62,6 +74,16 @@ func New(r runner.Runner, paths config.Paths, out io.Writer, opts ...Option) *Ap
 
 func (a *App) gatherFacts(ctx context.Context) host.Facts {
 	return host.Gatherer{Runner: a.r, LookPath: a.lookPath}.Gather(ctx)
+}
+
+// loadEnvd prefers the daemon embedded by `make envd`; a cracklet installed via
+// `go install ...@latest` has none and cross-compiles it from the module cache.
+func (a *App) loadEnvd(ctx context.Context) ([]byte, error) {
+	if data, ok := envdbin.Embedded(); ok {
+		return data, nil
+	}
+	a.printf("==> cracklet-envd is not embedded in this build, cross-compiling it with the local Go toolchain\n")
+	return envdbin.Builder{Runner: a.r, LookPath: a.lookPath, Version: envdbin.RunningVersion()}.Build(ctx)
 }
 
 func (a *App) printf(format string, args ...any) {

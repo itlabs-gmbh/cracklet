@@ -21,7 +21,13 @@ func newTestApp(t *testing.T, handle runner.FakeHandler) (*App, *runner.Fake, *b
 	fake := runner.NewFake(handle)
 	out := &bytes.Buffer{}
 	paths := config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}
-	return New(fake, paths, out), fake, out
+	return New(fake, paths, out, WithEnvd(fakeEnvd)), fake, out
+}
+
+// fakeEnvd stands in for the cross-compiled guest daemon so tests do not depend
+// on `make envd` having run.
+func fakeEnvd(context.Context) ([]byte, error) {
+	return bytes.Repeat([]byte{0x7f}, 2048), nil
 }
 
 // defaultHandler simulates a prepared, running Lima instance with a current agent.

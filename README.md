@@ -33,9 +33,11 @@ Check with `cracklet doctor`.
 ## Install
 
 ```sh
-make install          # go install ./cmd/cracklet  → $(go env GOPATH)/bin/cracklet
+go install github.com/itlabs-gmbh/cracklet/cmd/cracklet@latest
 cracklet prepare           # one-time setup, a few minutes
 ```
+
+Or from a checkout: `make install` (go install ./cmd/cracklet → `$(go env GOPATH)/bin/cracklet`).
 
 `cracklet prepare` is idempotent. It:
 
@@ -81,7 +83,9 @@ milliseconds there.
 Snapshots are keyed on the base image, kernel, Firecracker version and the
 agent revision, so they rebuild automatically after `cracklet prepare` changes any
 of them. `cracklet-envd` is cross-compiled for linux/arm64 and embedded into cracklet
-(`make envd`).
+(`make envd`). A cracklet installed with `go install ...@latest` has no embedded copy;
+`cracklet prepare` then cross-compiles the daemon from the module cache with your Go
+toolchain, at the same module version as the CLI.
 
 ### Port forwarding
 

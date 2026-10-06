@@ -1,7 +1,7 @@
 BINARY := cracklet
 GOFLAGS ?=
 
-ENVD := internal/envdbin/cracklet-envd
+ENVD := internal/envdbin/bin/cracklet-envd
 
 .PHONY: build install test cover lint e2e clean envd
 

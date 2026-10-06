@@ -13,6 +13,7 @@ import (
 
 	"github.com/itlabs-gmbh/cracklet/internal/agent"
 	"github.com/itlabs-gmbh/cracklet/internal/config"
+	"github.com/itlabs-gmbh/cracklet/internal/envdbin"
 	"github.com/itlabs-gmbh/cracklet/internal/runner"
 )
 
@@ -51,7 +52,7 @@ func writeDummyKeys(t *testing.T, paths config.Paths) {
 	}
 }
 
-func prepareApp(t *testing.T, handler runner.FakeHandler, hasLima bool) (*App, *runner.Fake, *bytes.Buffer, config.Paths) {
+func prepareApp(t *testing.T, handler runner.FakeHandler, hasLima bool, opts ...Option) (*App, *runner.Fake, *bytes.Buffer, config.Paths) {
 	t.Helper()
 	fake := runner.NewFake(handler)
 	out := &bytes.Buffer{}
@@ -62,7 +63,8 @@ func prepareApp(t *testing.T, handler runner.FakeHandler, hasLima bool) (*App, *
 		}
 		return "/usr/local/bin/" + name, nil
 	}
-	return New(fake, paths, out, WithLookPath(lookPath)), fake, out, paths
+	opts = append([]Option{WithLookPath(lookPath), WithEnvd(fakeEnvd)}, opts...)
+	return New(fake, paths, out, opts...), fake, out, paths
 }
 
 func TestPrepareCreatesInstanceAndImages(t *testing.T) {
@@ -298,5 +300,33 @@ func TestSSHReportsSignalDeath(t *testing.T) {
 	var remote *RemoteExitError
 	if !errors.As(err, &remote) || remote.Code != 128+15 || !strings.Contains(remote.Reason, "signal") {
 		t.Fatalf("expected 128+SIGTERM with a reason, got %v", err)
+	}
+}
+
+func TestPrepareFailsWhenGuestDaemonUnavailable(t *testing.T) {
+	app, fake, _, paths := prepareApp(t, hostHandler("Running", agent.Checksum()), true,
+		WithEnvd(func(context.Context) ([]byte, error) { return nil, errors.New("no toolchain") }))
+	writeDummyKeys(t, paths)
+
+	err := app.Prepare(context.Background(), PrepareOptions{CPUs: 4, MemoryGiB: 8, DiskGiB: 40})
+	if err == nil || !strings.Contains(err.Error(), "no toolchain") {
+		t.Fatalf("Prepare must surface the daemon error, got %v", err)
+	}
+	if fake.CalledWithSuffix(config.AgentPath + " prepare") {
+		t.Error("agent prepare must not run without the daemon")
+	}
+}
+
+func TestDefaultEnvdSourceBuildsWhenNotEmbedded(t *testing.T) {
+	if _, ok := envdbin.Embedded(); ok {
+		t.Skip("daemon is embedded in this test binary")
+	}
+	app, _, out := newTestApp(t, defaultHandler(nil))
+	_, err := app.loadEnvd(context.Background())
+	if err == nil {
+		t.Fatal("fake runner cannot build, want an error")
+	}
+	if !strings.Contains(out.String(), "cross-compiling") {
+		t.Errorf("user must be told the daemon is being built, got %q", out.String())
 	}
 }

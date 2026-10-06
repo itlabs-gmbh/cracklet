@@ -13,10 +13,7 @@ import (
 	"github.com/itlabs-gmbh/cracklet/internal/envd"
 )
 
-const (
-	hostnameFile = "/etc/hostname"
-	randomDev    = "/dev/urandom"
-)
+const hostnameFile = "/etc/hostname"
 
 func main() {
 	log.SetFlags(0)
@@ -47,7 +44,7 @@ func serve(conn io.ReadWriteCloser) {
 	id, err := envd.Parse(line)
 	started := time.Now()
 	if err == nil {
-		err = envd.Apply(id, linuxSystem{}, hostnameFile, randomDev)
+		err = envd.Apply(id, linuxSystem{}, hostnameFile)
 	}
 	if err != nil {
 		log.Printf("apply identity: %v", err)

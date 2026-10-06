@@ -25,8 +25,8 @@ type Identity struct {
 	Iface    string `json:"iface"`
 	// UnixTime resets the guest clock, which is frozen at snapshot time.
 	UnixTime int64 `json:"unix_time"`
-	// Seed is base64 random data mixed into the guest's entropy pool so
-	// clones do not share their random state.
+	// Seed is base64 random data credited to the guest's entropy pool so
+	// clones restored from the same snapshot do not share their random state.
 	Seed string `json:"seed,omitempty"`
 }
 
@@ -91,11 +91,17 @@ type System interface {
 	ReplaceDefaultRoute(iface, gateway string) error
 	SetHostname(name string) error
 	SetTime(unix int64) error
+	// SeedRandom credits seed to the kernel entropy pool and forces an
+	// immediate CRNG reseed. A plain write to /dev/urandom is not enough:
+	// it neither credits entropy nor reseeds the CRNG, so every clone would
+	// keep producing the snapshot's random stream until the next scheduled
+	// reseed.
+	SeedRandom(seed []byte) error
 }
 
-// Apply reconfigures the guest. hostnameFile and randomDev are parameters so
-// tests can point them at temp files.
-func Apply(id Identity, sys System, hostnameFile, randomDev string) error {
+// Apply reconfigures the guest. hostnameFile is a parameter so tests can
+// point it at a temp file.
+func Apply(id Identity, sys System, hostnameFile string) error {
 	if err := sys.ReplaceAddress(id.Iface, id.CIDR()); err != nil {
 		return fmt.Errorf("address: %w", err)
 	}
@@ -112,9 +118,12 @@ func Apply(id Identity, sys System, hostnameFile, randomDev string) error {
 		return fmt.Errorf("write %s: %w", hostnameFile, err)
 	}
 	if id.Seed != "" {
-		seed, _ := base64.StdEncoding.DecodeString(id.Seed)
-		if err := os.WriteFile(randomDev, seed, 0o600); err != nil {
-			return fmt.Errorf("seed %s: %w", randomDev, err)
+		seed, err := base64.StdEncoding.DecodeString(id.Seed)
+		if err != nil {
+			return fmt.Errorf("decode seed: %w", err)
+		}
+		if err := sys.SeedRandom(seed); err != nil {
+			return fmt.Errorf("seed entropy: %w", err)
 		}
 	}
 	return nil

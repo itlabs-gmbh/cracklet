@@ -127,15 +127,29 @@ that fails half-way rolls back its disk, tap, hosts entry and unit.
 
 ### Network isolation
 
-A dedicated iptables chain (`CRACKLET-FORWARD`) lets microVMs reach the internet
-through NAT but:
+Two dedicated iptables chains (`CRACKLET-FORWARD` for routed traffic,
+`CRACKLET-INPUT` for traffic addressed to the Lima VM itself) let microVMs reach
+the internet through NAT but:
 
 - microVMs cannot talk to each other (tap-to-tap traffic is dropped),
 - microVMs cannot reach services on the Mac (Lima's gateway, which forwards
-  to the macOS loopback, is rejected).
+  to the macOS loopback, is rejected),
+- microVMs cannot reach services on the Lima VM, including the port-forward
+  proxies of other microVMs (only replies to connections the Lima VM opened
+  are let back in).
 
-If you want guests to reach a service on your Mac, remove the `REJECT` rule in
-`setup_host_network` in `internal/agent/agent.sh`.
+Both chains end in an explicit `DROP`, so isolation does not depend on the
+default INPUT/FORWARD policy. If you want guests to reach a service on your
+Mac, remove the `REJECT` rule in `setup_host_network` in
+`internal/agent/agent.sh`.
+
+### Entropy after restore
+
+Every microVM restored from the golden snapshot starts with the snapshot's
+kernel random state. The host agent sends 32 bytes from the Lima VM's
+`/dev/urandom` with the identity message; `cracklet-envd` credits them with
+`RNDADDENTROPY` and forces a reseed with `RNDRESEEDCRNG`, so clones diverge
+immediately instead of at the kernel's next scheduled reseed.
 
 ## Troubleshooting
 

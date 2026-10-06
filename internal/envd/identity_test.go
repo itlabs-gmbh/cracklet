@@ -1,10 +1,10 @@
 package envd
 
 import (
-	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -32,6 +32,9 @@ func (f *fakeSystem) ReplaceDefaultRoute(iface, gw string) error {
 }
 func (f *fakeSystem) SetHostname(name string) error { return f.record("hostname " + name) }
 func (f *fakeSystem) SetTime(unix int64) error      { return f.record("time") }
+func (f *fakeSystem) SeedRandom(seed []byte) error {
+	return f.record("seed " + strconv.Itoa(len(seed)) + " bytes")
+}
 
 func TestParse(t *testing.T) {
 	id, err := Parse([]byte(good))
@@ -60,27 +63,43 @@ func TestApplyInOrder(t *testing.T) {
 	id, _ := Parse([]byte(good))
 	sys := &fakeSystem{}
 	dir := t.TempDir()
-	hostFile, randFile := filepath.Join(dir, "hostname"), filepath.Join(dir, "urandom")
-	if err := Apply(id, sys, hostFile, randFile); err != nil {
+	hostFile := filepath.Join(dir, "hostname")
+	if err := Apply(id, sys, hostFile); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	want := "addr eth0 172.16.3.2/30\nroute eth0 172.16.3.1\nhostname dev-1\ntime"
+	want := "addr eth0 172.16.3.2/30\nroute eth0 172.16.3.1\nhostname dev-1\ntime\nseed 3 bytes"
 	if got := strings.Join(sys.calls, "\n"); got != want {
 		t.Errorf("calls:\n%s\nwant:\n%s", got, want)
 	}
 	if h, _ := os.ReadFile(hostFile); string(h) != "dev-1\n" {
 		t.Errorf("hostname file = %q", h)
 	}
-	seed, _ := base64.StdEncoding.DecodeString("AAEC")
-	if r, _ := os.ReadFile(randFile); string(r) != string(seed) {
-		t.Errorf("seed not written: %q", r)
+}
+
+func TestApplySkipsSeedWhenAbsent(t *testing.T) {
+	id, _ := Parse([]byte(strings.Replace(good, `,"seed":"AAEC"`, "", 1)))
+	sys := &fakeSystem{}
+	if err := Apply(id, sys, filepath.Join(t.TempDir(), "h")); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if strings.Contains(strings.Join(sys.calls, "\n"), "seed") {
+		t.Errorf("seed must not be applied when absent: %v", sys.calls)
+	}
+}
+
+func TestApplyReportsSeedFailure(t *testing.T) {
+	id, _ := Parse([]byte(good))
+	sys := &fakeSystem{fail: "seed"}
+	err := Apply(id, sys, filepath.Join(t.TempDir(), "h"))
+	if err == nil || !strings.Contains(err.Error(), "seed") {
+		t.Fatalf("expected seed failure to surface, err=%v", err)
 	}
 }
 
 func TestApplyStopsOnFailure(t *testing.T) {
 	id, _ := Parse([]byte(good))
 	sys := &fakeSystem{fail: "route"}
-	err := Apply(id, sys, filepath.Join(t.TempDir(), "h"), filepath.Join(t.TempDir(), "r"))
+	err := Apply(id, sys, filepath.Join(t.TempDir(), "h"))
 	if err == nil || !strings.Contains(err.Error(), "route") || len(sys.calls) != 2 {
 		t.Fatalf("expected route failure to abort, err=%v calls=%v", err, sys.calls)
 	}

@@ -11,7 +11,8 @@ export LC_ALL=C
 CRACKLET_ROOT=${CRACKLET_ROOT:-/var/lib/cracklet}
 FC_BIN=${FC_BIN:-/usr/local/bin/firecracker}
 HOSTS_FILE=${HOSTS_FILE:-/etc/hosts}
-readonly CRACKLET_ROOT FC_BIN HOSTS_FILE
+SYSCTL_DROPIN=${SYSCTL_DROPIN:-/etc/sysctl.d/99-cracklet.conf}
+readonly CRACKLET_ROOT FC_BIN HOSTS_FILE SYSCTL_DROPIN
 readonly IMAGES_DIR=$CRACKLET_ROOT/images
 readonly VMS_DIR=$CRACKLET_ROOT/vms
 readonly KEY_FILE=$CRACKLET_ROOT/id_ed25519
@@ -24,7 +25,8 @@ readonly UNIT_PREFIX=cracklet-vm-
 readonly FWD_UNIT_PREFIX=cracklet-fwd-
 readonly PROXYD=/usr/lib/systemd/systemd-socket-proxyd
 readonly MIN_HOST_PORT=1024            # Lima exposes ports on the Mac as a normal user
-readonly CHAIN=CRACKLET-FORWARD
+readonly CHAIN=CRACKLET-FORWARD        # guest -> elsewhere (routed traffic)
+readonly INPUT_CHAIN=CRACKLET-INPUT    # guest -> the Lima VM itself
 readonly BASE_DISK_SIZE=2G
 readonly ROOTFS_REV=5                  # bump whenever customize_rootfs changes
 readonly GOLDEN_REV=1                  # bump whenever build_golden changes
@@ -334,15 +336,20 @@ trim_boot() { # root
 }
 
 # setup_host_network is idempotent and rebuilt on every start: microVMs reach
-# the internet through NAT but neither each other nor services on the Mac
-# (Lima's gateway forwards to the macOS loopback).
+# the internet through NAT but neither each other, nor services on the Mac
+# (Lima's gateway forwards to the macOS loopback), nor services on the Lima VM
+# itself (port-forward proxies listen on 0.0.0.0 and would otherwise let one
+# guest reach another guest's forwarded ports via the tap gateway address).
+# Both chains end in an explicit DROP so isolation never depends on the
+# default policy of INPUT/FORWARD, which is ACCEPT on Ubuntu.
 setup_host_network() {
   sysctl -q -w net.ipv4.ip_forward=1
-  echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-cracklet.conf
+  echo 'net.ipv4.ip_forward=1' > "$SYSCTL_DROPIN"
   local iface gw
   iface=$(ip -j route list default | jq -r '.[0].dev // empty')
   gw=$(ip -j route list default | jq -r '.[0].gateway // empty')
   [[ -n $iface ]] || die "cannot determine the default network interface"
+
   iptables -w -N "$CHAIN" 2>/dev/null || true
   iptables -w -F "$CHAIN"
   iptables -w -A "$CHAIN" -i "${TAP_PREFIX}+" -o "${TAP_PREFIX}+" -j DROP
@@ -351,7 +358,17 @@ setup_host_network() {
   fi
   iptables -w -A "$CHAIN" -i "${TAP_PREFIX}+" -o "$iface" -j ACCEPT
   iptables -w -A "$CHAIN" -o "${TAP_PREFIX}+" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+  iptables -w -A "$CHAIN" -i "${TAP_PREFIX}+" -j DROP
   iptables -w -C FORWARD -j "$CHAIN" 2>/dev/null || iptables -w -I FORWARD -j "$CHAIN"
+
+  # Guests never need to talk to the Lima VM; only replies to connections the
+  # Lima VM opened (ssh from the agent, systemd-socket-proxyd) may come back in.
+  iptables -w -N "$INPUT_CHAIN" 2>/dev/null || true
+  iptables -w -F "$INPUT_CHAIN"
+  iptables -w -A "$INPUT_CHAIN" -i "${TAP_PREFIX}+" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+  iptables -w -A "$INPUT_CHAIN" -i "${TAP_PREFIX}+" -j DROP
+  iptables -w -C INPUT -j "$INPUT_CHAIN" 2>/dev/null || iptables -w -I INPUT -j "$INPUT_CHAIN"
+
   iptables -w -t nat -C POSTROUTING -s "$NET" ! -d "$NET" -j MASQUERADE 2>/dev/null \
     || iptables -w -t nat -A POSTROUTING -s "$NET" ! -d "$NET" -j MASQUERADE
 }

@@ -209,3 +209,51 @@ func TestAgentForwardBookkeeping(t *testing.T) {
 		t.Errorf("after drop_forward: %q", lines[4])
 	}
 }
+
+// TestAgentHostNetworkIsolatesGuests drives setup_host_network with stubbed
+// system tools and checks the firewall shape: guests must not reach each
+// other, the Lima gateway (= macOS loopback) or services on the Lima VM
+// itself, and the rules must not rely on the default chain policies.
+func TestAgentHostNetworkIsolatesGuests(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available")
+	}
+	root := t.TempDir()
+	t.Setenv("SYSCTL_DROPIN", filepath.Join(root, "sysctl.conf"))
+	out, err := runAgentFuncs(t, root, `
+		iptables() { [[ $2 == -C ]] && return 1; echo "iptables $*"; }
+		sysctl() { :; }
+		ip() { echo '[{"dev":"eth0","gateway":"192.168.5.2"}]'; }
+		setup_host_network`)
+	if err != nil {
+		t.Fatalf("setup_host_network failed: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -o cracklet+ -j DROP",
+		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -d 192.168.5.2 -j REJECT",
+		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -o eth0 -j ACCEPT",
+		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -j DROP",
+		"iptables -w -A CRACKLET-INPUT -i cracklet+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+		"iptables -w -A CRACKLET-INPUT -i cracklet+ -j DROP",
+		"iptables -w -I INPUT -j CRACKLET-INPUT",
+		"iptables -w -I FORWARD -j CRACKLET-FORWARD",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing rule %q in:\n%s", want, out)
+		}
+	}
+	// The terminal DROP must come after the ACCEPT rules of its chain.
+	for _, chain := range []string{"CRACKLET-FORWARD", "CRACKLET-INPUT"} {
+		accept := strings.LastIndex(out, "-A "+chain+" -i cracklet+ -o eth0 -j ACCEPT")
+		if chain == "CRACKLET-INPUT" {
+			accept = strings.LastIndex(out, "-A "+chain+" -i cracklet+ -m conntrack")
+		}
+		drop := strings.LastIndex(out, "-A "+chain+" -i cracklet+ -j DROP")
+		if accept < 0 || drop < accept {
+			t.Errorf("%s: terminal DROP must follow the ACCEPT rules:\n%s", chain, out)
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(root, "sysctl.conf")); err != nil || !strings.Contains(string(b), "ip_forward=1") {
+		t.Errorf("sysctl drop-in not written: %v %q", err, b)
+	}
+}

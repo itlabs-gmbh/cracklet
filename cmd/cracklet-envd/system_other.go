@@ -12,3 +12,4 @@ func (linuxSystem) ReplaceAddress(string, string) error      { return errLinuxOn
 func (linuxSystem) ReplaceDefaultRoute(string, string) error { return errLinuxOnly }
 func (linuxSystem) SetHostname(string) error                 { return errLinuxOnly }
 func (linuxSystem) SetTime(int64) error                      { return errLinuxOnly }
+func (linuxSystem) SeedRandom([]byte) error                  { return errLinuxOnly }

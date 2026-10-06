@@ -1,5 +1,9 @@
 # cracklet – Firecracker microVMs on your Mac
 
+[![CI](https://github.com/itlabs-gmbh/cracklet/actions/workflows/ci.yml/badge.svg)](https://github.com/itlabs-gmbh/cracklet/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/itlabs-gmbh/cracklet.svg)](https://pkg.go.dev/github.com/itlabs-gmbh/cracklet)
+
 `cracklet` gives you the "ssh into a fresh microVM in a second" feeling on Apple
 Silicon. It runs **real, unmodified Firecracker** by placing a single Lima VM
 with nested virtualization between macOS and the microVMs:
@@ -191,3 +195,18 @@ Layout: `cmd/cracklet` (entry point), `internal/cli` (cobra commands),
 `internal/app` (workflows), `internal/lima` (limactl wrapper + template),
 `internal/agent` (embedded guest script), `internal/host` (preflight),
 `internal/vm` (spec validation), `internal/sshcfg` (ssh_config rendering).
+
+## Contributing
+
+Bug reports and pull requests are welcome. Please read
+[CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, coding
+guidelines and PR process, and [SECURITY.md](SECURITY.md) for how to report
+vulnerabilities privately. This project follows the
+[Contributor Covenant](CODE_OF_CONDUCT.md).
+
+## License
+
+cracklet is licensed under the [Apache License 2.0](LICENSE).
+Copyright 2026 IT-Labs GmbH. Firecracker, the guest kernel, the Ubuntu image
+and Lima are downloaded at `cracklet prepare` time and keep their own
+licenses; see [NOTICE](NOTICE).

@@ -21,6 +21,7 @@ type App struct {
 	paths    config.Paths
 	out      io.Writer
 	lookPath host.LookPathFunc
+	platform hostPlatform
 	probe    PortProbe
 	portBusy PortCheck
 	envd     EnvdSource
@@ -38,8 +39,21 @@ type PortProbe func(ctx context.Context, port int) bool
 // 127.0.0.1:port on the Mac.
 type PortCheck func(port int) bool
 
+// hostPlatform overrides the GOOS/GOARCH the preflight sees; empty means
+// "whatever this binary runs on".
+type hostPlatform struct {
+	os   string
+	arch string
+}
+
 // Option customises an App.
 type Option func(*App)
+
+// WithPlatform overrides the host OS and architecture reported to the
+// preflight check (used by tests so they do not depend on the CI runner).
+func WithPlatform(os, arch string) Option {
+	return func(a *App) { a.platform = hostPlatform{os: os, arch: arch} }
+}
 
 // WithLookPath overrides executable lookup (used by tests).
 func WithLookPath(fn host.LookPathFunc) Option {
@@ -73,7 +87,7 @@ func New(r runner.Runner, paths config.Paths, out io.Writer, opts ...Option) *Ap
 }
 
 func (a *App) gatherFacts(ctx context.Context) host.Facts {
-	return host.Gatherer{Runner: a.r, LookPath: a.lookPath}.Gather(ctx)
+	return host.Gatherer{OS: a.platform.os, Arch: a.platform.arch, Runner: a.r, LookPath: a.lookPath}.Gather(ctx)
 }
 
 // loadEnvd prefers the daemon embedded by `make envd`; a cracklet installed via

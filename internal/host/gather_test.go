@@ -10,9 +10,6 @@ import (
 )
 
 func TestGatherUsesRunnerAndLookPath(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("gather only queries macOS tools on darwin")
-	}
 	fake := runner.NewFake(func(name string, args []string) ([]byte, error) {
 		switch name {
 		case "sw_vers":
@@ -25,14 +22,38 @@ func TestGatherUsesRunnerAndLookPath(t *testing.T) {
 		}
 		return nil, errors.New("unexpected " + name)
 	})
-	g := Gatherer{Runner: fake, LookPath: func(name string) (string, error) {
+	g := Gatherer{OS: "darwin", Arch: "arm64", Runner: fake, LookPath: func(name string) (string, error) {
 		if name == "limactl" {
 			return "", errors.New("missing")
 		}
 		return "/opt/homebrew/bin/" + name, nil
 	}}
 	f := g.Gather(context.Background())
+	if f.OS != "darwin" || f.Arch != "arm64" {
+		t.Errorf("configured platform must be reported, got %s/%s", f.OS, f.Arch)
+	}
 	if f.MacOSVersion != "26.7" || f.Chip != "Apple M4 Pro" || !f.HVSupport || !f.HasBrew || f.HasLima {
+		t.Errorf("unexpected facts: %+v", f)
+	}
+}
+
+func TestGatherDefaultsToRuntimePlatform(t *testing.T) {
+	fake := runner.NewFake(func(string, []string) ([]byte, error) { return nil, errors.New("nope") })
+	g := Gatherer{Runner: fake, LookPath: func(string) (string, error) { return "", errors.New("nope") }}
+	f := g.Gather(context.Background())
+	if f.OS != runtime.GOOS || f.Arch != runtime.GOARCH {
+		t.Errorf("empty platform must fall back to the running binary, got %s/%s", f.OS, f.Arch)
+	}
+}
+
+func TestGatherSkipsMacOSProbesOffDarwin(t *testing.T) {
+	fake := runner.NewFake(func(name string, _ []string) ([]byte, error) {
+		t.Errorf("no system probe should run on linux, got %s", name)
+		return nil, errors.New("unexpected")
+	})
+	g := Gatherer{OS: "linux", Arch: "amd64", Runner: fake, LookPath: func(string) (string, error) { return "", errors.New("nope") }}
+	f := g.Gather(context.Background())
+	if f.OS != "linux" || f.MacOSVersion != "" || f.HVSupport {
 		t.Errorf("unexpected facts: %+v", f)
 	}
 }

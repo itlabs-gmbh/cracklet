@@ -132,16 +132,19 @@ Two dedicated iptables chains (`CRACKLET-FORWARD` for routed traffic,
 the internet through NAT but:
 
 - microVMs cannot talk to each other (tap-to-tap traffic is dropped),
-- microVMs cannot reach services on the Mac (Lima's gateway, which forwards
-  to the macOS loopback, is rejected),
+- microVMs cannot reach the Mac or your LAN: Lima's gateway (which forwards
+  to the macOS loopback) and all private, link-local and loopback
+  destinations are rejected, so the Mac's own LAN address is out of reach too,
 - microVMs cannot reach services on the Lima VM, including the port-forward
   proxies of other microVMs (only replies to connections the Lima VM opened
-  are let back in).
+  are let back in),
+- packets whose source is not in the guest subnet are dropped, and IPv6 is
+  disabled on every tap, so the IPv4 rules cannot be side-stepped.
 
 Both chains end in an explicit `DROP`, so isolation does not depend on the
 default INPUT/FORWARD policy. If you want guests to reach a service on your
-Mac, remove the `REJECT` rule in `setup_host_network` in
-`internal/agent/agent.sh`.
+Mac or LAN, edit `PRIVATE_NETS` and the `REJECT` rules in `setup_host_network`
+in `internal/agent/agent.sh`.
 
 ### Entropy after restore
 

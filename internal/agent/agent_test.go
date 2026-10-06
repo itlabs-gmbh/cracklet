@@ -229,8 +229,14 @@ func TestAgentHostNetworkIsolatesGuests(t *testing.T) {
 		t.Fatalf("setup_host_network failed: %v\n%s", err, out)
 	}
 	for _, want := range []string{
+		"iptables -w -A CRACKLET-FORWARD -i cracklet+ ! -s 172.16.0.0/16 -j DROP",
 		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -o cracklet+ -j DROP",
 		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -d 192.168.5.2 -j REJECT",
+		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -d 10.0.0.0/8 -j REJECT",
+		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -d 172.16.0.0/12 -j REJECT",
+		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -d 192.168.0.0/16 -j REJECT",
+		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -d 169.254.0.0/16 -j REJECT",
+		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -d 127.0.0.0/8 -j REJECT",
 		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -o eth0 -j ACCEPT",
 		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -j DROP",
 		"iptables -w -A CRACKLET-INPUT -i cracklet+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
@@ -255,5 +261,35 @@ func TestAgentHostNetworkIsolatesGuests(t *testing.T) {
 	}
 	if b, err := os.ReadFile(filepath.Join(root, "sysctl.conf")); err != nil || !strings.Contains(string(b), "ip_forward=1") {
 		t.Errorf("sysctl drop-in not written: %v %q", err, b)
+	}
+}
+
+// TestAgentCreateTapDisablesIPv6 ensures the IPv4-only firewall cannot be
+// side-stepped over IPv6 link-local addresses on the tap.
+func TestAgentCreateTapDisablesIPv6(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available")
+	}
+	root := t.TempDir()
+	t.Setenv("SYSCTL_DROPIN", filepath.Join(root, "sysctl.conf"))
+	out, err := runAgentFuncs(t, root, `
+		iptables() { [[ $2 == -C ]] && return 1; :; }
+		sysctl() { echo "sysctl $*"; }
+		ip() { if [[ $1 == -j ]]; then echo '[{"dev":"eth0","gateway":"192.168.5.2"}]'; else echo "ip $*"; fi; }
+		create_tap 3`)
+	if err != nil {
+		t.Fatalf("create_tap failed: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"ip tuntap add dev cracklet3 mode tap",
+		"sysctl -q -w net.ipv6.conf.cracklet3.disable_ipv6=1",
+		"ip link set dev cracklet3 up",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Index(out, "disable_ipv6=1") > strings.Index(out, "set dev cracklet3 up") {
+		t.Errorf("IPv6 must be disabled before the tap comes up:\n%s", out)
 	}
 }

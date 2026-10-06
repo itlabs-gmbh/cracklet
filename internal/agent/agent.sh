@@ -27,6 +27,9 @@ readonly PROXYD=/usr/lib/systemd/systemd-socket-proxyd
 readonly MIN_HOST_PORT=1024            # Lima exposes ports on the Mac as a normal user
 readonly CHAIN=CRACKLET-FORWARD        # guest -> elsewhere (routed traffic)
 readonly INPUT_CHAIN=CRACKLET-INPUT    # guest -> the Lima VM itself
+# Guests get internet only: private, link-local and loopback destinations are
+# rejected so they cannot reach the LAN or the Mac's own LAN address.
+readonly PRIVATE_NETS=(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 127.0.0.0/8)
 readonly BASE_DISK_SIZE=2G
 readonly ROOTFS_REV=5                  # bump whenever customize_rootfs changes
 readonly GOLDEN_REV=1                  # bump whenever build_golden changes
@@ -336,12 +339,15 @@ trim_boot() { # root
 }
 
 # setup_host_network is idempotent and rebuilt on every start: microVMs reach
-# the internet through NAT but neither each other, nor services on the Mac
-# (Lima's gateway forwards to the macOS loopback), nor services on the Lima VM
-# itself (port-forward proxies listen on 0.0.0.0 and would otherwise let one
-# guest reach another guest's forwarded ports via the tap gateway address).
+# the internet through NAT but neither each other, nor the LAN or the Mac
+# (Lima's gateway forwards to the macOS loopback; the Mac's LAN address is a
+# private destination), nor services on the Lima VM itself (port-forward
+# proxies listen on 0.0.0.0 and would otherwise let one guest reach another
+# guest's forwarded ports via the tap gateway address). Source addresses are
+# pinned to the guest subnet so a guest cannot spoof its way past the NAT.
 # Both chains end in an explicit DROP so isolation never depends on the
-# default policy of INPUT/FORWARD, which is ACCEPT on Ubuntu.
+# default policy of INPUT/FORWARD, which is ACCEPT on Ubuntu. IPv6 is disabled
+# per tap (see create_tap), so these IPv4 rules are the whole story.
 setup_host_network() {
   sysctl -q -w net.ipv4.ip_forward=1
   echo 'net.ipv4.ip_forward=1' > "$SYSCTL_DROPIN"
@@ -350,12 +356,17 @@ setup_host_network() {
   gw=$(ip -j route list default | jq -r '.[0].gateway // empty')
   [[ -n $iface ]] || die "cannot determine the default network interface"
 
+  local net
   iptables -w -N "$CHAIN" 2>/dev/null || true
   iptables -w -F "$CHAIN"
+  iptables -w -A "$CHAIN" -i "${TAP_PREFIX}+" ! -s "$NET" -j DROP
   iptables -w -A "$CHAIN" -i "${TAP_PREFIX}+" -o "${TAP_PREFIX}+" -j DROP
   if [[ -n $gw ]]; then
     iptables -w -A "$CHAIN" -i "${TAP_PREFIX}+" -d "$gw" -j REJECT
   fi
+  for net in "${PRIVATE_NETS[@]}"; do
+    iptables -w -A "$CHAIN" -i "${TAP_PREFIX}+" -d "$net" -j REJECT
+  done
   iptables -w -A "$CHAIN" -i "${TAP_PREFIX}+" -o "$iface" -j ACCEPT
   iptables -w -A "$CHAIN" -o "${TAP_PREFIX}+" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
   iptables -w -A "$CHAIN" -i "${TAP_PREFIX}+" -j DROP
@@ -470,6 +481,9 @@ create_tap() { # idx
   setup_host_network
   ip link del "$tap" 2>/dev/null || true
   ip tuntap add dev "$tap" mode tap
+  # The firewall is IPv4-only; without this a guest could reach the Lima VM
+  # over IPv6 link-local addresses.
+  sysctl -q -w "net.ipv6.conf.$tap.disable_ipv6=1"
   ip addr add "$(idx_gw "$1")/30" dev "$tap"
   ip link set dev "$tap" up
 }

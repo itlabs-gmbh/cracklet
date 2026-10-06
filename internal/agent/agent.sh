@@ -29,7 +29,7 @@ readonly CHAIN=CRACKLET-FORWARD        # guest -> elsewhere (routed traffic)
 readonly INPUT_CHAIN=CRACKLET-INPUT    # guest -> the Lima VM itself
 # Guests get internet only: private, link-local and loopback destinations are
 # rejected so they cannot reach the LAN or the Mac's own LAN address.
-readonly PRIVATE_NETS=(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 127.0.0.0/8)
+readonly PRIVATE_NETS=(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16 127.0.0.0/8)
 readonly BASE_DISK_SIZE=2G
 readonly ROOTFS_REV=5                  # bump whenever customize_rootfs changes
 readonly GOLDEN_REV=1                  # bump whenever build_golden changes
@@ -338,6 +338,34 @@ trim_boot() { # root
   chroot "$root" ldconfig 2>/dev/null || true
 }
 
+# render_firewall_batch prints the filter-table rules for iptables-restore.
+# A ":CHAIN" line creates the chain or, with --noflush, flushes an existing
+# one; the explicit -F keeps that behaviour independent of the backend.
+render_firewall_batch() { # iface gateway
+  local iface=$1 gw=$2 tap="${TAP_PREFIX}+" net
+  echo '*filter'
+  echo ":$CHAIN - [0:0]"
+  echo ":$INPUT_CHAIN - [0:0]"
+  echo "-F $CHAIN"
+  echo "-F $INPUT_CHAIN"
+  # Guests never reach each other, spoof their source, or leave the NAT
+  # towards private destinations (the Mac's LAN address included).
+  echo "-A $CHAIN -i $tap ! -s $NET -j DROP"
+  echo "-A $CHAIN -i $tap -o $tap -j DROP"
+  [[ -n $gw ]] && echo "-A $CHAIN -i $tap -d $gw -j REJECT"
+  for net in "${PRIVATE_NETS[@]}"; do
+    echo "-A $CHAIN -i $tap -d $net -j REJECT"
+  done
+  echo "-A $CHAIN -i $tap -o $iface -j ACCEPT"
+  echo "-A $CHAIN -o $tap -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"
+  echo "-A $CHAIN -i $tap -j DROP"
+  # Guests never need to talk to the Lima VM; only replies to connections the
+  # Lima VM opened (ssh from the agent, systemd-socket-proxyd) may come back in.
+  echo "-A $INPUT_CHAIN -i $tap -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"
+  echo "-A $INPUT_CHAIN -i $tap -j DROP"
+  echo 'COMMIT'
+}
+
 # setup_host_network is idempotent and rebuilt on every start: microVMs reach
 # the internet through NAT but neither each other, nor the LAN or the Mac
 # (Lima's gateway forwards to the macOS loopback; the Mac's LAN address is a
@@ -356,30 +384,14 @@ setup_host_network() {
   gw=$(ip -j route list default | jq -r '.[0].gateway // empty')
   [[ -n $iface ]] || die "cannot determine the default network interface"
 
-  local net
-  iptables -w -N "$CHAIN" 2>/dev/null || true
-  iptables -w -F "$CHAIN"
-  iptables -w -A "$CHAIN" -i "${TAP_PREFIX}+" ! -s "$NET" -j DROP
-  iptables -w -A "$CHAIN" -i "${TAP_PREFIX}+" -o "${TAP_PREFIX}+" -j DROP
-  if [[ -n $gw ]]; then
-    iptables -w -A "$CHAIN" -i "${TAP_PREFIX}+" -d "$gw" -j REJECT
-  fi
-  for net in "${PRIVATE_NETS[@]}"; do
-    iptables -w -A "$CHAIN" -i "${TAP_PREFIX}+" -d "$net" -j REJECT
-  done
-  iptables -w -A "$CHAIN" -i "${TAP_PREFIX}+" -o "$iface" -j ACCEPT
-  iptables -w -A "$CHAIN" -o "${TAP_PREFIX}+" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-  iptables -w -A "$CHAIN" -i "${TAP_PREFIX}+" -j DROP
+  # Both chains are rebuilt in one iptables-restore batch, which the kernel
+  # commits atomically: running guests never see a flushed, empty chain
+  # (FORWARD/INPUT default to ACCEPT, so even a millisecond would be a hole).
+  # The jumps from INPUT/FORWARD are installed once, afterwards, so the chains
+  # already carry their rules when traffic first hits them.
+  render_firewall_batch "$iface" "$gw" | iptables-restore --noflush -w
   iptables -w -C FORWARD -j "$CHAIN" 2>/dev/null || iptables -w -I FORWARD -j "$CHAIN"
-
-  # Guests never need to talk to the Lima VM; only replies to connections the
-  # Lima VM opened (ssh from the agent, systemd-socket-proxyd) may come back in.
-  iptables -w -N "$INPUT_CHAIN" 2>/dev/null || true
-  iptables -w -F "$INPUT_CHAIN"
-  iptables -w -A "$INPUT_CHAIN" -i "${TAP_PREFIX}+" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-  iptables -w -A "$INPUT_CHAIN" -i "${TAP_PREFIX}+" -j DROP
   iptables -w -C INPUT -j "$INPUT_CHAIN" 2>/dev/null || iptables -w -I INPUT -j "$INPUT_CHAIN"
-
   iptables -w -t nat -C POSTROUTING -s "$NET" ! -d "$NET" -j MASQUERADE 2>/dev/null \
     || iptables -w -t nat -A POSTROUTING -s "$NET" ! -d "$NET" -j MASQUERADE
 }

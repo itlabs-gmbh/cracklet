@@ -212,8 +212,9 @@ func TestAgentForwardBookkeeping(t *testing.T) {
 
 // TestAgentHostNetworkIsolatesGuests drives setup_host_network with stubbed
 // system tools and checks the firewall shape: guests must not reach each
-// other, the Lima gateway (= macOS loopback) or services on the Lima VM
-// itself, and the rules must not rely on the default chain policies.
+// other, the Lima gateway (= macOS loopback), the LAN or services on the Lima
+// VM itself, the rules must not rely on the default chain policies, and they
+// must be installed atomically so running guests never see an empty chain.
 func TestAgentHostNetworkIsolatesGuests(t *testing.T) {
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("jq not available")
@@ -221,43 +222,58 @@ func TestAgentHostNetworkIsolatesGuests(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("SYSCTL_DROPIN", filepath.Join(root, "sysctl.conf"))
 	out, err := runAgentFuncs(t, root, `
-		iptables() { [[ $2 == -C ]] && return 1; echo "iptables $*"; }
+		iptables() { [[ " $* " == *" -C "* ]] && return 1; echo "iptables $*"; }
+		iptables-restore() { echo "iptables-restore $*"; cat; }
 		sysctl() { :; }
 		ip() { echo '[{"dev":"eth0","gateway":"192.168.5.2"}]'; }
 		setup_host_network`)
 	if err != nil {
 		t.Fatalf("setup_host_network failed: %v\n%s", err, out)
 	}
+	if strings.Contains(out, "iptables -w -F") || strings.Contains(out, "iptables -w -A") {
+		t.Errorf("chains must be rebuilt through iptables-restore, not flushed in place:\n%s", out)
+	}
 	for _, want := range []string{
-		"iptables -w -A CRACKLET-FORWARD -i cracklet+ ! -s 172.16.0.0/16 -j DROP",
-		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -o cracklet+ -j DROP",
-		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -d 192.168.5.2 -j REJECT",
-		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -d 10.0.0.0/8 -j REJECT",
-		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -d 172.16.0.0/12 -j REJECT",
-		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -d 192.168.0.0/16 -j REJECT",
-		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -d 169.254.0.0/16 -j REJECT",
-		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -d 127.0.0.0/8 -j REJECT",
-		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -o eth0 -j ACCEPT",
-		"iptables -w -A CRACKLET-FORWARD -i cracklet+ -j DROP",
-		"iptables -w -A CRACKLET-INPUT -i cracklet+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
-		"iptables -w -A CRACKLET-INPUT -i cracklet+ -j DROP",
+		"iptables-restore --noflush -w",
+		"*filter",
+		":CRACKLET-FORWARD - [0:0]",
+		":CRACKLET-INPUT - [0:0]",
+		"-A CRACKLET-FORWARD -i cracklet+ ! -s 172.16.0.0/16 -j DROP",
+		"-A CRACKLET-FORWARD -i cracklet+ -o cracklet+ -j DROP",
+		"-A CRACKLET-FORWARD -i cracklet+ -d 192.168.5.2 -j REJECT",
+		"-A CRACKLET-FORWARD -i cracklet+ -d 10.0.0.0/8 -j REJECT",
+		"-A CRACKLET-FORWARD -i cracklet+ -d 172.16.0.0/12 -j REJECT",
+		"-A CRACKLET-FORWARD -i cracklet+ -d 192.168.0.0/16 -j REJECT",
+		"-A CRACKLET-FORWARD -i cracklet+ -d 100.64.0.0/10 -j REJECT",
+		"-A CRACKLET-FORWARD -i cracklet+ -d 169.254.0.0/16 -j REJECT",
+		"-A CRACKLET-FORWARD -i cracklet+ -d 127.0.0.0/8 -j REJECT",
+		"-A CRACKLET-FORWARD -i cracklet+ -o eth0 -j ACCEPT",
+		"-A CRACKLET-FORWARD -o cracklet+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+		"-A CRACKLET-FORWARD -i cracklet+ -j DROP",
+		"-A CRACKLET-INPUT -i cracklet+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+		"-A CRACKLET-INPUT -i cracklet+ -j DROP",
+		"COMMIT",
 		"iptables -w -I INPUT -j CRACKLET-INPUT",
 		"iptables -w -I FORWARD -j CRACKLET-FORWARD",
+		"iptables -w -t nat -A POSTROUTING -s 172.16.0.0/16 ! -d 172.16.0.0/16 -j MASQUERADE",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("missing rule %q in:\n%s", want, out)
+			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
 	// The terminal DROP must come after the ACCEPT rules of its chain.
-	for _, chain := range []string{"CRACKLET-FORWARD", "CRACKLET-INPUT"} {
-		accept := strings.LastIndex(out, "-A "+chain+" -i cracklet+ -o eth0 -j ACCEPT")
-		if chain == "CRACKLET-INPUT" {
-			accept = strings.LastIndex(out, "-A "+chain+" -i cracklet+ -m conntrack")
-		}
-		drop := strings.LastIndex(out, "-A "+chain+" -i cracklet+ -j DROP")
-		if accept < 0 || drop < accept {
+	for chain, accept := range map[string]string{
+		"CRACKLET-FORWARD": "-A CRACKLET-FORWARD -i cracklet+ -o eth0 -j ACCEPT",
+		"CRACKLET-INPUT":   "-A CRACKLET-INPUT -i cracklet+ -m conntrack",
+	} {
+		a, d := strings.LastIndex(out, accept), strings.LastIndex(out, "-A "+chain+" -i cracklet+ -j DROP")
+		if a < 0 || d < a {
 			t.Errorf("%s: terminal DROP must follow the ACCEPT rules:\n%s", chain, out)
 		}
+	}
+	// The hooks must be installed only after the chains carry their rules.
+	if strings.Index(out, "COMMIT") > strings.Index(out, "-I FORWARD -j CRACKLET-FORWARD") {
+		t.Errorf("hook into FORWARD must come after the atomic chain commit:\n%s", out)
 	}
 	if b, err := os.ReadFile(filepath.Join(root, "sysctl.conf")); err != nil || !strings.Contains(string(b), "ip_forward=1") {
 		t.Errorf("sysctl drop-in not written: %v %q", err, b)
@@ -273,7 +289,8 @@ func TestAgentCreateTapDisablesIPv6(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("SYSCTL_DROPIN", filepath.Join(root, "sysctl.conf"))
 	out, err := runAgentFuncs(t, root, `
-		iptables() { [[ $2 == -C ]] && return 1; :; }
+		iptables() { [[ " $* " == *" -C "* ]] && return 1; :; }
+		iptables-restore() { cat >/dev/null; }
 		sysctl() { echo "sysctl $*"; }
 		ip() { if [[ $1 == -j ]]; then echo '[{"dev":"eth0","gateway":"192.168.5.2"}]'; else echo "ip $*"; fi; }
 		create_tap 3`)

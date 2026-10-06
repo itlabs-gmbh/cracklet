@@ -142,7 +142,8 @@ the internet through NAT but:
   disabled on every tap, so the IPv4 rules cannot be side-stepped.
 
 Both chains end in an explicit `DROP`, so isolation does not depend on the
-default INPUT/FORWARD policy. If you want guests to reach a service on your
+default INPUT/FORWARD policy, and they are rebuilt through a single
+`iptables-restore` batch so running guests never observe an empty chain. If you want guests to reach a service on your
 Mac or LAN, edit `PRIVATE_NETS` and the `REJECT` rules in `setup_host_network`
 in `internal/agent/agent.sh`.
 

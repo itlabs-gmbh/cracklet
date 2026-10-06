@@ -310,3 +310,55 @@ func TestAgentCreateTapDisablesIPv6(t *testing.T) {
 		t.Errorf("IPv6 must be disabled before the tap comes up:\n%s", out)
 	}
 }
+
+// TestAgentInstallMotdReplacesUbuntuBanner checks that the guest greets with a
+// cracklet banner instead of Ubuntu's "minimized" and Landscape notices, and
+// that the banner script runs even on a host without /proc or hostname -I.
+func TestAgentInstallMotdReplacesUbuntuBanner(t *testing.T) {
+	root := t.TempDir()
+	motdDir := filepath.Join(root, "etc", "update-motd.d")
+	if err := os.MkdirAll(motdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, stale := range []string{"00-header", "10-help-text", "50-landscape-sysinfo", "60-unminimize"} {
+		if err := os.WriteFile(filepath.Join(motdDir, stale), []byte("#!/bin/sh\necho stale\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "etc", "legal"), []byte("legal notice\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runAgentFuncs(t, root, `install_motd "`+root+`"`); err != nil {
+		t.Fatalf("install_motd failed: %v\n%s", err, out)
+	}
+	entries, err := os.ReadDir(motdDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "00-cracklet" {
+		t.Fatalf("update-motd.d should only contain 00-cracklet, got %v", entries)
+	}
+	script := filepath.Join(motdDir, "00-cracklet")
+	if info, err := os.Stat(script); err != nil || info.Mode()&0o111 == 0 {
+		t.Fatalf("banner script must be executable: %v %v", err, info)
+	}
+	if b, err := os.ReadFile(filepath.Join(root, "etc", "legal")); err != nil || len(b) != 0 {
+		t.Errorf("/etc/legal should be emptied, got %v %q", err, b)
+	}
+	out, err := exec.Command("sh", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("banner script failed: %v\n%s", err, out)
+	}
+	host, _ := os.Hostname()
+	for _, want := range []string{"cracklet", host, "ip", "vcpus", "memory", "up"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("banner missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(string(out), "stale") {
+		t.Errorf("Ubuntu banner scripts still run:\n%s", out)
+	}
+	if !strings.Contains(Script, "install_motd \"$root\"") {
+		t.Error("customize_rootfs must call install_motd")
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/itlabs-gmbh/cracklet/internal/config"
 	"github.com/itlabs-gmbh/cracklet/internal/vm"
 )
 
@@ -60,7 +61,7 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 	if err != nil {
 		return VMInfo{}, err
 	}
-	a.printf("%s is running at %s\n  cracklet ssh %s\n", info.Name, info.IP, info.Name)
+	a.printf("%s is running at %s\n  cracklet ssh %s\n  ssh %s.%s\n", info.Name, info.IP, info.Name, info.Name, config.Instance)
 	if len(spec.Forwards) > 0 {
 		return a.Forward(ctx, info.Name, spec.Forwards)
 	}

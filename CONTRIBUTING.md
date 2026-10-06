@@ -19,7 +19,7 @@ Unit tests, `go vet` and `shellcheck` also run on Linux.
 ```sh
 git clone https://github.com/itlabs-gmbh/cracklet.git
 cd cracklet
-make envd     # cross-compile the guest daemon (required before go build)
+make envd     # cross-compile the guest daemon so `make build` embeds it
 make build    # -> bin/cracklet
 make test     # unit tests with -race
 make lint     # gofmt, go vet, shellcheck
@@ -27,7 +27,10 @@ make e2e      # boots a real microVM, needs `cracklet prepare` first
 ```
 
 `make lint` and `make test` must pass before you open a pull request. CI runs
-the same targets.
+the same targets, and additionally `go build ./...` without `make envd` so a
+plain `go install ...@latest` keeps working: the daemon directory
+`internal/envdbin/bin/` is embedded with the `all:` prefix and only holds a
+`.gitkeep` in a clean checkout.
 
 Tools: Go 1.26+, `shellcheck` (`brew install shellcheck`).
 

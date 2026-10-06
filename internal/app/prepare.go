@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/envdbin"
 	"github.com/itlabs-gmbh/cracklet/internal/host"
 	"github.com/itlabs-gmbh/cracklet/internal/lima"
 )
@@ -177,12 +176,13 @@ func (a *App) ensureInstance(ctx context.Context, o PrepareOptions) error {
 	}
 }
 
-// pushEnvd ships the embedded guest daemon; the agent bakes it into the base image.
+// pushEnvd ships the guest daemon; the agent bakes it into the base image.
 func (a *App) pushEnvd(ctx context.Context) error {
-	if len(envdbin.Binary) < 1024 {
-		return fmt.Errorf("embedded cracklet-envd binary is missing; build cracklet with 'make build'")
+	data, err := a.envd(ctx)
+	if err != nil {
+		return err
 	}
-	return a.lima.WriteFile(ctx, bytes.NewReader(envdbin.Binary), config.GuestEnvdPath, "0755")
+	return a.lima.WriteFile(ctx, bytes.NewReader(data), config.GuestEnvdPath, "0755")
 }
 
 func (a *App) pushKeys(ctx context.Context) error {

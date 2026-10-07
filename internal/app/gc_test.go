@@ -394,6 +394,42 @@ func TestNewVMStartsWithoutLeftoverGrants(t *testing.T) {
 	}
 }
 
+func TestNewVMKeepsAGrantGivenWhileItStarts(t *testing.T) {
+	store := grant.Store{}
+	granted := make(chan struct{})
+	a, _, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
+		if strings.Contains(strings.Join(args, " "), config.AgentPath+" new ") {
+			// `cracklet grant box claude` in another terminal, as soon as box runs
+			go func() {
+				defer close(granted)
+				unlock, err := store.Lock("box")
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer unlock()
+				if err := store.Save("box", grant.Set{{Cap: "claude"}}); err != nil {
+					t.Error(err)
+				}
+			}()
+			select { // give it the chance to land before NewVM clears
+			case <-granted:
+			case <-time.After(100 * time.Millisecond):
+			}
+			return []byte(`{"name":"box","state":"running"}`), nil
+		}
+		return defaultHandler(nil)(name, args)
+	})
+	store.Dir = a.paths.VMsDir()
+	if _, err := a.NewVM(context.Background(), vm.Spec{Name: "box", VCPUs: 2, MemMiB: 1024}); err != nil {
+		t.Fatalf("NewVM: %v", err)
+	}
+	<-granted
+	if set, _ := store.Load("box"); len(set) != 1 {
+		t.Errorf("a grant given while the VM started must survive, got %v", set)
+	}
+}
+
 func TestNewVMKeepsGrantsWhenTheNameIsTaken(t *testing.T) {
 	a, _, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
 		if strings.Contains(strings.Join(args, " "), config.AgentPath+" new ") {

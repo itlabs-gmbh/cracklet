@@ -248,3 +248,37 @@ func TestStorePruneKeepsEverythingWhenLivenessFails(t *testing.T) {
 		t.Error("Prune must reject invalid names")
 	}
 }
+
+func TestStoreWithFreshState(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if err := s.Save("box", Set{{Cap: "claude"}}); err != nil {
+		t.Fatal(err)
+	}
+	err := s.WithFreshState("box", func() error {
+		f, err := os.OpenFile(filepath.Join(s.Dir, "box.lock"), os.O_RDWR, 0)
+		if err != nil {
+			t.Fatalf("lock file missing: %v", err)
+		}
+		defer f.Close()
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+			t.Error("create must run under the VM's lock, so a grant cannot slip in before the clear")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WithFreshState: %v", err)
+	}
+	if set, _ := s.Load("box"); len(set) != 0 {
+		t.Errorf("state of the predecessor must be gone, got %v", set)
+	}
+
+	if err := s.Save("box", Set{{Cap: "claude"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WithFreshState("box", func() error { return errors.New("already exists") }); err == nil {
+		t.Fatal("the create error must be returned")
+	}
+	if set, _ := s.Load("box"); len(set) != 1 {
+		t.Error("a failed create must leave the state of the existing VM alone")
+	}
+}

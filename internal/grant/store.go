@@ -154,6 +154,27 @@ func (s Store) Remove(vm string) error {
 	return nil
 }
 
+// WithFreshState runs create, which creates the VM, under the VM's lock and,
+// when it succeeds, removes whatever state is stored under the name before
+// releasing the lock. Grants saved by a concurrent grant therefore land after
+// the clear and belong to the new VM, while none of a predecessor's remain.
+// A failed create (e.g. the name is taken) leaves the state alone.
+func (s Store) WithFreshState(vm string, create func() error) error {
+	unlock, err := s.Lock(vm)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := create(); err != nil {
+		return err
+	}
+	dir, _ := s.vmDir(vm) // validated by Lock
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("clear state left by an earlier %s: %w", vm, err)
+	}
+	return nil
+}
+
 // Names lists the VMs that have host-side state, sorted. Lock files and
 // entries that are not valid VM names are ignored.
 func (s Store) Names() ([]string, error) {

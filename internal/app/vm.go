@@ -71,7 +71,20 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 		// gc measures ages with this clock; the Lima VM's may lag after sleep
 		args = append(args, spec.Owner, orDash(spec.Slot), a.now().UTC().Format(time.RFC3339))
 	}
-	out, err := a.agentOutput(ctx, args...)
+	var out []byte
+	create := func() (err error) {
+		out, err = a.agentOutput(ctx, args...)
+		return err
+	}
+	// pruneVanished cleared leftovers before, but an earlier VM of this name
+	// may have been removed only after that (by gc, whose own prune then sees
+	// the new VM and keeps the state). A named VM is therefore created under
+	// its grant lock and starts clean before a concurrent grant can save.
+	if spec.Name != "" {
+		err = a.grantStore().WithFreshState(spec.Name, create)
+	} else {
+		err = create()
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			a.cleanupInterrupted(spec.Name)
@@ -82,12 +95,12 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 	if err != nil {
 		return VMInfo{}, err
 	}
-	// pruneVanished cleared leftovers before the VM ran, but an earlier VM of
-	// this name may have been removed only after that (by gc, whose own
-	// prune then sees this VM and keeps the state). The agent created the
-	// VM, so nothing stored under its name belongs to a live one.
-	if err := a.grantStore().Remove(info.Name); err != nil {
-		return info, fmt.Errorf("%s was created, but clearing grants left by an earlier VM of that name failed: %w", info.Name, err)
+	if spec.Name == "" {
+		// The agent picked the name, so it could not be locked in advance;
+		// nobody can have granted the VM before learning its name.
+		if err := a.grantStore().Remove(info.Name); err != nil {
+			return info, fmt.Errorf("%s was created, but clearing grants left by an earlier VM of that name failed: %w", info.Name, err)
+		}
 	}
 	a.printf("%s is running at %s\n  cracklet ssh %s\n  ssh %s.%s\n", info.Name, info.IP, info.Name, info.Name, config.Instance)
 	if len(spec.Forwards) > 0 {

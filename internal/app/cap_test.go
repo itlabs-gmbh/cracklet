@@ -131,11 +131,10 @@ func TestCapAddDownloadsAndInstalls(t *testing.T) {
 	}
 }
 
-func TestSecretRefsSeeWhatTheTemplateSees(t *testing.T) {
+func TestSecretRefsListLiteralReferences(t *testing.T) {
 	cases := map[string][]string{
 		`Bearer {{ secret "keychain:cracklet/a" }}`: {"keychain:cracklet/a"},
 		"Bearer {{ secret `keychain:cracklet/b` }}": {"keychain:cracklet/b"},
-		`{{ secret (print "env:" "C") }}`:           {"env:C"},
 		`{{ secret "env:D" }} {{ secret "env:E" }}`: {"env:D", "env:E"},
 		`plain`: nil,
 	}

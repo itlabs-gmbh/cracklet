@@ -176,6 +176,10 @@ func (p Proxy) validate() []string {
 	for _, k := range sortedKeys(p.Headers) {
 		if err := checkTemplate(p.Headers[k], true); err != nil {
 			problems = append(problems, fmt.Sprintf("proxy.headers.%s: %v", k, err))
+			continue
+		}
+		if _, err := SecretRefs(p.Headers[k]); err != nil {
+			problems = append(problems, fmt.Sprintf("proxy.headers.%s: %v", k, err))
 		}
 	}
 	return problems

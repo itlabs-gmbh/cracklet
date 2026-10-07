@@ -309,6 +309,46 @@ func TestScriptsRunUnderBash(t *testing.T) {
 	}
 }
 
+// TestFailedWriteKeepsOriginal makes the target directory read-only so the
+// temp file cannot be created: the script must fail and the file must be
+// byte-identical afterwards.
+func TestFailedWriteKeepsOriginal(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil || os.Geteuid() == 0 {
+		t.Skip("needs bash and a non-root user")
+	}
+	root := t.TempDir()
+	dir := filepath.Join(root, "etc")
+	_ = os.MkdirAll(dir, 0o755)
+	target := filepath.Join(dir, "gitconfig")
+	original := "[user]\n\tname = Keep Me\n"
+	_ = os.WriteFile(target, []byte(original), 0o600)
+	_ = os.Chmod(dir, 0o555)
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	plan, err := Render([]cap.Cap{blockLike()}, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := plan.ApplyScript(State{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only the gitconfig part matters here; cut the script at the env rewrite.
+	script = script[:strings.Index(script, "sed '/^"+markerBegin)]
+	script = script[:strings.LastIndex(script, "install -d")]
+	out, err := exec.Command("bash", "-c", rewriteRoot(script, root)).CombinedOutput()
+	if err == nil {
+		t.Fatalf("script should fail when the temp file cannot be created:\n%s", out)
+	}
+	got, _ := os.ReadFile(target)
+	if string(got) != original {
+		t.Errorf("original must be untouched, got %q", got)
+	}
+	if info, _ := os.Stat(target); info.Mode().Perm() != 0o600 {
+		t.Errorf("mode changed to %o", info.Mode().Perm())
+	}
+}
+
 func mustOutput(t *testing.T, script string) []byte {
 	t.Helper()
 	out, err := exec.Command("bash", "-c", script).Output()

@@ -134,13 +134,19 @@ func (s Store) Lock(vm string) (func(), error) {
 	}, nil
 }
 
-// Remove deletes all state of a VM.
+// Remove deletes all state of a VM. The lock file itself stays: deleting it
+// would let a later Lock create a fresh file and succeed while a holder of
+// the old inode still believes it is exclusive.
 func (s Store) Remove(vm string) error {
+	unlock, err := s.Lock(vm)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	dir, err := s.vmDir(vm)
 	if err != nil {
 		return err
 	}
-	_ = os.Remove(dir + ".lock")
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("remove vm state: %w", err)
 	}

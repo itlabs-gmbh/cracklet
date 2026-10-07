@@ -79,6 +79,10 @@ type Guest struct {
 	Env map[string]string `toml:"env"`
 	// Files are written verbatim (after templating).
 	Files []File `toml:"files"`
+	// Blocks are managed sections appended to existing files, delimited by
+	// marker comments and removed again on revoke. Use them for shared
+	// configuration files such as /etc/gitconfig.
+	Blocks []Block `toml:"blocks"`
 	// JSONMerge sets a dotted key inside a JSON file, creating it if needed.
 	JSONMerge []JSONMerge `toml:"json_merge"`
 }
@@ -87,6 +91,14 @@ type Guest struct {
 type File struct {
 	Path    string `toml:"path"`
 	Mode    string `toml:"mode"`
+	Content string `toml:"content"`
+}
+
+// Block is a managed section inside an existing file. Comment is the line
+// comment prefix of the file's syntax ("#" by default) used for the markers.
+type Block struct {
+	Path    string `toml:"path"`
+	Comment string `toml:"comment"`
 	Content string `toml:"content"`
 }
 
@@ -224,6 +236,17 @@ func (c Cap) validateGuest() []string {
 		}
 		if err := checkTemplate(f.Content, false); err != nil {
 			problems = append(problems, fmt.Sprintf("guest.files[%d].content: %v", i, err))
+		}
+	}
+	for i, b := range c.Guest.Blocks {
+		if !strings.HasPrefix(b.Path, "/") {
+			problems = append(problems, fmt.Sprintf("guest.blocks[%d]: path must be absolute", i))
+		}
+		if b.Comment != "" && b.Comment != "#" && b.Comment != ";" && b.Comment != "//" {
+			problems = append(problems, fmt.Sprintf("guest.blocks[%d]: comment must be #, ; or //", i))
+		}
+		if err := checkTemplate(b.Content, false); err != nil {
+			problems = append(problems, fmt.Sprintf("guest.blocks[%d].content: %v", i, err))
 		}
 	}
 	for i, m := range c.Guest.JSONMerge {

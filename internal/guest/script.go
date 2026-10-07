@@ -6,6 +6,8 @@ import (
 	"path"
 	"sort"
 	"strings"
+
+	"github.com/itlabs-gmbh/cracklet/internal/cap"
 )
 
 // State is what the guest reported before an apply: the previous manifest and
@@ -88,6 +90,12 @@ func (p Plan) ApplyScript(st State) (string, error) {
 	for _, f := range p.Files {
 		writeFile(&b, f.Path, f.Mode, []byte(f.Content))
 	}
+	for _, stale := range p.staleBlocks(st) {
+		writeBlock(&b, stale.Path, stale.Owner, "", "")
+	}
+	for _, blk := range p.Blocks {
+		writeBlock(&b, blk.Path, blk.Owner, blk.Comment, blk.Content)
+	}
 	merged, err := p.mergedJSON(st)
 	if err != nil {
 		return "", err
@@ -115,6 +123,28 @@ func (p Plan) staleFiles(st State) []string {
 		if path := strings.TrimPrefix(l, "file:"); validatePath(path) == nil {
 			stale = append(stale, path)
 		}
+	}
+	return stale
+}
+
+// staleBlocks are managed sections a previous plan owned that this plan no
+// longer declares. The comment syntax is unknown by then, so the markers
+// are matched on their cracklet:<owner> tag alone.
+func (p Plan) staleBlocks(st State) []Block {
+	current := map[string]bool{}
+	for _, l := range p.Manifest() {
+		current[l] = true
+	}
+	var stale []Block
+	for _, l := range st.Manifest {
+		if !strings.HasPrefix(l, "block:") || current[l] {
+			continue
+		}
+		path, owner, ok := strings.Cut(strings.TrimPrefix(l, "block:"), "#")
+		if !ok || validatePath(path) != nil || cap.ValidateName(owner) != nil {
+			continue
+		}
+		stale = append(stale, Block{Path: path, Owner: owner})
 	}
 	return stale
 }
@@ -185,6 +215,32 @@ func (p Plan) writeEnv(b *strings.Builder) {
 	b.WriteString(base64.StdEncoding.EncodeToString([]byte(block.String())) + "\n")
 	b.WriteString("CRACKLET_B64\n")
 	b.WriteString("chmod 0644 \"$tmp\" && mv \"$tmp\" " + EnvFile + "\n")
+}
+
+// writeBlock replaces the section tagged cracklet:<owner> in a file with
+// content (an empty content just removes it). The file is rebuilt in a temp
+// file and moved into place; a missing file is created. Markers are matched
+// by their tag so the comment syntax may change between versions.
+func writeBlock(b *strings.Builder, p, owner, comment, content string) {
+	begin, end := blockMarkers(owner, comment)
+	var block strings.Builder
+	if content != "" {
+		block.WriteString(begin + "\n" + content + end + "\n")
+	}
+	tag := blockTag(owner)
+	b.WriteString("install -d -m 0755 " + shQuote(path.Dir(p)) + "\n")
+	b.WriteString("tmp=$(mktemp)\n")
+	b.WriteString("if [ -f " + shQuote(p) + " ]; then sed '/^.* >>> " + tag + " .*$/,/^.* <<< " + tag + "$/d' " + shQuote(p) + " > \"$tmp\"; fi\n")
+	b.WriteString("base64 -d >> \"$tmp\" <<'CRACKLET_B64'\n")
+	b.WriteString(base64.StdEncoding.EncodeToString([]byte(block.String())) + "\n")
+	b.WriteString("CRACKLET_B64\n")
+	b.WriteString("chmod 0644 \"$tmp\" && mv \"$tmp\" " + shQuote(p) + "\n")
+}
+
+func blockTag(owner string) string { return "cracklet:" + owner }
+
+func blockMarkers(owner, comment string) (string, string) {
+	return comment + " >>> " + blockTag(owner) + " managed, do not edit", comment + " <<< " + blockTag(owner)
 }
 
 // writeFile emits a heredoc with base64 content, so no byte of the content

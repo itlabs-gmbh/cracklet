@@ -78,6 +78,9 @@ func (a *App) CapShow(name string, render bool, vmName string) error {
 	for _, f := range plan.Files {
 		a.printf("file %s (%s):\n%s", f.Path, f.Mode, indent(f.Content))
 	}
+	for _, blk := range plan.Blocks {
+		a.printf("block %s (section cracklet:%s):\n%s", blk.Path, blk.Owner, indent(blk.Content))
+	}
 	for _, m := range plan.Merges {
 		a.printf("json %s %s = %v\n", m.Path, m.Key, m.Value)
 	}

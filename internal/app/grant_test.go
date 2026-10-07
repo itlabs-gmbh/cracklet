@@ -88,13 +88,13 @@ func TestGrantProvisionsGuestAndPersists(t *testing.T) {
 		t.Fatalf("expected a read and an apply script, got %d:\n%s", scripts.calls, fake.Dump())
 	}
 	apply := scripts.last()
-	for _, want := range []string{"/root/.claude.json", "/etc/environment"} {
+	for _, want := range []string{"/root/.claude.json", "/etc/environment", "cracklet:github"} {
 		if !strings.Contains(apply, want) {
 			t.Errorf("apply script should contain %q:\n%s", want, apply)
 		}
 	}
 	decoded := decodeAll(apply)
-	for _, want := range []string{`ANTHROPIC_BASE_URL="http://127.0.0.1:7777/claude"`, "CLAUDE_CODE_OAUTH_TOKEN=\"sk-ant-oat01-", `GIT_CONFIG_KEY_0="url.http://127.0.0.1:7777/github/.insteadOf"`} {
+	for _, want := range []string{`ANTHROPIC_BASE_URL="http://127.0.0.1:7777/claude"`, "CLAUDE_CODE_OAUTH_TOKEN=\"sk-ant-oat01-", `[url "http://127.0.0.1:7777/github/"]`} {
 		if !strings.Contains(decoded, want) {
 			t.Errorf("apply script should provision %q:\n%s", want, decoded)
 		}

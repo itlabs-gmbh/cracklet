@@ -26,7 +26,17 @@ const (
 type Plan struct {
 	Env    map[string]string
 	Files  []cap.File
+	Blocks []Block
 	Merges []cap.JSONMerge
+}
+
+// Block is a rendered managed section; Owner is the cap name and part of
+// the marker lines so several caps can share one file.
+type Block struct {
+	Path    string
+	Owner   string
+	Comment string
+	Content string
 }
 
 // Render evaluates the guest sections of caps. Conflicting definitions are
@@ -35,6 +45,7 @@ func Render(caps []cap.Cap, data cap.TemplateData) (Plan, error) {
 	plan := Plan{Env: map[string]string{}}
 	envOwner := map[string]string{}
 	fileOwner := map[string]string{}
+	blockOwner := map[string]string{}
 	keyOwner := map[string]string{}
 	for _, c := range caps {
 		for _, k := range sortedKeys(c.Guest.Env) {
@@ -55,6 +66,9 @@ func Render(caps []cap.Cap, data cap.TemplateData) (Plan, error) {
 			if owner, dup := fileOwner[f.Path]; dup {
 				return Plan{}, fmt.Errorf("caps %s and %s both write %s", owner, c.Name, f.Path)
 			}
+			if owner, dup := blockOwner[f.Path]; dup {
+				return Plan{}, fmt.Errorf("cap %s manages a block in %s while cap %s writes it as a file", owner, f.Path, c.Name)
+			}
 			for other, owner := range keyOwner {
 				if strings.HasPrefix(other, f.Path+"#") {
 					return Plan{}, fmt.Errorf("cap %s merges JSON into %s while cap %s writes it as a file", owner, f.Path, c.Name)
@@ -73,6 +87,27 @@ func Render(caps []cap.Cap, data cap.TemplateData) (Plan, error) {
 			}
 			fileOwner[f.Path] = c.Name
 			plan.Files = append(plan.Files, cap.File{Path: f.Path, Mode: mode, Content: content})
+		}
+		for _, blk := range c.Guest.Blocks {
+			if err := validatePath(blk.Path); err != nil {
+				return Plan{}, fmt.Errorf("cap %s: %w", c.Name, err)
+			}
+			if owner, dup := fileOwner[blk.Path]; dup {
+				return Plan{}, fmt.Errorf("cap %s writes %s as a file while cap %s manages a block in it", owner, blk.Path, c.Name)
+			}
+			content, err := cap.RenderGuest(blk.Content, data)
+			if err != nil {
+				return Plan{}, fmt.Errorf("cap %s: block %s: %w", c.Name, blk.Path, err)
+			}
+			comment := blk.Comment
+			if comment == "" {
+				comment = "#"
+			}
+			if strings.Contains(content, "cracklet:"+c.Name) {
+				return Plan{}, fmt.Errorf("cap %s: block %s must not contain its own marker", c.Name, blk.Path)
+			}
+			blockOwner[blk.Path] = c.Name
+			plan.Blocks = append(plan.Blocks, Block{Path: blk.Path, Owner: c.Name, Comment: comment, Content: strings.TrimRight(content, "\n") + "\n"})
 		}
 		for _, m := range c.Guest.JSONMerge {
 			id := m.Path + "#" + m.Key
@@ -106,6 +141,9 @@ func (p Plan) Manifest() []string {
 	var lines []string
 	for _, f := range p.Files {
 		lines = append(lines, "file:"+f.Path)
+	}
+	for _, b := range p.Blocks {
+		lines = append(lines, "block:"+b.Path+"#"+b.Owner)
 	}
 	for _, m := range p.Merges {
 		lines = append(lines, "json:"+m.Path+"#"+m.Key)

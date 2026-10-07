@@ -243,6 +243,7 @@ section { border-top: 1px solid var(--border); }
   color: var(--muted-foreground);
 }
 .card .cmd, .card .term { margin-top: 1rem; }
+.card .term { font-size: .75rem; }
 .card .cmd + .cmd { margin-top: .75rem; }
 
 .narrow { max-width: 36rem; }

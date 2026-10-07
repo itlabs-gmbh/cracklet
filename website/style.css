@@ -243,6 +243,9 @@ section { border-top: 1px solid var(--border); }
   color: var(--muted-foreground);
 }
 .card .cmd, .card .term { margin-top: 1rem; }
+.card .term { font-size: .75rem; }
+.term--wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (min-width: 768px) { .grid--wide-left { grid-template-columns: 3fr 2fr; } }
 .card .cmd + .cmd { margin-top: .75rem; }
 
 .narrow { max-width: 36rem; }

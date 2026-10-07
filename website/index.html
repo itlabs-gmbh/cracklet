@@ -66,7 +66,7 @@ $ cracklet ssh dev uname -a
         <div class="grid grid--3" style="margin-top:2.5rem">
           <div class="card">
             <h3 class="small">Run the agent inside</h3>
-            <p>Start a VM, install your agent CLI over SSH and point it at a repo. It can <code>apt install</code>, run tests and open ports without ever touching your home directory or keychain.</p>
+            <p>Start a VM, install your agent CLI over SSH and point it at a repo. It can <code>apt install</code>, run tests and open ports without ever touching your home directory or keychain. Credentials it needs come through the broker below, never as copies.</p>
             <div class="cmd" data-copy="cracklet new task-42 -p 3000">
               <span class="prompt" aria-hidden="true">$</span>
               <span class="text">cracklet new task-42 -p 3000</span>
@@ -98,6 +98,55 @@ $ cracklet ssh dev uname -a
 
     <section>
       <div class="container section">
+        <h2>Your credentials stay on the Mac</h2>
+        <p class="intro">An agent in a microVM still needs a <code>git push</code>, a Claude login or a browser MCP that only runs on your Mac. Copying tokens into the VM would throw the isolation away. cracklet opens one controlled hole instead: a broker that hands out connections, never secrets.</p>
+        <div class="grid grid--3" style="margin-top:2.5rem">
+          <div class="card">
+            <h3 class="small">Grant, don't copy</h3>
+            <p>Store a token once in the macOS Keychain and grant it per VM. The guest only ever holds a placeholder; the broker on your Mac swaps it for the real credential on every request, and only while <code>cracklet ssh</code> is open. Close the terminal, close the hole.</p>
+            <div class="cmd" data-copy="cracklet secret set claude-token">
+              <span class="prompt" aria-hidden="true">$</span>
+              <span class="text">cracklet secret set claude-token</span>
+              <button type="button" aria-label="Copy cracklet secret set claude-token to the clipboard"></button>
+            </div>
+            <div class="cmd" data-copy="cracklet grant ai claude github:acme/app">
+              <span class="prompt" aria-hidden="true">$</span>
+              <span class="text">cracklet grant ai claude github:acme/app</span>
+              <button type="button" aria-label="Copy the grant command to the clipboard"></button>
+            </div>
+          </div>
+          <div class="card">
+            <h3 class="small">Default deny, fully audited</h3>
+            <p>Every request is checked against the VM's grants and written to an audit log. GitHub access is scoped to the repositories you name. A denied request is answered with the exact command that would allow it.</p>
+            <div class="term term--wrap">$ curl -s :7777/github/acme/app/info/refs
+<span class="dim">{"error":"github:acme/app is not granted to ai","hint":"cracklet grant ai github:acme/app"}</span></div>
+            <div class="cmd" data-copy="cracklet revoke ai github:acme/app">
+              <span class="prompt" aria-hidden="true">$</span>
+              <span class="text">cracklet revoke ai github:acme/app</span>
+              <button type="button" aria-label="Copy the revoke command to the clipboard"></button>
+            </div>
+          </div>
+          <div class="card">
+            <h3 class="small">Any tool, one TOML file</h3>
+            <p>The broker knows three primitives: a header-injecting proxy, a bridge for MCP servers that run on your Mac, and an external program. Claude Code and GitHub ship built in. Codex, Gemini CLI or your own MCP server are a capability file in <code>~/.cracklet/caps</code>, shareable by URL.</p>
+            <div class="cmd" data-copy="cracklet cap init codex">
+              <span class="prompt" aria-hidden="true">$</span>
+              <span class="text">cracklet cap init codex</span>
+              <button type="button" aria-label="Copy cracklet cap init codex to the clipboard"></button>
+            </div>
+            <div class="cmd" data-copy="cracklet cap add https://example.com/gemini.toml">
+              <span class="prompt" aria-hidden="true">$</span>
+              <span class="text">cracklet cap add https://example.com/gemini.toml</span>
+              <button type="button" aria-label="Copy the cap add example to the clipboard"></button>
+            </div>
+          </div>
+        </div>
+        <p class="intro" style="max-width:48rem;margin-top:2.5rem">Claude Code runs unmodified in the guest with your own subscription: it sends exactly the headers of a normal login and the broker only replaces the token. Usage counts against your plan like any other session. The broker is personal tooling for your Mac and your VMs, not a way to route other people's requests through your account.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="container section">
         <h2>Size it as you need</h2>
         <p class="intro">Defaults are 2 vCPUs, 1 GiB RAM and a 2 GiB disk. Pass <code>--vcpus</code>, <code>--mem</code> and <code>--disk</code> to change them; a bigger disk grows the root filesystem on first boot.</p>
         <div class="grid grid--2">
@@ -124,18 +173,18 @@ $ cracklet ssh dev uname -a
     </section>
 
     <section>
-      <div class="container section grid grid--2" style="margin-top:0">
+      <div class="container section grid grid--2 grid--wide-left" style="margin-top:0">
         <div class="card">
           <h2>Find your microVMs</h2>
-          <p>List every microVM with its state, IP, size, port forwards and the SSH destination to use.</p>
+          <p>List every microVM with its state, IP, size, port forwards, grants and the SSH destination to use.</p>
           <div class="cmd" data-copy="cracklet ls">
             <span class="prompt" aria-hidden="true">$</span>
             <span class="text">cracklet ls</span>
             <button type="button" aria-label="Copy cracklet ls to the clipboard"></button>
           </div>
-          <div class="term">NAME  STATE    IP          VCPUS  MEM    PORTS  SSH
-dev   running  172.16.1.2  2      1024M  -      ssh dev.cracklet
-web   running  172.16.2.2  2      1024M  8080   ssh web.cracklet</div>
+          <div class="term">NAME  STATE    IP          VCPUS  MEM    PORTS  GRANTS  SSH
+dev   running  172.16.1.2  2      1024M  -      -       ssh dev.cracklet
+ai    running  172.16.2.2  2      1024M  3000   claude  ssh ai.cracklet</div>
           <p>Stop keeps the disk, start brings it back, rm deletes it.</p>
           <div class="cmd" data-copy="cracklet stop dev">
             <span class="prompt" aria-hidden="true">$</span>

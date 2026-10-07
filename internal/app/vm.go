@@ -152,6 +152,14 @@ func (a *App) ListVMs(ctx context.Context) ([]VMInfo, error) {
 	return vms, nil
 }
 
+// InspectVM returns a single microVM, including its host-side grants.
+func (a *App) InspectVM(ctx context.Context, name string) (VMInfo, error) {
+	if err := vm.ValidateName(name); err != nil {
+		return VMInfo{}, err
+	}
+	return a.describe(ctx, name)
+}
+
 func parseVM(out []byte) (VMInfo, error) {
 	var info VMInfo
 	if err := json.Unmarshal(out, &info); err != nil {

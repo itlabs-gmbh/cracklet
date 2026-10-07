@@ -64,7 +64,11 @@ root disk, IP address and SSH access.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) (err error) {
-			a, err = build(cmd.OutOrStdout())
+			out := cmd.OutOrStdout()
+			if wantsJSON(cmd) {
+				out = cmd.ErrOrStderr()
+			}
+			a, err = build(out)
 			return err
 		},
 	}
@@ -75,6 +79,7 @@ root disk, IP address and SSH access.`,
 		newNewCmd(get),
 		newRmCmd(get),
 		newLsCmd(get),
+		newInspectCmd(get),
 		newSSHCmd(get),
 		newTunnelCmd(get),
 		newStartCmd(get),

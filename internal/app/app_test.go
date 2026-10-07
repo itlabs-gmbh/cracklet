@@ -139,6 +139,31 @@ func TestListParsesAgentOutput(t *testing.T) {
 	}
 }
 
+func TestInspectVM(t *testing.T) {
+	app, fake, _ := newTestApp(t, defaultHandler(map[string]string{
+		"ls": `[{"name":"vm1","index":1,"ip":"172.16.1.2","state":"running"},` +
+			`{"name":"vm2","index":2,"ip":"172.16.2.2","state":"stopped"}]`,
+	}))
+	ctx := context.Background()
+	info, err := app.InspectVM(ctx, "vm2")
+	if err != nil {
+		t.Fatalf("InspectVM: %v", err)
+	}
+	if info.Name != "vm2" || info.State != "stopped" || info.IP != "172.16.2.2" {
+		t.Errorf("unexpected VM: %+v", info)
+	}
+	if _, err := app.InspectVM(ctx, "vm9"); err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("unknown VM: want 'does not exist', got %v", err)
+	}
+	calls := len(fake.Calls())
+	if _, err := app.InspectVM(ctx, "../etc"); err == nil {
+		t.Error("invalid name must be rejected")
+	}
+	if len(fake.Calls()) != calls {
+		t.Errorf("an invalid name must not reach the agent:\n%s", fake.Dump())
+	}
+}
+
 func TestRemoveCallsAgent(t *testing.T) {
 	app, fake, _ := newTestApp(t, defaultHandler(map[string]string{"rm": ""}))
 	if err := app.RemoveVM(context.Background(), "vm1"); err != nil {

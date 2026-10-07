@@ -131,17 +131,19 @@ func TestResolveCachesWithinTTL(t *testing.T) {
 
 func TestStoreAndDelete(t *testing.T) {
 	fake := runner.NewFake(func(string, []string) ([]byte, error) { return nil, nil })
-	if err := Store(context.Background(), fake, "claude-token", "s3cret"); err != nil {
+	if err := Store(context.Background(), fake, "claude-token", `s3"c\ret`); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
-	if !fake.Called("security add-generic-password -U -s cracklet -a claude-token -w") {
-		t.Errorf("unexpected calls:\n%s", fake.Dump())
+	if !fake.Called("security -i") {
+		t.Errorf("value must not appear in argv:\n%s", fake.Dump())
 	}
-	if in, ok := fake.Input("-a claude-token -w"); !ok || in != "s3cret\ns3cret\n" {
-		t.Errorf("secret and its confirmation should travel via stdin, got %q", in)
+	if in, ok := fake.Input("security -i"); !ok || in != `add-generic-password -U -s cracklet -a claude-token -w "s3\"c\\ret"`+"\n" {
+		t.Errorf("command should travel via stdin with the value quoted, got %q", in)
 	}
-	if err := Store(context.Background(), fake, "x", "  "); err == nil {
-		t.Errorf("empty secrets must be rejected")
+	for name, value := range map[string]string{"x": "  ", "y": "two\nlines", "Bad Name": "v"} {
+		if err := Store(context.Background(), fake, name, value); err == nil {
+			t.Errorf("Store(%q, %q) must be rejected", name, value)
+		}
 	}
 	if err := Delete(context.Background(), fake, "claude-token"); err != nil {
 		t.Fatalf("Delete: %v", err)

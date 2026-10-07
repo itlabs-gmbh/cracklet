@@ -70,6 +70,10 @@ func TestSecretRefsRequireLiterals(t *testing.T) {
 	if err != nil || strings.Join(refs, ",") != "keychain:cracklet/a,env:B" {
 		t.Fatalf("refs = %v, %v", refs, err)
 	}
+	refs, err = SecretRefs(`{{ define "h" }}{{ secret "env:H" }}{{ end }}{{ template "h" . }}`)
+	if err != nil || strings.Join(refs, ",") != "env:H" {
+		t.Fatalf("defined templates must be listed: %v, %v", refs, err)
+	}
 	for _, bad := range []string{
 		`{{ secret (print "env:" .VM) }}`,
 		`{{ secret .VM }}`,
@@ -77,6 +81,10 @@ func TestSecretRefsRequireLiterals(t *testing.T) {
 		`{{ "env:A" | secret }}`,
 		`{{ call secret "env:A" }}`,
 		`{{ range .List }}{{ secret .X }}{{ end }}`,
+		`{{ define "h" }}{{ secret .VM }}{{ end }}{{ template "h" . }}`,
+		`{{ block "h" . }}{{ secret (print .VM) }}{{ end }}`,
+		`{{ (secret .VM) }}`,
+		`{{ with .VM }}{{ secret . }}{{ end }}`,
 	} {
 		if _, err := SecretRefs(bad); err == nil {
 			t.Errorf("%s must be rejected", bad)

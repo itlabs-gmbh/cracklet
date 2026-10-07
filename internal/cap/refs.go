@@ -49,6 +49,8 @@ func SecretRefs(text string) ([]string, error) {
 					return err
 				}
 			}
+		case *parse.ChainNode:
+			return walk(x.Node)
 		case *parse.CommandNode:
 			for i, arg := range x.Args {
 				if id, ok := arg.(*parse.IdentifierNode); ok && id.Ident == "secret" {
@@ -69,8 +71,15 @@ func SecretRefs(text string) ([]string, error) {
 		}
 		return nil
 	}
-	if err := walk(tmpl.Tree.Root); err != nil {
-		return nil, err
+	// {{ define }} and {{ block }} create further trees that are not part of
+	// Root; a secret call hidden there must be found as well.
+	for _, t := range tmpl.Templates() {
+		if t.Tree == nil {
+			continue
+		}
+		if err := walk(t.Tree.Root); err != nil {
+			return nil, err
+		}
 	}
 	return refs, nil
 }

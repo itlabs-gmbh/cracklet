@@ -1,0 +1,180 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"time"
+
+	"github.com/itlabs-gmbh/cracklet/internal/config"
+	"github.com/itlabs-gmbh/cracklet/internal/vm"
+)
+
+const (
+	// defaultTunnelRetry is the first pause before `cracklet tunnel`
+	// reconnects after the ssh connection dropped.
+	defaultTunnelRetry = 5 * time.Second
+	// maxTunnelRetry caps the backoff: a guest port held by another session
+	// is retried about once a minute rather than flooding the audit log.
+	maxTunnelRetry = time.Minute
+	// tunnelStable is how long a connection must have lasted for the backoff
+	// to start over.
+	tunnelStable = time.Minute
+	// maxTunnelFailures consecutive failed status checks end the tunnel; a
+	// single one is usually Lima restarting.
+	maxTunnelFailures = 5
+)
+
+// tunnelKeepAlive lets ssh notice a dead connection (Lima suspended, VM
+// killed) within about 45 seconds instead of waiting for TCP to give up.
+var tunnelKeepAlive = []string{"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"}
+
+// Tunnel serves the VM's broker without an interactive session: it holds an
+// ssh connection that carries only the broker forward, reconnects when it
+// drops, and returns when ctx is cancelled or the VM stops running.
+func (a *App) Tunnel(ctx context.Context, name string) error {
+	if err := vm.ValidateName(name); err != nil {
+		return err
+	}
+	if err := a.requireRunning(ctx); err != nil {
+		return err
+	}
+	if err := a.ensureSSHConfig(); err != nil {
+		return err
+	}
+	set, err := a.grantStore().Load(name)
+	if err != nil {
+		return err
+	}
+	if !needsBroker(set) {
+		return fmt.Errorf("%s has no grants served by the broker; add one with 'cracklet grant %s CAP'", name, name)
+	}
+	running, err := a.vmRunning(ctx, name)
+	if err != nil {
+		return err
+	}
+	if !running {
+		return fmt.Errorf("%s is not running; start it with 'cracklet start %s'", name, name)
+	}
+	a.printf("broker tunnel for %s on guest 127.0.0.1:%d; stop it with Ctrl-C\n", name, config.BrokerGuestPort)
+	return a.holdTunnel(ctx, name)
+}
+
+// holdTunnel reconnects until ctx ends or the VM is no longer running. The
+// broker is acquired per attempt: one reused from an interactive session
+// disappears with that session, and the next attempt then starts its own.
+func (a *App) holdTunnel(ctx context.Context, name string) error {
+	var wait time.Duration
+	failures := 0
+	for {
+		socket, stop, err := a.tunnel(ctx, name)
+		if err != nil {
+			return err
+		}
+		started := time.Now()
+		sshErr := a.forwardOnce(ctx, name, socket)
+		stop()
+		if ctx.Err() != nil {
+			a.printf("broker tunnel for %s closed\n", name)
+			return nil
+		}
+		running, err := a.vmRunning(ctx, name)
+		switch {
+		case err != nil:
+			if failures++; failures >= maxTunnelFailures {
+				return fmt.Errorf("check whether %s still runs: %w", name, err)
+			}
+			a.printf("could not check whether %s still runs: %v\n", name, err)
+		case !running:
+			a.printf("%s is no longer running, broker tunnel closed\n", name)
+			return nil
+		default:
+			failures = 0
+		}
+		wait = a.nextTunnelRetry(wait, time.Since(started))
+		a.printf("broker tunnel for %s dropped (%s), reconnecting in %s\n", name, sshEnd(sshErr), wait)
+		if !sleepCtx(ctx, wait) {
+			return nil
+		}
+	}
+}
+
+// nextTunnelRetry doubles the previous pause up to maxTunnelRetry and starts
+// over after a connection that held for tunnelStable.
+func (a *App) nextTunnelRetry(prev, lasted time.Duration) time.Duration {
+	if prev == 0 || lasted >= tunnelStable {
+		return a.tunnelRetry
+	}
+	return min(2*prev, maxTunnelRetry)
+}
+
+// forwardOnce runs one ssh connection that executes nothing (-N), never reads
+// the terminal (-n) and only carries the broker forward.
+func (a *App) forwardOnce(ctx context.Context, name, socket string) error {
+	args := append([]string{"-N", "-n"}, tunnelKeepAlive...)
+	args = append(args, brokerForward(socket)...)
+	a.auditTunnel(name, "open", "")
+	err := a.r.Run(ctx, "ssh", append(args, a.sshArgs(name, nil)...)...)
+	a.auditTunnel(name, "closed", sshEnd(err))
+	return err
+}
+
+// sshEnd says briefly why an ssh connection ended; the runner's error repeats
+// the whole command line, which the audit log already has.
+func sshEnd(err error) string {
+	var exitErr *exec.ExitError
+	switch {
+	case err == nil:
+		return "ssh exited"
+	case errors.As(err, &exitErr):
+		return fmt.Sprintf("ssh exit %d", exitErr.ExitCode())
+	default:
+		return err.Error()
+	}
+}
+
+// vmRunning asks the agent whether the VM exists and runs.
+func (a *App) vmRunning(ctx context.Context, name string) (bool, error) {
+	vms, err := a.ListVMs(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, v := range vms {
+		if v.Name == name {
+			return v.State == "running", nil
+		}
+	}
+	return false, nil
+}
+
+// auditTunnel records tunnel lifecycle events next to the broker's request
+// lines, so a gap in decisions can be told apart from an idle guest.
+func (a *App) auditTunnel(name, event, reason string) {
+	f, err := os.OpenFile(a.paths.AuditLog(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		a.printf("cracklet: warning: audit log: %v\n", err)
+		return
+	}
+	defer f.Close()
+	line := fmt.Sprintf("%s vm=%s tunnel=%s", time.Now().UTC().Format(time.RFC3339), name, event)
+	if reason != "" {
+		line += fmt.Sprintf(" reason=%q", reason)
+	}
+	if _, err := fmt.Fprintln(f, line); err != nil {
+		a.printf("cracklet: warning: audit log: %v\n", err)
+	}
+}
+
+// sleepCtx waits d and reports false if ctx ended first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}

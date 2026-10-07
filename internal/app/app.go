@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"time"
 
 	"github.com/itlabs-gmbh/cracklet/internal/config"
 	"github.com/itlabs-gmbh/cracklet/internal/envdbin"
@@ -26,6 +27,8 @@ type App struct {
 	portBusy PortCheck
 	envd     EnvdSource
 	tunnel   Tunnel
+	// tunnelRetry is the pause before `cracklet tunnel` reconnects.
+	tunnelRetry time.Duration
 }
 
 // EnvdSource yields the linux/arm64 cracklet-envd binary that Prepare ships
@@ -79,7 +82,7 @@ func WithEnvd(src EnvdSource) Option {
 // New wires an App.
 func New(r runner.Runner, paths config.Paths, out io.Writer, opts ...Option) *App {
 	a := &App{r: r, lima: lima.NewClient(r, config.Instance), paths: paths, out: out,
-		lookPath: exec.LookPath, probe: waitForHostPort, portBusy: hostPortBusy}
+		lookPath: exec.LookPath, probe: waitForHostPort, portBusy: hostPortBusy, tunnelRetry: defaultTunnelRetry}
 	a.envd = a.loadEnvd
 	a.tunnel = a.startBroker
 	for _, opt := range opts {

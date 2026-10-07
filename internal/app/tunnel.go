@@ -34,21 +34,41 @@ func (a *App) sshExtraArgs(ctx context.Context, name string) ([]string, func(), 
 	if set.Contains(grant.Grant{Cap: grant.SSHAgent}) {
 		args = append(args, "-A")
 	}
-	if len(set.Caps()) == 1 && set.Caps()[0] == grant.SSHAgent {
+	if !needsBroker(set) {
+		return args, func() {}, nil
+	}
+	// A running broker belongs to a `cracklet tunnel` or another session,
+	// which already holds the guest port; a second -R would only fail.
+	if broker.Alive(a.paths.SocketPath(name)) {
 		return args, func() {}, nil
 	}
 	socket, stop, err := a.tunnel(ctx, name)
 	if err != nil {
 		return nil, nil, err
 	}
-	// Without ExitOnForwardFailure a squatter on the guest port would leave
-	// the session running with no tunnel and only a warning.
-	args = append(args, "-o", "ExitOnForwardFailure=yes", "-R", fmt.Sprintf("127.0.0.1:%d:%s", config.BrokerGuestPort, socket))
-	return args, stop, nil
+	return append(args, brokerForward(socket)...), stop, nil
+}
+
+// needsBroker reports whether any grant is served by the broker; ssh-agent
+// alone is plain agent forwarding.
+func needsBroker(set grant.Set) bool {
+	for _, c := range set.Caps() {
+		if c != grant.SSHAgent {
+			return true
+		}
+	}
+	return false
+}
+
+// brokerForward maps the guest's broker port onto the host socket. Without
+// ExitOnForwardFailure a squatter on the guest port would leave ssh running
+// with no tunnel and only a warning.
+func brokerForward(socket string) []string {
+	return []string{"-o", "ExitOnForwardFailure=yes", "-R", fmt.Sprintf("127.0.0.1:%d:%s", config.BrokerGuestPort, socket)}
 }
 
 // startBroker is the production Tunnel: it serves the VM's broker on a Unix
-// socket for as long as the ssh session lives. A broker left by another
+// socket for as long as the ssh session or `cracklet tunnel` lives. A broker left by another
 // session of the same VM is reused.
 func (a *App) startBroker(ctx context.Context, name string) (string, func(), error) {
 	socket := a.paths.SocketPath(name)

@@ -88,7 +88,6 @@ func New(r runner.Runner, paths config.Paths, out io.Writer, opts ...Option) *Ap
 		lookPath: exec.LookPath, probe: waitForHostPort, portBusy: hostPortBusy, tunnelRetry: defaultTunnelRetry,
 		brokerWatch: defaultBrokerWatch}
 	a.envd = a.loadEnvd
-	a.tunnel = a.startBroker
 	for _, opt := range opts {
 		opt(a)
 	}

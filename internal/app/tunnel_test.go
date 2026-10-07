@@ -3,14 +3,13 @@ package app
 import (
 	"context"
 	"errors"
-	"net"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/config"
+	"github.com/itlabs-gmbh/cracklet/internal/broker"
 	"github.com/itlabs-gmbh/cracklet/internal/grant"
 	"github.com/itlabs-gmbh/cracklet/internal/runner"
 )
@@ -155,47 +154,54 @@ func TestTunnelNeedsBrokerGrant(t *testing.T) {
 	}
 }
 
-// newSharedBrokerApp returns an App with a short home (Unix socket limits on
-// macOS), a claude grant for agent1, and a stand-in broker already answering
-// on agent1's socket. closeBroker makes that broker go away.
-func newSharedBrokerApp(t *testing.T, handle runner.FakeHandler) (app *App, fake *runner.Fake, closeBroker func()) {
-	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "cracklet-")
-	if err != nil {
-		t.Fatal(err)
+// ownedBroker is a Tunnel with real ownership semantics: one holder at a
+// time, everyone else gets broker.ErrBusy.
+type ownedBroker struct {
+	mu       sync.Mutex
+	held     bool
+	acquires int
+}
+
+func (o *ownedBroker) tunnel(ctx context.Context, name string) (string, func(), error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.held {
+		return "", nil, broker.ErrBusy
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	fake = runner.NewFake(handle)
-	app = New(fake, config.Paths{Home: dir, LimaHome: "/tmp/lima"}, &strings.Builder{}, WithEnvd(fakeEnvd), WithTunnel(fakeTunnel))
+	o.held = true
+	o.acquires++
+	return "/tmp/fake-" + name + ".sock", o.release, nil
+}
+
+func (o *ownedBroker) release() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.held = false
+}
+
+func (o *ownedBroker) isHeld() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.held
+}
+
+// newSharedBrokerApp returns an App whose agent1 has a claude grant and
+// whose broker is already owned by another session.
+func newSharedBrokerApp(t *testing.T, handle runner.FakeHandler) (*App, *runner.Fake, *ownedBroker) {
+	t.Helper()
+	owner := &ownedBroker{held: true}
+	fake := runner.NewFake(handle)
+	app := New(fake, testPaths(t), &strings.Builder{}, WithEnvd(fakeEnvd), WithTunnel(owner.tunnel))
 	app.tunnelRetry = time.Millisecond
 	app.brokerWatch = time.Millisecond
 	set, _ := grant.ParseSet([]string{"claude"})
 	if err := app.grantStore().Save("agent1", set); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(app.paths.RunDir(), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	ln, err := net.Listen("unix", app.paths.SocketPath("agent1"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			_ = conn.Close()
-		}
-	}()
-	var once sync.Once
-	closeBroker = func() { once.Do(func() { _ = ln.Close() }) }
-	t.Cleanup(closeBroker)
-	return app, fake, closeBroker
+	return app, fake, owner
 }
 
-func TestSSHSkipsForwardWhenBrokerAlreadyServes(t *testing.T) {
+func TestSSHSkipsForwardWhenBrokerOwnedElsewhere(t *testing.T) {
 	script := &tunnelScript{states: []string{"running"}}
 	app, fake, _ := newSharedBrokerApp(t, script.handle)
 	if err := app.SSH(context.Background(), "agent1", nil); err != nil {
@@ -203,7 +209,7 @@ func TestSSHSkipsForwardWhenBrokerAlreadyServes(t *testing.T) {
 	}
 	for _, c := range fake.Calls() {
 		if strings.Contains(c, "-R ") {
-			t.Errorf("the session owning the broker already holds the guest port: %s", c)
+			t.Errorf("only the broker's owner may forward the guest port: %s", c)
 		}
 	}
 }
@@ -211,14 +217,14 @@ func TestSSHSkipsForwardWhenBrokerAlreadyServes(t *testing.T) {
 func TestSSHTakesOverBrokerWhenOwnerLeaves(t *testing.T) {
 	script := &tunnelScript{states: []string{"running"}}
 	var (
-		closeBroker func()
-		fake        *runner.Fake
-		took        = make(chan string, 1)
+		owner *ownedBroker
+		fake  *runner.Fake
+		took  = make(chan string, 1)
 	)
 	handle := func(name string, args []string) ([]byte, error) {
 		if name == "ssh" && len(args) > 0 && args[0] != "-N" {
-			// The interactive session: its peer ends, the takeover must follow.
-			closeBroker()
+			// The interactive session: the broker's owner leaves meanwhile.
+			owner.release()
 			deadline := time.Now().Add(5 * time.Second)
 			for time.Now().Before(deadline) {
 				for _, c := range fake.Calls() {
@@ -234,7 +240,7 @@ func TestSSHTakesOverBrokerWhenOwnerLeaves(t *testing.T) {
 		return script.handle(name, args)
 	}
 	var app *App
-	app, fake, closeBroker = newSharedBrokerApp(t, handle)
+	app, fake, owner = newSharedBrokerApp(t, handle)
 	if err := app.SSH(context.Background(), "agent1", nil); err != nil {
 		t.Fatalf("SSH: %v", err)
 	}
@@ -246,6 +252,85 @@ func TestSSHTakesOverBrokerWhenOwnerLeaves(t *testing.T) {
 	default:
 		t.Fatalf("no takeover after the broker owner left:\n%s", fake.Dump())
 	}
+	if owner.isHeld() {
+		t.Error("ending the session must release the broker it took over")
+	}
+}
+
+func TestConcurrentTakeoversForwardOnlyAsOwner(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var (
+		mu       sync.Mutex
+		active   int
+		forwards int
+		owner    *ownedBroker
+		bad      []string
+	)
+	handle := func(name string, args []string) ([]byte, error) {
+		if name == "ssh" && len(args) > 0 && args[0] == "-N" {
+			mu.Lock()
+			active++
+			forwards++
+			if active > 1 {
+				bad = append(bad, "two forwards at once")
+			}
+			if !owner.isHeld() {
+				bad = append(bad, "forward without owning the broker")
+			}
+			if forwards >= 6 {
+				cancel()
+			}
+			mu.Unlock()
+			time.Sleep(2 * time.Millisecond)
+			mu.Lock()
+			active--
+			mu.Unlock()
+			return nil, errors.New("exit status 255")
+		}
+		if name == "limactl" && args[len(args)-1] == "ls" {
+			return []byte(`[{"name":"agent1","state":"running"}]`), nil
+		}
+		return defaultHandler(nil)(name, args)
+	}
+	app, _, o := newSharedBrokerApp(t, handle)
+	owner = o
+	owner.release() // the previous owner just left; two sessions race for it
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = app.holdTunnel(ctx, "agent1")
+		}()
+	}
+	wg.Wait()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bad) > 0 {
+		t.Errorf("ownership violated: %v", bad)
+	}
+	if forwards < 2 {
+		t.Errorf("expected repeated forwards, got %d", forwards)
+	}
+}
+
+func TestStandbyAuditsFailedTakeovers(t *testing.T) {
+	script := &tunnelScript{states: []string{"running"}}
+	app, _, _ := newSharedBrokerApp(t, script.handle)
+	broken := errors.New("load caps: bad toml")
+	app.tunnel = func(ctx context.Context, name string) (string, func(), error) { return "", nil, broken }
+	stop := app.standby(context.Background(), "agent1")
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if audit, _ := os.ReadFile(app.paths.AuditLog()); strings.Contains(string(audit), `vm=agent1 tunnel=failed reason="load caps: bad toml"`) {
+			stop()
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	stop()
+	t.Error("a failed takeover must be recorded in the audit log")
 }
 
 func TestTunnelSurvivesTransientListErrors(t *testing.T) {

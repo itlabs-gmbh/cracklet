@@ -40,6 +40,17 @@ func NewExec() *Exec {
 	return &Exec{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 }
 
+// Silenced returns a Runner whose commands neither read nor write the
+// terminal, for work in the background of an interactive session. Output
+// still folds stderr into its errors. Runners other than Exec (test fakes)
+// are returned unchanged.
+func Silenced(r Runner) Runner {
+	if _, ok := r.(*Exec); !ok {
+		return r
+	}
+	return &Exec{Stdout: io.Discard, Stderr: io.Discard}
+}
+
 // Output implements Runner. Stderr is both streamed and captured so that error
 // messages carry the command's own diagnostics.
 func (e *Exec) Output(ctx context.Context, name string, args ...string) ([]byte, error) {

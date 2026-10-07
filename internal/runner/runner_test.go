@@ -88,3 +88,25 @@ func TestExecErrorsKeepExitError(t *testing.T) {
 		t.Fatalf("expected wrapped ExitError 255, got %v", err)
 	}
 }
+
+func TestSilencedDetachesTerminal(t *testing.T) {
+	loud := &Exec{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	quiet, ok := Silenced(loud).(*Exec)
+	if !ok {
+		t.Fatal("Silenced(*Exec) must stay an *Exec")
+	}
+	_, err := quiet.Output(context.Background(), "sh", "-c", "echo noisy >&2; exit 4")
+	if err == nil || !strings.Contains(err.Error(), "noisy") {
+		t.Errorf("errors must still carry stderr, got %v", err)
+	}
+	if err := quiet.Run(context.Background(), "sh", "-c", "echo out; echo err >&2"); err != nil {
+		t.Fatal(err)
+	}
+	if loud.Stdout.(*bytes.Buffer).Len()+loud.Stderr.(*bytes.Buffer).Len() != 0 {
+		t.Error("a silenced runner must not write to the original streams")
+	}
+	fake := NewFake(func(string, []string) ([]byte, error) { return nil, nil })
+	if Silenced(fake) != Runner(fake) {
+		t.Error("runners other than Exec are returned unchanged")
+	}
+}

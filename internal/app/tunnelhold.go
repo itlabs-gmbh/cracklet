@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/itlabs-gmbh/cracklet/internal/broker"
 	"github.com/itlabs-gmbh/cracklet/internal/config"
 	"github.com/itlabs-gmbh/cracklet/internal/vm"
 )
@@ -62,20 +63,49 @@ func (a *App) Tunnel(ctx context.Context, name string) error {
 	return a.holdTunnel(ctx, name)
 }
 
-// holdTunnel reconnects until ctx ends or the VM is no longer running. The
-// broker is acquired per attempt: one reused from an interactive session
-// disappears with that session, and the next attempt then starts its own.
+// holdTunnel owns the VM's broker and keeps it forwarded until ctx ends or
+// the VM is no longer running. While another process owns the broker it
+// waits rather than forward: a forward is only ever made by the broker's
+// owner, so none can outlive the broker it points to. Ownership is kept
+// across reconnects.
 func (a *App) holdTunnel(ctx context.Context, name string) error {
+	socket, stop, err := a.awaitBroker(ctx, name)
+	if ctx.Err() != nil {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer stop()
+	return a.keepForwarded(ctx, name, socket)
+}
+
+// awaitBroker claims the VM's broker, waiting while another process owns it.
+func (a *App) awaitBroker(ctx context.Context, name string) (string, func(), error) {
+	announced := false
+	for {
+		socket, stop, err := a.claimTunnel(ctx, name)
+		if !errors.Is(err, broker.ErrBusy) {
+			return socket, stop, err
+		}
+		if !announced {
+			a.printf("another session serves %s's broker; taking over when it ends\n", name)
+			announced = true
+		}
+		if !sleepCtx(ctx, a.brokerWatch) {
+			return "", nil, ctx.Err()
+		}
+	}
+}
+
+// keepForwarded reconnects the forward with backoff until ctx ends or the VM
+// is no longer running.
+func (a *App) keepForwarded(ctx context.Context, name, socket string) error {
 	var wait time.Duration
 	failures := 0
 	for {
-		socket, stop, err := a.tunnel(ctx, name)
-		if err != nil {
-			return err
-		}
 		started := time.Now()
 		sshErr := a.forwardOnce(ctx, name, socket)
-		stop()
 		if ctx.Err() != nil {
 			a.printf("broker tunnel for %s closed\n", name)
 			return nil

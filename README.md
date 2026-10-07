@@ -151,7 +151,7 @@ specific to Claude Code, GitHub or any other tool is a **capability file**:
 ```sh
 cracklet cap ls                           # embedded: claude, github; yours in ~/.cracklet/caps
 cracklet cap show claude                  # the TOML file
-cracklet cap show github --render --vm agent1   # what the guest receives
+cracklet cap show github --render --vm agent1   # what the guest receives (GIT_CONFIG_* variables)
 cracklet cap init codex                   # commented skeleton, then: cracklet cap lint codex
 cracklet cap add https://example.com/gemini.toml   # shown before it is installed
 ```

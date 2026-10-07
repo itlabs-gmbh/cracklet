@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseAndString(t *testing.T) {
@@ -109,6 +110,37 @@ func TestStoreRoundTrip(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(s.Dir, "vm1")); !os.IsNotExist(err) {
 		t.Errorf("Remove should delete the directory")
+	}
+}
+
+func TestStoreLockIsExclusiveAcrossHolders(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	unlock, err := s.Lock("vm1")
+	if err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+	acquired := make(chan struct{})
+	go func() {
+		second, err := s.Lock("vm1")
+		if err != nil {
+			t.Error(err)
+		}
+		close(acquired)
+		second()
+	}()
+	select {
+	case <-acquired:
+		t.Fatal("second lock must wait for the first")
+	case <-time.After(100 * time.Millisecond):
+	}
+	unlock()
+	select {
+	case <-acquired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second lock should proceed after unlock")
+	}
+	if _, err := s.Lock("Bad"); err == nil {
+		t.Errorf("Lock must validate the name")
 	}
 }
 

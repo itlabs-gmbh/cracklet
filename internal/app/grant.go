@@ -40,6 +40,11 @@ func (a *App) Grant(ctx context.Context, name string, specs []string) (grant.Set
 		}
 	}
 	store := a.grantStore()
+	unlock, err := store.Lock(name)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	set, err := store.Load(name)
 	if err != nil {
 		return nil, err
@@ -69,6 +74,11 @@ func (a *App) Revoke(ctx context.Context, name string, specs []string) (grant.Se
 		return nil, err
 	}
 	store := a.grantStore()
+	unlock, err := store.Lock(name)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	set, err := store.Load(name)
 	if err != nil {
 		return nil, err

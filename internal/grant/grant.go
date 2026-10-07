@@ -47,7 +47,7 @@ func (g Grant) String() string {
 // Set is an immutable collection of grants.
 type Set []Grant
 
-// ParseSet parses many grants, rejecting duplicates.
+// ParseSet parses many grants, removing duplicates.
 func ParseSet(specs []string) (Set, error) {
 	var set Set
 	for _, s := range specs {

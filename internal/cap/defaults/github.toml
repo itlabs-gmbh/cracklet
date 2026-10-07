@@ -6,8 +6,10 @@
 # the safest choice):
 #   cracklet secret set github-token
 #
-# The guest's git config rewrites https://github.com/ to the broker, so plain
-# `git clone https://github.com/org/repo` and `git push` just work.
+# Git's GIT_CONFIG_* environment variables rewrite https://github.com/ and
+# git@github.com: to the broker, so plain `git clone https://github.com/org/repo`
+# and `git push` just work. Nothing in /etc/gitconfig is touched, and
+# `cracklet revoke` removes the variables again.
 
 name = "github"
 description = "git over HTTPS to github.com, scoped per org/repo"
@@ -18,12 +20,9 @@ scope_segments = 2
 [proxy.headers]
 Authorization = "Bearer {{ secret \"keychain:cracklet/github-token\" }}"
 
-[[guest.files]]
-path = "/etc/gitconfig"
-mode = "0644"
-content = """
-# Managed by cracklet: route github.com through the broker.
-[url "{{ .BrokerURL }}/github/"]
-	insteadOf = https://github.com/
-	insteadOf = git@github.com:
-"""
+[guest.env]
+GIT_CONFIG_COUNT = "2"
+GIT_CONFIG_KEY_0 = "url.{{ .BrokerURL }}/github/.insteadOf"
+GIT_CONFIG_VALUE_0 = "https://github.com/"
+GIT_CONFIG_KEY_1 = "url.{{ .BrokerURL }}/github/.insteadOf"
+GIT_CONFIG_VALUE_1 = "git@github.com:"

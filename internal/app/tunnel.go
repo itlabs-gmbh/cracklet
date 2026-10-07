@@ -75,6 +75,7 @@ func (a *App) startBroker(ctx context.Context, name string) (string, func(), err
 		Secrets: secret.NewResolver(a.r),
 		Audit:   audit,
 		Data:    data,
+		Warn:    func(msg string) { a.printf("cracklet: warning: %s\n", msg) },
 	}
 	ln, err := broker.Listen(socket)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -188,17 +189,30 @@ func (b *Broker) handlerFor(c cap.Cap) (http.Handler, error) {
 	return h, nil
 }
 
-// unsafePath rejects paths that could make the scope check and the upstream
-// request disagree: dot segments (".." would escape a granted org/repo) and
-// percent-encoded slashes or dots, which upstreams may decode differently.
+// unsafePath rejects every path on which the scope check and an upstream
+// could disagree. The grant scope is derived from the decoded path, so the
+// path must have exactly one reading: no percent-encoding at all (upstreams
+// decode %2F, %2E or double encoding differently), no backslashes (some
+// servers treat them as separators), no dot or empty segments, and no
+// difference from its cleaned form.
 func unsafePath(u *url.URL) string {
-	for _, seg := range strings.Split(u.Path, "/") {
+	if strings.Contains(u.EscapedPath(), "%") || strings.Contains(u.RawPath, "%") {
+		return "percent-encoded characters are not allowed in capability paths"
+	}
+	if strings.ContainsAny(u.Path, "\\\x00") {
+		return "backslashes and NUL are not allowed in capability paths"
+	}
+	segments := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
+	for i, seg := range segments {
 		if seg == "." || seg == ".." {
 			return "dot segments are not allowed in capability paths"
 		}
+		if seg == "" && i < len(segments)-1 {
+			return "empty path segments are not allowed in capability paths"
+		}
 	}
-	if escaped := strings.ToLower(u.EscapedPath()); strings.Contains(escaped, "%2f") || strings.Contains(escaped, "%2e") {
-		return "percent-encoded slashes and dots are not allowed in capability paths"
+	if cleaned := path.Clean(u.Path); cleaned != u.Path && cleaned+"/" != u.Path {
+		return "path is not in canonical form"
 	}
 	return ""
 }

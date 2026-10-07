@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -220,6 +221,10 @@ func TestDenyUnknownAndUngranted(t *testing.T) {
 		{"/github/org/repo/./info/refs", 400, ""},
 		{"/github/org/repo%2F..%2Fother/info/refs", 400, ""},
 		{"/github/org/repo/%2e%2e/other/info/refs", 400, ""},
+		{"/github/org/repo/%252e%252e/other/info/refs", 400, ""},
+		{"/github/org/rep%6f/info/refs", 400, ""},
+		{"/github/org//repo/info/refs", 400, ""},
+		{"/github/org/repo/info/refs/", 200, ""},
 	}
 	for _, tc := range cases {
 		resp, err := http.Get(srv.URL + tc.path)
@@ -239,6 +244,16 @@ func TestDenyUnknownAndUngranted(t *testing.T) {
 	}
 	if !strings.Contains(audit.String(), "unsafe path GET \"/github/org/repo/../other/info/refs\" 400") {
 		t.Errorf("audit should record rejected paths:\n%s", audit.String())
+	}
+}
+
+func TestUnsafePathRejectsBackslashes(t *testing.T) {
+	u := &url.URL{Path: `/github/org/repo\..\x`}
+	if unsafePath(u) == "" {
+		t.Errorf("backslashes must be rejected")
+	}
+	if unsafePath(&url.URL{Path: "/claude/v1/messages"}) != "" {
+		t.Errorf("plain paths must pass")
 	}
 }
 

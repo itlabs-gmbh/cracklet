@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"text/tabwriter"
+	"unicode"
 
 	"github.com/itlabs-gmbh/cracklet/internal/cap"
 	"github.com/itlabs-gmbh/cracklet/internal/grant"
@@ -247,23 +247,32 @@ func capSummary(c cap.Cap) string {
 	return b.String()
 }
 
-var secretRefRe = regexp.MustCompile(`secret\s+"([^"]+)"`)
-
+// secretRefs finds every secret reference a header template resolves by
+// executing it with a recording resolver. Unlike a regular expression this
+// sees exactly what the template engine sees, including references built
+// from expressions, which are reported as the expression's result.
 func secretRefs(tmpl string) []string {
 	var refs []string
-	for _, m := range secretRefRe.FindAllStringSubmatch(tmpl, -1) {
-		refs = append(refs, m[1])
-	}
+	_, _ = cap.Render(tmpl, cap.TemplateData{VM: "vm", BrokerURL: "http://127.0.0.1:1", PseudoToken: "token"},
+		func(ref string) (string, error) {
+			refs = append(refs, ref)
+			return "placeholder", nil
+		})
 	return refs
 }
 
-// stripControl replaces control characters other than newline and tab.
+// stripControl replaces everything that could hide or reorder text in a
+// terminal: C0 and C1 control characters (except newline and tab) and
+// Unicode format characters such as bidi overrides and zero-width joiners.
 func stripControl(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r == '\n' || r == '\t' || r >= 0x20 && r != 0x7f {
+		if r == '\n' || r == '\t' {
 			return r
 		}
-		return '?'
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return '?'
+		}
+		return r
 	}, s)
 }
 

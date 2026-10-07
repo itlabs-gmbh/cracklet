@@ -169,10 +169,10 @@ func TestProxyInjectsCredentialsAndStripsGuestHeaders(t *testing.T) {
 	if seen.Get("X-Forwarded-For") != "" {
 		t.Errorf("no forwarding headers should be added: %v", seen)
 	}
+	// The audit line is written after the response has been flushed to the
+	// client, so it may trail the client's read by a moment.
 	want := "1970-01-01T00:00:00Z vm=agent1 cap=claude scope=- allow POST \"/claude/v1/messages\" 200\n"
-	if audit.String() != want {
-		t.Errorf("audit = %q, want %q", audit.String(), want)
-	}
+	waitFor(t, "audit line", func() bool { return audit.String() == want })
 }
 
 func TestProxyAllowHeadersKeepsOnlyListed(t *testing.T) {
@@ -244,12 +244,12 @@ func TestDenyUnknownAndUngranted(t *testing.T) {
 			t.Errorf("%s: want hint %q in %s", tc.path, tc.hint, body)
 		}
 	}
-	if !strings.Contains(audit.String(), "cap=claude scope=- denied GET \"/claude/v1/messages\" 403") {
-		t.Errorf("audit should record denials:\n%s", audit.String())
-	}
-	if !strings.Contains(audit.String(), "unsafe path GET \"/github/org/repo/../other/info/refs\" 400") {
-		t.Errorf("audit should record rejected paths:\n%s", audit.String())
-	}
+	waitFor(t, "denial in audit", func() bool {
+		return strings.Contains(audit.String(), "cap=claude scope=- denied GET \"/claude/v1/messages\" 403")
+	})
+	waitFor(t, "rejected path in audit", func() bool {
+		return strings.Contains(audit.String(), "unsafe path GET \"/github/org/repo/../other/info/refs\" 400")
+	})
 }
 
 func TestUnsafePathRejectsBackslashes(t *testing.T) {
@@ -270,13 +270,17 @@ func TestAuditFailureIsReportedOnce(t *testing.T) {
 	var warnings []string
 	b, _ := newBroker(t, cap.Set{}, nil)
 	b.Audit = failingWriter{}
-	b.Warn = func(msg string) { warnings = append(warnings, msg) }
 	srv := httptest.NewServer(b.Handler())
 	defer srv.Close()
+	var mu sync.Mutex
+	b.Warn = func(msg string) { mu.Lock(); warnings = append(warnings, msg); mu.Unlock() }
 	for i := 0; i < 3; i++ {
 		resp, _ := http.Get(srv.URL + "/nope/x")
 		resp.Body.Close()
 	}
+	waitFor(t, "warning", func() bool { mu.Lock(); defer mu.Unlock(); return len(warnings) >= 1 })
+	mu.Lock()
+	defer mu.Unlock()
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "audit log for agent1") {
 		t.Errorf("warnings = %v", warnings)
 	}
@@ -296,9 +300,7 @@ func TestProxyReportsSecretFailure(t *testing.T) {
 	if resp.StatusCode != 502 || strings.Contains(string(body), "keychain:cracklet/missing") || !strings.Contains(string(body), "credential unavailable") {
 		t.Errorf("guest must get a generic error: status %d body %s", resp.StatusCode, body)
 	}
-	if !strings.Contains(audit.String(), "no secret keychain:cracklet/missing") {
-		t.Errorf("detail should be in the audit log:\n%s", audit.String())
-	}
+	waitFor(t, "detail in audit", func() bool { return strings.Contains(audit.String(), "no secret keychain:cracklet/missing") })
 }
 
 func TestExecPipesBodyAndMetadata(t *testing.T) {

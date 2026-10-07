@@ -117,10 +117,9 @@ $ cracklet ssh dev uname -a
           </div>
           <div class="card">
             <h3 class="small">Default deny, fully audited</h3>
-            <p>Every request is checked against the VM's grants and written to an audit log. GitHub access is scoped to the repositories you name. A denied request answers with the exact command that would allow it.</p>
-            <div class="term">$ git push
-<span class="dim">github:acme/app is not granted to ai</span>
-<span class="dim">cracklet grant ai github:acme/app</span></div>
+            <p>Every request is checked against the VM's grants and written to an audit log. GitHub access is scoped to the repositories you name. A denied request is answered with the exact command that would allow it.</p>
+            <div class="term term--wrap">$ curl -s :7777/github/acme/app/info/refs
+<span class="dim">{"error":"github:acme/app is not granted to ai","hint":"cracklet grant ai github:acme/app"}</span></div>
             <div class="cmd" data-copy="cracklet revoke ai github:acme/app">
               <span class="prompt" aria-hidden="true">$</span>
               <span class="text">cracklet revoke ai github:acme/app</span>
@@ -174,18 +173,18 @@ $ cracklet ssh dev uname -a
     </section>
 
     <section>
-      <div class="container section grid grid--2" style="margin-top:0">
+      <div class="container section grid grid--2 grid--wide-left" style="margin-top:0">
         <div class="card">
           <h2>Find your microVMs</h2>
-          <p>List every microVM with its state, IP, port forwards, grants and the SSH destination to use.</p>
+          <p>List every microVM with its state, IP, size, port forwards, grants and the SSH destination to use.</p>
           <div class="cmd" data-copy="cracklet ls">
             <span class="prompt" aria-hidden="true">$</span>
             <span class="text">cracklet ls</span>
             <button type="button" aria-label="Copy cracklet ls to the clipboard"></button>
           </div>
-          <div class="term">NAME  STATE    IP          PORTS  GRANTS  SSH
-dev   running  172.16.1.2  -      -       ssh dev.cracklet
-ai    running  172.16.2.2  3000   claude  ssh ai.cracklet</div>
+          <div class="term">NAME  STATE    IP          VCPUS  MEM    PORTS  GRANTS  SSH
+dev   running  172.16.1.2  2      1024M  -      -       ssh dev.cracklet
+ai    running  172.16.2.2  2      1024M  3000   claude  ssh ai.cracklet</div>
           <p>Stop keeps the disk, start brings it back, rm deletes it.</p>
           <div class="cmd" data-copy="cracklet stop dev">
             <span class="prompt" aria-hidden="true">$</span>

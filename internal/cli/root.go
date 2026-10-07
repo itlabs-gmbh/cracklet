@@ -80,6 +80,11 @@ root disk, IP address and SSH access.`,
 		newStopCmd(get),
 		newForwardCmd(get),
 		newUnforwardCmd(get),
+		newGrantCmd(get),
+		newRevokeCmd(get),
+		newGrantsCmd(get),
+		newCapCmd(get),
+		newSecretCmd(get),
 	)
 	return root
 }

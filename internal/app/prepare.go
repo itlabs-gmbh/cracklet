@@ -17,21 +17,19 @@ import (
 	"github.com/itlabs-gmbh/cracklet/internal/vm"
 )
 
-// PrepareOptions size the Lima VM created by Prepare and pick the guest
-// image profiles to build besides the always-built base image.
+// PrepareOptions size the Lima VM and pick the guest image profiles to build
+// besides the always-built base image. A new VM gets all three sizes; an
+// existing one is resized to the Explicit ones only.
 type PrepareOptions struct {
 	CPUs      int
 	MemoryGiB int
 	DiskGiB   int
+	Explicit  SizeFlags
 	Profiles  []string
 }
 
 func (o PrepareOptions) template() lima.TemplateOptions {
 	return lima.TemplateOptions{CPUs: o.CPUs, MemoryGiB: o.MemoryGiB, DiskGiB: o.DiskGiB}
-}
-
-func (o PrepareOptions) isDefault() bool {
-	return o.template() == lima.TemplateOptions{CPUs: config.DefaultLimaCPUs, MemoryGiB: config.DefaultLimaMemoryGiB, DiskGiB: config.DefaultLimaDiskGiB}
 }
 
 // extraProfiles validates the requested profiles and returns them without
@@ -173,25 +171,16 @@ func (a *App) ensureInstance(ctx context.Context, o PrepareOptions) error {
 	if err != nil {
 		return err
 	}
-	if ok && !o.isDefault() {
-		a.printf("  note: --cpus/--memory/--disk only apply when the Lima VM is created; "+
-			"delete it with 'limactl delete -f %s' to resize\n", config.Instance)
+	if !ok {
+		return a.createInstance(ctx, o)
+	}
+	r, err := o.resizeFor(inst)
+	if err != nil {
+		return err
 	}
 	switch {
-	case !ok:
-		a.printf("==> Creating Lima VM %q (%d CPUs, %d GiB RAM, %d GiB disk, nested virtualization)\n",
-			config.Instance, o.CPUs, o.MemoryGiB, o.DiskGiB)
-		text, err := lima.RenderTemplate(o.template())
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(a.paths.LimaTemplatePath()), 0o700); err != nil {
-			return fmt.Errorf("create %s: %w", a.paths.Home, err)
-		}
-		if err := os.WriteFile(a.paths.LimaTemplatePath(), []byte(text), 0o600); err != nil {
-			return fmt.Errorf("write lima template: %w", err)
-		}
-		return a.lima.Create(ctx, a.paths.LimaTemplatePath())
+	case r != lima.Resize{}:
+		return a.resizeInstance(ctx, inst, r)
 	case inst.Status != lima.StatusRunning:
 		a.printf("==> Starting Lima VM %q\n", config.Instance)
 		return a.lima.Start(ctx)
@@ -199,6 +188,22 @@ func (a *App) ensureInstance(ctx context.Context, o PrepareOptions) error {
 		a.printf("==> Lima VM %q is running\n", config.Instance)
 		return nil
 	}
+}
+
+func (a *App) createInstance(ctx context.Context, o PrepareOptions) error {
+	a.printf("==> Creating Lima VM %q (%d CPUs, %d GiB RAM, %d GiB disk, nested virtualization)\n",
+		config.Instance, o.CPUs, o.MemoryGiB, o.DiskGiB)
+	text, err := lima.RenderTemplate(o.template())
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(a.paths.LimaTemplatePath()), 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", a.paths.Home, err)
+	}
+	if err := os.WriteFile(a.paths.LimaTemplatePath(), []byte(text), 0o600); err != nil {
+		return fmt.Errorf("write lima template: %w", err)
+	}
+	return a.lima.Create(ctx, a.paths.LimaTemplatePath())
 }
 
 // pushEnvd ships the guest daemon; the agent bakes it into the base image.

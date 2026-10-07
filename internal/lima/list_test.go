@@ -51,3 +51,14 @@ func TestFindInstance(t *testing.T) {
 		t.Error("Find(nope) should not match")
 	}
 }
+
+func TestParseListReadsSize(t *testing.T) {
+	instances, err := ParseList([]byte(`{"name":"cracklet","status":"Running","cpus":4,"memory":8589934592,"disk":42949672960}`))
+	if err != nil {
+		t.Fatalf("ParseList: %v", err)
+	}
+	got := instances[0]
+	if got.CPUs != 4 || got.Memory != 8<<30 || got.Disk != 40<<30 {
+		t.Errorf("size not decoded: %+v", got)
+	}
+}

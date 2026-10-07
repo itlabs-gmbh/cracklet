@@ -100,3 +100,51 @@ func TestErrorsAreWrapped(t *testing.T) {
 		}
 	}
 }
+
+func TestStopAndEditCommandLines(t *testing.T) {
+	fake := runner.NewFake(func(string, []string) ([]byte, error) { return nil, nil })
+	c := NewClient(fake, "cracklet")
+	ctx := context.Background()
+	if err := c.Stop(ctx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if err := c.Edit(ctx, Resize{CPUs: 8, MemoryGiB: 16, DiskGiB: 80}); err != nil {
+		t.Fatalf("Edit: %v", err)
+	}
+	if err := c.Edit(ctx, Resize{MemoryGiB: 12}); err != nil {
+		t.Fatalf("Edit: %v", err)
+	}
+	for _, want := range []string{
+		"limactl stop cracklet",
+		"limactl edit --tty=false --cpus 8 --memory 16 --disk 80 cracklet",
+		"limactl edit --tty=false --memory 12 cracklet",
+	} {
+		if !fake.Called(want) {
+			t.Errorf("missing call %q in:\n%s", want, fake.Dump())
+		}
+	}
+}
+
+func TestEditWithoutChangesRunsNothing(t *testing.T) {
+	fake := runner.NewFake(func(string, []string) ([]byte, error) { return nil, nil })
+	if err := NewClient(fake, "cracklet").Edit(context.Background(), Resize{}); err != nil {
+		t.Fatalf("Edit: %v", err)
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("an empty resize must not invoke limactl:\n%s", fake.Dump())
+	}
+}
+
+func TestStopAndEditWrapErrors(t *testing.T) {
+	fake := runner.NewFake(func(string, []string) ([]byte, error) { return nil, errors.New("boom") })
+	c := NewClient(fake, "cracklet")
+	ctx := context.Background()
+	for name, err := range map[string]error{
+		"stop": c.Stop(ctx),
+		"edit": c.Edit(ctx, Resize{CPUs: 2}),
+	} {
+		if err == nil || !strings.Contains(err.Error(), "boom") {
+			t.Errorf("%s: expected wrapped error, got %v", name, err)
+		}
+	}
+}

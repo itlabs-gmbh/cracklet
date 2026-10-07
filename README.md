@@ -44,13 +44,28 @@ Or from a checkout: `make install` (go install ./cmd/cracklet → `$(go env GOPA
 1. verifies the host (chip, macOS version, Hypervisor framework, Lima),
 2. generates an SSH key pair in `~/.cracklet/`,
 3. creates and boots the Lima VM from an embedded template
-   (`--cpus`, `--memory`, `--disk` size it; defaults 4 / 8 GiB / 40 GiB),
+   (`--cpus`, `--memory`, `--disk` size it; defaults 4 / 8 GiB / 40 GiB;
+   see [Resizing the Lima VM](#resizing-the-lima-vm) to change an existing one),
 4. installs Firecracker, downloads the guest kernel and the Ubuntu rootfs
    (all three verified against SHA-256 digests pinned in `internal/config`),
    injects your public key and builds a sparse ext4 base image,
 5. writes `~/.cracklet/ssh_config`.
 
 The Lima VM mounts nothing from the Mac; files travel over `limactl shell`.
+
+### Resizing the Lima VM
+
+All microVMs share the Lima VM's CPUs and memory, so the defaults fit about
+two or three parallel task VMs. Grow it in place, without rebuilding:
+
+```sh
+cracklet stop vm1                 # resizing restarts the Lima VM
+cracklet prepare --cpus 8 --memory 16
+```
+
+Only the flags you pass are applied, so a later plain `cracklet prepare` keeps
+the new size. The restart would kill running microVMs, so prepare refuses
+while any run. The disk can only grow; shrinking means recreating the Lima VM.
 
 ## Usage
 

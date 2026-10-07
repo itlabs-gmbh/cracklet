@@ -77,6 +77,12 @@ func (a *App) Prepare(ctx context.Context, o PrepareOptions) error {
 	if err := a.pushEnvd(ctx); err != nil {
 		return err
 	}
+	// Building a golden snapshot boots a microVM, so it must not overlap a resize.
+	release, err := a.holdLimaForMicroVM()
+	if err != nil {
+		return err
+	}
+	defer release()
 	a.printf("==> Installing Firecracker %s, building guest images and the golden snapshot (this can take a few minutes)\n", config.FirecrackerVersion)
 	args := append([]string{"prepare",
 		config.FirecrackerVersion, config.FirecrackerSHA256,

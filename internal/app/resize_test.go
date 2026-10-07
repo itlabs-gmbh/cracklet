@@ -215,3 +215,44 @@ func TestPrepareResizeFailuresExplainTheVMState(t *testing.T) {
 		})
 	}
 }
+
+// A microVM start that races the check must not be killed by the restart:
+// it either fails or the resize does, never both proceed.
+func TestPrepareResizeBlocksStartsBetweenCheckAndStop(t *testing.T) {
+	var startErr error
+	var other *App
+	base := sizedHandler("Running", 4, 8, 40, "[]")
+	app, fake, _, paths := prepareApp(t, func(name string, args []string) ([]byte, error) {
+		if strings.HasSuffix(name+" "+strings.Join(args, " "), config.AgentPath+" ls") {
+			// a second cracklet process sharing ~/.cracklet tries to start a guest now
+			_, startErr = other.StartVM(context.Background(), "vm1")
+		}
+		return base(name, args)
+	}, true)
+	other = New(fake, paths, &strings.Builder{}, WithEnvd(fakeEnvd))
+	writeDummyKeys(t, paths)
+	if err := app.Prepare(context.Background(), explicitSize(8, 8, 40)); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if startErr == nil || !strings.Contains(startErr.Error(), "being resized") {
+		t.Fatalf("a start racing the resize must be refused, got %v", startErr)
+	}
+	if fake.CalledWithSuffix(config.AgentPath + " start vm1") {
+		t.Errorf("the racing start must not reach the agent:\n%s", fake.Dump())
+	}
+}
+
+func TestPrepareRefusesResizeWhileMicroVMStarts(t *testing.T) {
+	app, fake, _, paths := prepareApp(t, sizedHandler("Running", 4, 8, 40, "[]"), true)
+	writeDummyKeys(t, paths)
+	release, err := app.holdLimaForMicroVM()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	err = app.Prepare(context.Background(), explicitSize(8, 8, 40))
+	if err == nil || !strings.Contains(err.Error(), "starting a microVM") {
+		t.Fatalf("expected the resize to yield to a starting microVM, got %v", err)
+	}
+	assertUntouched(t, fake)
+}

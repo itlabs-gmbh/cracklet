@@ -42,6 +42,11 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 	if err := a.checkHostPortsFree(forwards); err != nil {
 		return VMInfo{}, err
 	}
+	release, err := a.holdLimaForMicroVM()
+	if err != nil {
+		return VMInfo{}, err
+	}
+	defer release()
 	if err := a.readyForAgent(ctx); err != nil {
 		return VMInfo{}, err
 	}
@@ -83,6 +88,11 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 
 // StartVM boots a stopped microVM.
 func (a *App) StartVM(ctx context.Context, name string) (VMInfo, error) {
+	release, err := a.holdLimaForMicroVM()
+	if err != nil {
+		return VMInfo{}, err
+	}
+	defer release()
 	return a.lifecycle(ctx, "start", name)
 }
 

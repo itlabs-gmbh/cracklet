@@ -48,8 +48,14 @@ func (o PrepareOptions) resizeFor(inst lima.Instance) (lima.Resize, error) {
 }
 
 // resizeInstance applies r, which needs a restart of the Lima VM. A restart
-// kills every microVM, so running ones must be stopped by the user first.
+// kills every microVM, so running ones must be stopped by the user first, and
+// the Lima lock keeps new ones from starting until the VM is back.
 func (a *App) resizeInstance(ctx context.Context, inst lima.Instance, r lima.Resize) error {
+	release, err := a.holdLimaForResize()
+	if err != nil {
+		return err
+	}
+	defer release()
 	if inst.Status == lima.StatusRunning {
 		if err := a.refuseWhileMicroVMsRun(ctx); err != nil {
 			return err

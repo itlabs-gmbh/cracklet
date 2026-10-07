@@ -65,7 +65,9 @@ cracklet prepare --cpus 8 --memory 16
 
 Only the flags you pass are applied, so a later plain `cracklet prepare` keeps
 the new size. The restart would kill running microVMs, so prepare refuses
-while any run. The disk can only grow; shrinking means recreating the Lima VM.
+while any run, and `cracklet new`/`start` refuse until the resize is done
+(a host-side lock in `~/.cracklet/lima.lock`). The disk can only grow;
+shrinking means recreating the Lima VM.
 
 ## Usage
 

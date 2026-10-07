@@ -18,8 +18,9 @@ const (
 	// MaxVCPUs caps the vCPU count per microVM.
 	MaxVCPUs = 32
 	// MaxDisk caps the root disk at 1 TiB.
-	MaxDisk       = "1024G"
-	maxNameLength = 31
+	MaxDisk        = "1024G"
+	maxNameLength  = 31
+	maxLabelLength = 63
 
 	// ProfileBase is the plain Ubuntu guest image.
 	ProfileBase = "base"
@@ -37,7 +38,10 @@ var profileDisks = map[string]string{
 
 var (
 	nameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-	sizeRe = regexp.MustCompile(`^(\d+)([MmGg])$`)
+	// labelRe keeps owner and slot labels to characters that need no
+	// quoting: they reach the agent as plain words through `limactl shell`.
+	labelRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	sizeRe  = regexp.MustCompile(`^(\d+)([MmGg])$`)
 )
 
 // Spec describes a microVM to create.
@@ -57,6 +61,11 @@ type Spec struct {
 	Fresh bool
 	// Grants are capabilities to grant right after creation, as "cap[:scope]".
 	Grants []string
+	// Owner labels the tool or person that manages the VM; only owned VMs
+	// are candidates for `cracklet gc`. Empty means created by hand.
+	Owner string
+	// Slot is the VM's position in its owner's pool, e.g. "3"; needs Owner.
+	Slot string
 }
 
 // Mode is the boot mode the agent should use for this spec.
@@ -128,6 +137,17 @@ func ValidateName(name string) error {
 	return nil
 }
 
+// ValidateLabel checks an owner or slot label; kind names it in errors.
+func ValidateLabel(kind, label string) error {
+	if len(label) > maxLabelLength {
+		return fmt.Errorf("%s %q is longer than %d characters", kind, label, maxLabelLength)
+	}
+	if !labelRe.MatchString(label) {
+		return fmt.Errorf("%s %q must start with a letter or digit and contain only letters, digits, '.', '_' and '-'", kind, label)
+	}
+	return nil
+}
+
 // ParseSize converts "512M" / "2G" into bytes.
 func ParseSize(s string) (int64, error) {
 	m := sizeRe.FindStringSubmatch(strings.TrimSpace(s))
@@ -190,5 +210,20 @@ func (s Spec) Validate() error {
 			return err
 		}
 	}
-	return nil
+	return s.validateMetadata()
+}
+
+func (s Spec) validateMetadata() error {
+	if s.Owner != "" {
+		if err := ValidateLabel("owner", s.Owner); err != nil {
+			return err
+		}
+	}
+	if s.Slot == "" {
+		return nil
+	}
+	if s.Owner == "" {
+		return fmt.Errorf("slot %q needs an owner", s.Slot)
+	}
+	return ValidateLabel("slot", s.Slot)
 }

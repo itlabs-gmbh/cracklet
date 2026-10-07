@@ -83,6 +83,7 @@ cracklet exec dev -- git commit -m "it's done"   # exact argv, every word quoted
 cracklet stop dev               # keep the disk
 cracklet start dev
 cracklet rm dev                 # stop and delete
+cracklet gc --owner paseo       # remove VMs a tool created and lost track of
 ```
 
 ### Golden snapshots
@@ -124,6 +125,27 @@ be restored onto a disk of exactly that size; `--disk` defaults to it.
 enabled, so the snapshot carries no daemon keypair; start it per VM with
 `systemctl enable --now paseo`. Package versions are the newest available when
 the image is built; a new base image or agent revision rebuilds the profile.
+
+### Owned VMs and `cracklet gc`
+
+Tools that create VMs on your behalf label them with an owner and, if they keep a
+pool, a slot. cracklet records both together with the creation time in the VM's
+directory, so the labels disappear with the VM:
+
+```sh
+cracklet new paseo-3 --profile paseo --owner paseo --slot 3
+cracklet ls                             # OWNER shows paseo/3, AGE the time since creation
+cracklet gc --owner paseo --keep paseo-1 --keep paseo-2   # a tool reconciling its pool
+cracklet gc --older-than 7d --dry-run   # owned VMs older than a week
+```
+
+`gc` only ever removes VMs that have an owner; VMs created by hand have none and
+are never collected. `--owner` and `--older-than` select which owned VMs go,
+`--keep` exempts VMs by name, and `--dry-run` shows the plan. Without `--owner`
+or `--older-than`, gc removes no VM and only deletes the grants and tokens left
+on the Mac for VMs that no longer exist. A VM a tool is creating right now is not
+in its keep list yet; guard it with `--keep` or `--older-than`. `gc --json`
+reports `{"vms": [...], "host_state": [...], "dry_run": ...}`.
 
 ### Port forwarding
 

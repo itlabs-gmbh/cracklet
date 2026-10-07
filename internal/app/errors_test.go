@@ -118,18 +118,18 @@ func TestRemoteExitErrorMessage(t *testing.T) {
 }
 
 func TestNewCleansUpWhenInterrupted(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
 	app, fake, out := newTestApp(t, func(name string, args []string) ([]byte, error) {
 		joined := strings.Join(args, " ")
 		switch {
 		case strings.Contains(joined, config.AgentPath+" new "):
+			cancel() // Ctrl-C while the agent creates the VM
 			return nil, errors.New("signal: interrupt")
 		case strings.Contains(joined, config.AgentPath+" rm "):
 			return nil, nil
 		}
 		return defaultHandler(nil)(name, args)
 	})
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
 	if _, err := app.NewVM(ctx, vm.Spec{Name: "doomed", VCPUs: 1, MemMiB: 256, Disk: "2G"}); err == nil {
 		t.Fatal("expected the interrupted creation to fail")
 	}
@@ -157,14 +157,14 @@ func TestNewDoesNotCleanUpOnOrdinaryFailure(t *testing.T) {
 }
 
 func TestNewInterruptedWithoutNameOnlyHints(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
 	app, fake, out := newTestApp(t, func(name string, args []string) ([]byte, error) {
 		if strings.Contains(strings.Join(args, " "), config.AgentPath+" new ") {
+			cancel() // Ctrl-C while the agent creates the VM
 			return nil, errors.New("signal: interrupt")
 		}
 		return defaultHandler(nil)(name, args)
 	})
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
 	_, _ = app.NewVM(ctx, vm.Spec{VCPUs: 1, MemMiB: 256, Disk: "2G"})
 	if fake.CalledWithSuffix(" rm -") || !strings.Contains(out.String(), "cracklet ls") {
 		t.Errorf("unnamed VMs cannot be cleaned up blindly:\n%s\n%s", fake.Dump(), out.String())

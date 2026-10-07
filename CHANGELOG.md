@@ -9,11 +9,19 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- VM metadata: `cracklet new --owner NAME [--slot N]` labels a VM managed by a
+  tool, and every new VM records its creation time. `ls` shows OWNER and AGE
+  columns, `inspect` and `--json` report `owner`, `slot` and `created_at`.
+- `cracklet gc` removes orphaned owned VMs, selected by `--owner` and
+  `--older-than` with `--keep` exemptions and `--dry-run`, and deletes the
+  grants and tokens left on the Mac for VMs that no longer exist. VMs without an
+  owner are never collected, nor are VMs `ls` reports as `creating`; the agent
+  re-checks owner and creation time under its lock before removing, so a VM
+  recreated under the same name survives.
 - `cracklet prepare --cpus/--memory/--disk` resizes an existing Lima VM in
   place (stop, `limactl edit`, start) instead of only applying at creation.
   Only explicitly given flags count, running microVMs block the restart, a
   host-side lock keeps `new`/`start` from racing it, and the disk can only grow.
-
 - `cracklet exec NAME -- command [arg...]` runs a command with every argument
   shell-quoted, so the guest receives exactly that argv. `cracklet ssh NAME cmd`
   keeps plain-ssh semantics and passes a shell command line.
@@ -52,6 +60,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- A new microVM never inherits the grants or placeholder token left on the Mac
+  by an earlier VM of the same name; the broker authorises by name, so such
+  leftovers would have handed the new VM the old one's capabilities.
 - Firewall chains are rebuilt atomically with `iptables-restore`; CGNAT
   (`100.64.0.0/10`) is blocked alongside the other private ranges.
 - Guests are internet-only: tap-to-tap traffic, the Lima VM's own services,

@@ -72,7 +72,14 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 		args = append(args, spec.Owner, orDash(spec.Slot), a.now().UTC().Format(time.RFC3339))
 	}
 	var out []byte
+	started := false
 	create := func() (err error) {
+		// Ctrl-C while waiting for the lock: another `new` of this name
+		// may hold it, and its VM must not be cleaned up as ours.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		started = true
 		out, err = a.agentOutput(ctx, args...)
 		return err
 	}
@@ -86,7 +93,7 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 		err = create()
 	}
 	if err != nil {
-		if ctx.Err() != nil {
+		if started && ctx.Err() != nil {
 			a.cleanupInterrupted(spec.Name)
 		}
 		return VMInfo{}, err

@@ -430,6 +430,38 @@ func TestNewVMKeepsAGrantGivenWhileItStarts(t *testing.T) {
 	}
 }
 
+func TestNewVMCancelledWhileWaitingLeavesTheOtherVMAlone(t *testing.T) {
+	a, fake, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
+		if strings.Contains(strings.Join(args, " "), config.AgentPath+" new ") {
+			return nil, errors.New("signal: killed") // limactl under a cancelled context
+		}
+		return defaultHandler(map[string]string{"rm": ""})(name, args)
+	})
+	store := grant.Store{Dir: a.paths.VMsDir()}
+	// another `cracklet new box` is creating box and holds its grant lock
+	unlock, err := store.Lock("box")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.NewVM(ctx, vm.Spec{Name: "box", VCPUs: 2, MemMiB: 1024})
+		done <- err
+	}()
+	time.Sleep(50 * time.Millisecond) // let NewVM block on the lock
+	cancel()                          // Ctrl-C while waiting
+	unlock()                          // the other call finished box
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Errorf("want the cancellation, got %v", err)
+	}
+	for _, c := range fake.Calls() {
+		if strings.Contains(c, config.AgentPath+" rm ") || strings.Contains(c, config.AgentPath+" new ") {
+			t.Errorf("a call cancelled before it created anything must not touch box: %s", c)
+		}
+	}
+}
+
 func TestNewVMKeepsGrantsWhenTheNameIsTaken(t *testing.T) {
 	a, _, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
 		if strings.Contains(strings.Join(args, " "), config.AgentPath+" new ") {

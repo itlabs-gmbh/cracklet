@@ -61,7 +61,8 @@ cracklet ls
 cracklet ls --json              # also: new --json, inspect --json
 cracklet inspect dev            # details of one VM
 cracklet ssh dev                # interactive root shell
-cracklet ssh dev uname -a       # run a command
+cracklet ssh dev uname -a       # run a command (a shell command line, like plain ssh)
+cracklet exec dev -- git commit -m "it's done"   # exact argv, every word quoted
 cracklet stop dev               # keep the disk
 cracklet start dev
 cracklet rm dev                 # stop and delete
@@ -249,7 +250,10 @@ immediately instead of at the kernel's next scheduled reseed.
 - Agent logs: `limactl shell cracklet sudo journalctl -u cracklet-vm-<name>`
 - After a reboot of the Lima VM, microVMs are stopped; `cracklet start <name>` brings them back.
 - `cracklet ls` shows `broken` for a VM whose metadata is damaged; `cracklet rm <name>` cleans it up.
-- `cracklet ssh` mirrors the remote exit status; exit 255 means the connection failed.
+- `cracklet ssh` and `cracklet exec` mirror the remote exit status; exit 255 means the connection failed.
+- `cracklet ssh dev a b` joins its words into one shell command line, as ssh does, so
+  quotes and `$` are interpreted by the guest shell. Use `cracklet exec dev -- a b` from
+  scripts: it quotes every argument and the guest sees exactly that argv.
 - Ctrl-C during `cracklet new NAME` removes the half-created VM again (the agent inside
   the Lima VM finishes or rolls back on its own, then cracklet runs `rm`). For an
   auto-named VM, check `cracklet ls` afterwards.

@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `cracklet exec NAME -- command [arg...]` runs a command with every argument
+  shell-quoted, so the guest receives exactly that argv. `cracklet ssh NAME cmd`
+  keeps plain-ssh semantics and passes a shell command line.
 - Image profiles: `cracklet prepare --profile paseo` builds an 8G guest image
   with Node 22, `@getpaseo/cli`, Claude Code, git, gh and rsync (with
   `paseo.service` installed but disabled), and `cracklet new --profile paseo`

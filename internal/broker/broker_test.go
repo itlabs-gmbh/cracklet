@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,11 +37,15 @@ func fakeMCPServer() {
 	for sc.Scan() {
 		var msg map[string]any
 		if err := json.Unmarshal(sc.Bytes(), &msg); err != nil {
+			fmt.Fprintln(os.Stderr, "bad line:", sc.Text())
 			continue
 		}
 		method, _ := msg["method"].(string)
 		id, hasID := msg["id"]
 		switch {
+		case method == "sleep/forever":
+			// Stop reading stdin so the bridge's write path can be tested.
+			select {}
 		case method == "ping/server":
 			// A server-initiated request: expect the bridge to reject it.
 			fmt.Println(`{"jsonrpc":"2.0","id":"srv-1","method":"sampling/createMessage","params":{}}`)
@@ -257,6 +262,26 @@ func TestUnsafePathRejectsBackslashes(t *testing.T) {
 	}
 }
 
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+
+func TestAuditFailureIsReportedOnce(t *testing.T) {
+	var warnings []string
+	b, _ := newBroker(t, cap.Set{}, nil)
+	b.Audit = failingWriter{}
+	b.Warn = func(msg string) { warnings = append(warnings, msg) }
+	srv := httptest.NewServer(b.Handler())
+	defer srv.Close()
+	for i := 0; i < 3; i++ {
+		resp, _ := http.Get(srv.URL + "/nope/x")
+		resp.Body.Close()
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "audit log for agent1") {
+		t.Errorf("warnings = %v", warnings)
+	}
+}
+
 func TestProxyReportsSecretFailure(t *testing.T) {
 	c := cap.Cap{Name: "x", Proxy: &cap.Proxy{Upstream: "http://127.0.0.1:1",
 		Headers: map[string]string{"Authorization": `{{ secret "keychain:cracklet/missing" }}`}}}
@@ -343,7 +368,7 @@ func TestMCPBridgeAnswersRequestsAndAcceptsNotifications(t *testing.T) {
 	if resp.Header.Get("Mcp-Session-Id") == "" || resp.Header.Get("Content-Type") != "application/json" {
 		t.Errorf("initialize response headers: %v", resp.Header)
 	}
-	resp, _ = rpc(t, url, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	resp, _ = rpc(t, url, "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"notifications/initialized\"\n}")
 	if resp.StatusCode != 202 {
 		t.Errorf("notification status %d", resp.StatusCode)
 	}
@@ -385,6 +410,35 @@ func TestMCPBridgeAnswersRequestsAndAcceptsNotifications(t *testing.T) {
 	}
 	waitFor(t, "child stderr in the log", func() bool {
 		return strings.Contains(audit.String(), "mcp fake: notification: notifications/initialized")
+	})
+	if strings.Contains(audit.String(), "bad line") {
+		t.Errorf("pretty-printed notification must reach the child as one line:\n%s", audit.String())
+	}
+}
+
+func TestMCPBridgeWriteHonoursContext(t *testing.T) {
+	b, _ := newBroker(t, cap.Set{"fake": mcpCap()}, []string{"fake"})
+	srv := httptest.NewServer(b.Handler())
+	defer srv.Close()
+	url := srv.URL + "/fake"
+	if resp, _ := rpc(t, url, `{"jsonrpc":"2.0","method":"sleep/forever"}`); resp.StatusCode != 202 {
+		t.Fatalf("sleep/forever: %d", resp.StatusCode)
+	}
+	// Fill the pipe with a large notification so the next write blocks, then
+	// cancel it: the bridge must give up and kill the wedged child.
+	big := `{"jsonrpc":"2.0","method":"noop","params":{"pad":"` + strings.Repeat("x", 2<<20) + `"}}`
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(big))
+	start := time.Now()
+	_, _ = http.DefaultClient.Do(req)
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("blocked write was not cancelled")
+	}
+	// After the kill the bridge restarts the child for the next request.
+	waitFor(t, "child restart", func() bool {
+		resp, _ := rpc(t, url, `{"jsonrpc":"2.0","id":9,"method":"tools/list"}`)
+		return resp.StatusCode == 200
 	})
 }
 

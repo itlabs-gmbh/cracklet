@@ -47,9 +47,11 @@ type mcpBridge struct {
 	nextID  uint64
 	session string
 
-	// writeMu serialises writes to the child's stdin and is never held
-	// together with mu, so a blocked write cannot stall the read loop.
-	writeMu sync.Mutex
+	// writeSlot serialises writes to the child's stdin and is never held
+	// together with mu, so a blocked write cannot stall the read loop. It is
+	// a channel rather than a mutex so waiting for it honours the request
+	// context.
+	writeSlot chan struct{}
 }
 
 type pendingRequest struct {
@@ -58,7 +60,7 @@ type pendingRequest struct {
 }
 
 func newMCPBridge(c cap.Cap, log io.Writer) *mcpBridge {
-	return &mcpBridge{spec: c, log: log, pending: map[uint64]pendingRequest{}}
+	return &mcpBridge{spec: c, log: log, pending: map[uint64]pendingRequest{}, writeSlot: make(chan struct{}, 1)}
 }
 
 func (b *mcpBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -97,8 +99,18 @@ func (b *mcpBridge) post(w http.ResponseWriter, r *http.Request) {
 	clientID, hasID := msg["id"]
 	method := string(bytes.Trim(msg["method"], `"`))
 	isRequest := hasID && string(clientID) != "null" && len(msg["method"]) > 0
+	// The deadline covers the write as well: a child that stopped reading
+	// its stdin must not pin the request (or later writers) forever.
+	ctx, cancel := context.WithTimeout(r.Context(), mcpResponseTimeout)
+	defer cancel()
 	if !isRequest {
-		if err := b.send(body); err != nil {
+		// Re-encode so pretty-printed JSON reaches the line-based child as one line.
+		compact, err := json.Marshal(msg)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON-RPC message: "+err.Error(), "")
+			return
+		}
+		if err := b.send(ctx, compact); err != nil {
 			writeError(w, http.StatusBadGateway, b.spec.Name+": the MCP server is not accepting messages", "")
 			return
 		}
@@ -112,13 +124,11 @@ func (b *mcpBridge) post(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON-RPC message: "+err.Error(), "")
 		return
 	}
-	if err := b.send(rewritten); err != nil {
+	if err := b.send(ctx, rewritten); err != nil {
 		b.unregister(id)
 		writeError(w, http.StatusBadGateway, b.spec.Name+": the MCP server is not accepting messages", "")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), mcpResponseTimeout)
-	defer cancel()
 	select {
 	case resp := <-reply:
 		w.Header().Set("Content-Type", "application/json")
@@ -256,22 +266,45 @@ func (b *mcpBridge) rejectServerRequest(id json.RawMessage) {
 		"jsonrpc": "2.0", "id": id,
 		"error": map[string]any{"code": -32601, "message": "server-initiated requests are not supported by the cracklet bridge"},
 	})
-	_ = b.send(msg)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpResponseTimeout)
+	defer cancel()
+	_ = b.send(ctx, msg)
 }
 
-func (b *mcpBridge) send(msg []byte) error {
+// send writes one line to the child. If ctx ends while waiting for the
+// write slot or during the write, the child is wedged and gets killed: a
+// stuck stdin write cannot be interrupted any other way, and the read loop
+// then reports the exit to every pending request.
+func (b *mcpBridge) send(ctx context.Context, msg []byte) error {
 	b.mu.Lock()
-	stdin, running := b.stdin, b.running
+	cmd, stdin, running := b.cmd, b.stdin, b.running
 	b.mu.Unlock()
 	if !running || stdin == nil {
 		return fmt.Errorf("%s: mcp server is not running", b.spec.Name)
 	}
-	b.writeMu.Lock()
-	defer b.writeMu.Unlock()
-	if _, err := stdin.Write(append(append([]byte(nil), msg...), '\n')); err != nil {
-		return fmt.Errorf("%s: write to mcp server: %w", b.spec.Name, err)
+	select {
+	case b.writeSlot <- struct{}{}:
+	case <-ctx.Done():
+		return fmt.Errorf("%s: mcp server is not reading its input", b.spec.Name)
 	}
-	return nil
+	done := make(chan error, 1)
+	go func() {
+		defer func() { <-b.writeSlot }()
+		_, err := stdin.Write(append(append([]byte(nil), msg...), '\n'))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("%s: write to mcp server: %w", b.spec.Name, err)
+		}
+		return nil
+	case <-ctx.Done():
+		b.logf("write stalled, killing the server")
+		_ = killGroup(cmd)
+		<-done
+		return fmt.Errorf("%s: mcp server stopped reading its input", b.spec.Name)
+	}
 }
 
 func (b *mcpBridge) register(clientID json.RawMessage) (uint64, chan json.RawMessage) {

@@ -63,6 +63,24 @@ func TestRenderMergesCapsAndRejectsConflicts(t *testing.T) {
 	if _, err := Render([]cap.Cap{fileLike(), dupFile}, data); err == nil || !strings.Contains(err.Error(), "both write /etc/gitconfig") {
 		t.Errorf("duplicate file should fail, got %v", err)
 	}
+	fileAndJSON := cap.Cap{Name: "other", Guest: cap.Guest{Files: []cap.File{{Path: "/root/.claude.json", Content: "{}"}}}}
+	if _, err := Render([]cap.Cap{claudeLike(), fileAndJSON}, data); err == nil || !strings.Contains(err.Error(), "merges JSON into /root/.claude.json") {
+		t.Errorf("file and JSON merge on the same path must fail, got %v", err)
+	}
+	if _, err := Render([]cap.Cap{fileAndJSON, claudeLike()}, data); err == nil || !strings.Contains(err.Error(), "as a file") {
+		t.Errorf("JSON merge after file on the same path must fail, got %v", err)
+	}
+	parent := cap.Cap{Name: "p", Guest: cap.Guest{JSONMerge: []cap.JSONMerge{{Path: "/x.json", Key: "settings", Value: 1}}}}
+	child := cap.Cap{Name: "c", Guest: cap.Guest{JSONMerge: []cap.JSONMerge{{Path: "/x.json", Key: "settings.mode", Value: 2}}}}
+	for _, order := range [][]cap.Cap{{parent, child}, {child, parent}} {
+		if _, err := Render(order, data); err == nil || !strings.Contains(err.Error(), "overlapping keys") {
+			t.Errorf("nested keys must fail, got %v", err)
+		}
+	}
+	sibling := cap.Cap{Name: "s", Guest: cap.Guest{JSONMerge: []cap.JSONMerge{{Path: "/x.json", Key: "settingsExtra", Value: 2}}}}
+	if _, err := Render([]cap.Cap{parent, sibling}, data); err != nil {
+		t.Errorf("sibling keys must be fine, got %v", err)
+	}
 	badEnv := cap.Cap{Name: "x", Guest: cap.Guest{Env: map[string]string{"A": `has "quote"`}}}
 	if _, err := Render([]cap.Cap{badEnv}, data); err == nil {
 		t.Errorf("env values with quotes must be rejected")

@@ -196,7 +196,7 @@ func (a *App) CapAdd(ctx context.Context, url string, yes bool, confirm io.Reade
 	}
 	// Control characters could hide lines from the review below.
 	a.printf("%s\n", strings.ToValidUTF8(stripControl(string(body)), "?"))
-	a.printf("%s", capSummary(c))
+	a.printf("%s", stripControl(capSummary(c)))
 	path := filepath.Join(a.paths.CapsDir(), c.Name+".toml")
 	if _, err := os.Stat(path); err == nil {
 		a.printf("note: this replaces the existing %s\n", path)

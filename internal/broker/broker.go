@@ -40,6 +40,9 @@ type Broker struct {
 	Audit io.Writer
 	// Data is the template data the guest was provisioned with.
 	Data cap.TemplateData
+	// Warn receives host-side problems that must not go unnoticed but have
+	// no better channel, such as a failing audit log. Nil discards them.
+	Warn func(string)
 	// Transport overrides the upstream transport (tests).
 	Transport http.RoundTripper
 	// Now is the audit clock.
@@ -50,6 +53,7 @@ type Broker struct {
 	bridges  []*mcpBridge
 	log      *syncWriter
 	closed   bool
+	warnOnce sync.Once
 }
 
 // syncWriter serialises writes from request handlers and MCP child stderr
@@ -262,8 +266,15 @@ func (b *Broker) audit(r *http.Request, d decision, status int) {
 		scope = "-"
 	}
 	// %q keeps a decoded newline in the path from forging a log line.
-	fmt.Fprintf(log, "%s vm=%s cap=%s scope=%s %s %s %q %d\n",
+	_, err := fmt.Fprintf(log, "%s vm=%s cap=%s scope=%s %s %s %q %d\n",
 		now().UTC().Format(time.RFC3339), b.VM, orDash(d.cap), scope, d.reason, r.Method, r.URL.Path, status)
+	if err != nil {
+		b.warnOnce.Do(func() {
+			if b.Warn != nil {
+				b.Warn(fmt.Sprintf("audit log for %s is not being written (%v); decisions since are unrecorded", b.VM, err))
+			}
+		})
+	}
 }
 
 // childLog is the writer MCP children's stderr goes to. handlerFor holds mu,

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/itlabs-gmbh/cracklet/internal/cap"
 )
@@ -106,12 +107,40 @@ func (s Store) Token(vm string) (string, error) {
 	return token, nil
 }
 
+// Lock takes an exclusive, cross-process lock for a VM and returns the
+// function that releases it. Grant and revoke hold it from reading the
+// grants through provisioning the guest to saving, so two invocations
+// cannot lose each other's change (atomic file replacement alone would let
+// a slower grant re-save a grant that a concurrent revoke removed).
+func (s Store) Lock(vm string) (func(), error) {
+	dir, err := s.vmDir(vm)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
+		return nil, fmt.Errorf("create vm state: %w", err)
+	}
+	f, err := os.OpenFile(dir+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open lock: %w", err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("lock %s: %w", vm, err)
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}, nil
+}
+
 // Remove deletes all state of a VM.
 func (s Store) Remove(vm string) error {
 	dir, err := s.vmDir(vm)
 	if err != nil {
 		return err
 	}
+	_ = os.Remove(dir + ".lock")
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("remove vm state: %w", err)
 	}

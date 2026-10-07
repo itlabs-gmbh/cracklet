@@ -5,7 +5,8 @@
 #   cracklet cap lint chrome-devtools
 #   cracklet grant agent1 chrome-devtools
 #
-# The broker starts `npx chrome-devtools-mcp` lazily on the first request and
+# The version is pinned on purpose: whatever npx runs here runs on your Mac,
+# so bump it deliberately. The broker starts it lazily on the first request and
 # bridges its stdio to Streamable HTTP. Server-initiated requests (sampling,
 # elicitation) are answered with a JSON-RPC error.
 
@@ -14,7 +15,7 @@ description = "Chrome DevTools MCP running on the Mac, bridged into the guest"
 
 [mcp]
 command = "npx"
-args = ["-y", "chrome-devtools-mcp@latest"]
+args = ["-y", "chrome-devtools-mcp@1.10.1"]
 
 [[guest.json_merge]]
 path = "/root/.claude.json"

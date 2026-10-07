@@ -55,6 +55,11 @@ func Render(caps []cap.Cap, data cap.TemplateData) (Plan, error) {
 			if owner, dup := fileOwner[f.Path]; dup {
 				return Plan{}, fmt.Errorf("caps %s and %s both write %s", owner, c.Name, f.Path)
 			}
+			for other, owner := range keyOwner {
+				if strings.HasPrefix(other, f.Path+"#") {
+					return Plan{}, fmt.Errorf("cap %s merges JSON into %s while cap %s writes it as a file", owner, f.Path, c.Name)
+				}
+			}
 			if err := validatePath(f.Path); err != nil {
 				return Plan{}, fmt.Errorf("cap %s: %w", c.Name, err)
 			}
@@ -73,6 +78,14 @@ func Render(caps []cap.Cap, data cap.TemplateData) (Plan, error) {
 			id := m.Path + "#" + m.Key
 			if owner, dup := keyOwner[id]; dup {
 				return Plan{}, fmt.Errorf("caps %s and %s both set %s in %s", owner, c.Name, m.Key, m.Path)
+			}
+			if owner, dup := fileOwner[m.Path]; dup {
+				return Plan{}, fmt.Errorf("cap %s writes %s as a file while cap %s merges JSON into it", owner, m.Path, c.Name)
+			}
+			for other, owner := range keyOwner {
+				if nested(id, other) {
+					return Plan{}, fmt.Errorf("caps %s and %s set overlapping keys %s and %s in %s", owner, c.Name, strings.TrimPrefix(other, m.Path+"#"), m.Key, m.Path)
+				}
 			}
 			if err := validatePath(m.Path); err != nil {
 				return Plan{}, fmt.Errorf("cap %s: %w", c.Name, err)
@@ -105,6 +118,17 @@ func (p Plan) Manifest() []string {
 // scripts. Cap files can come from `cracklet cap add`, so a path is
 // attacker-influenced input that ends up in a root shell.
 var pathRe = regexp.MustCompile(`^/[A-Za-z0-9._/-]+$`)
+
+// nested reports whether two path#key ids target the same JSON file and one
+// key is an ancestor of the other (settings vs settings.mode).
+func nested(a, b string) bool {
+	pa, ka, _ := strings.Cut(a, "#")
+	pb, kb, _ := strings.Cut(b, "#")
+	if pa != pb {
+		return false
+	}
+	return strings.HasPrefix(ka, kb+".") || strings.HasPrefix(kb, ka+".")
+}
 
 func validatePath(path string) error {
 	if !pathRe.MatchString(path) || strings.Contains(path, "/../") || strings.HasSuffix(path, "/..") {

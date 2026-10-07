@@ -127,6 +127,20 @@ func TestBlocksAreManagedPerOwner(t *testing.T) {
 			t.Errorf("file and block on the same path must conflict")
 		}
 	}
+	twice := cap.Cap{Name: "t", Guest: cap.Guest{Blocks: []cap.Block{{Path: "/etc/t", Content: "a"}, {Path: "/etc/t", Content: "b"}}}}
+	if _, err := Render([]cap.Cap{twice}, data); err == nil || !strings.Contains(err.Error(), "two blocks") {
+		t.Errorf("two blocks of one cap for one path must fail, got %v", err)
+	}
+	jsonSame := cap.Cap{Name: "j", Guest: cap.Guest{JSONMerge: []cap.JSONMerge{{Path: "/etc/gitconfig", Key: "k", Value: 1}}}}
+	for _, order := range [][]cap.Cap{{blockLike(), jsonSame}, {jsonSame, blockLike()}} {
+		if _, err := Render(order, data); err == nil || !strings.Contains(err.Error(), "block") {
+			t.Errorf("block and JSON merge on one path must fail, got %v", err)
+		}
+	}
+	shared := cap.Cap{Name: "other", Guest: cap.Guest{Blocks: []cap.Block{{Path: "/etc/gitconfig", Content: "[x]\n"}}}}
+	if _, err := Render([]cap.Cap{blockLike(), shared}, data); err != nil {
+		t.Errorf("different owners may share a file, got %v", err)
+	}
 	selfMarker := cap.Cap{Name: "m", Guest: cap.Guest{Blocks: []cap.Block{{Path: "/etc/m", Content: "# <<< cracklet:m\n"}}}}
 	if _, err := Render([]cap.Cap{selfMarker}, data); err == nil {
 		t.Errorf("content containing the own marker must be rejected")
@@ -220,7 +234,8 @@ func TestScriptsRunUnderBash(t *testing.T) {
 	_ = os.MkdirAll(rooted("/root"), 0o755)
 	_ = os.WriteFile(rooted(EnvFile), []byte("PATH=/usr/bin\n"+markerBegin+"\nOLD=\"1\"\n"+markerEnd+"\n"), 0o644)
 	_ = os.WriteFile(rooted("/root/.claude.json"), []byte(`{"projects":{"keep":true}}`), 0o600)
-	_ = os.WriteFile(rooted("/etc/gitconfig"), []byte("[user]\n\tname = Keep Me\n"), 0o644)
+	// No trailing newline and a restrictive mode: both must survive.
+	_ = os.WriteFile(rooted("/etc/gitconfig"), []byte("[user]\n\tname = Keep Me"), 0o600)
 
 	plan, err := Render([]cap.Cap{claudeLike(), blockLike()}, data)
 	if err != nil {
@@ -256,9 +271,19 @@ func TestScriptsRunUnderBash(t *testing.T) {
 		t.Errorf("claude.json:\n%s", js)
 	}
 	git, _ := os.ReadFile(rooted("/etc/gitconfig"))
-	if !strings.Contains(string(git), "name = Keep Me") || !strings.Contains(string(git), "insteadOf = https://github.com/") ||
-		!strings.Contains(string(git), "# >>> cracklet:github managed") {
-		t.Errorf("gitconfig should keep existing settings and gain the block:\n%s", git)
+	if !strings.Contains(string(git), "name = Keep Me\n# >>> cracklet:github managed") || !strings.Contains(string(git), "insteadOf = https://github.com/") {
+		t.Errorf("gitconfig should keep existing settings and gain the block on its own line:\n%s", git)
+	}
+	if info, _ := os.Stat(rooted("/etc/gitconfig")); info.Mode().Perm() != 0o600 {
+		t.Errorf("existing mode must be preserved, got %o", info.Mode().Perm())
+	}
+	// Re-applying the same plan must not duplicate or eat anything.
+	if out, err := exec.Command("bash", "-c", rewriteRoot(apply, root)).CombinedOutput(); err != nil {
+		t.Fatalf("second apply: %v\n%s", err, out)
+	}
+	git, _ = os.ReadFile(rooted("/etc/gitconfig"))
+	if strings.Count(string(git), "cracklet:github managed") != 1 || !strings.Contains(string(git), "name = Keep Me") {
+		t.Errorf("second apply should replace the block in place:\n%s", git)
 	}
 	manifest, _ := os.ReadFile(rooted(ManifestPath))
 	if !strings.Contains(string(manifest), "block:/etc/gitconfig#github") {
@@ -276,8 +301,11 @@ func TestScriptsRunUnderBash(t *testing.T) {
 		t.Fatalf("revoke script: %v\n%s", err, out)
 	}
 	git, _ = os.ReadFile(rooted("/etc/gitconfig"))
-	if !strings.Contains(string(git), "name = Keep Me") || strings.Contains(string(git), "cracklet") || strings.Contains(string(git), "insteadOf") {
-		t.Errorf("revoke should strip the block only:\n%s", git)
+	if string(git) != "[user]\n\tname = Keep Me\n" {
+		t.Errorf("revoke should strip the block only:\n%q", git)
+	}
+	if info, _ := os.Stat(rooted("/etc/gitconfig")); info.Mode().Perm() != 0o600 {
+		t.Errorf("mode must survive revoke, got %o", info.Mode().Perm())
 	}
 }
 
@@ -318,11 +346,17 @@ func unrootState(st State, root string) State {
 
 func decodeEnvBlock(t *testing.T, script string) string {
 	t.Helper()
+	// The env section is the heredoc that follows the /etc/environment sed.
+	anchor := strings.Index(script, "sed '/^"+markerBegin)
+	if anchor < 0 {
+		t.Fatalf("no env rewrite in:\n%s", script)
+	}
 	marker := "base64 -d >> \"$tmp\" <<'CRACKLET_B64'\n"
-	i := strings.Index(script, marker)
+	i := strings.Index(script[anchor:], marker)
 	if i < 0 {
 		t.Fatalf("no env heredoc in:\n%s", script)
 	}
+	i += anchor
 	rest := script[i+len(marker):]
 	data, err := base64.StdEncoding.DecodeString(rest[:strings.Index(rest, "\n")])
 	if err != nil {

@@ -46,6 +46,7 @@ func Render(caps []cap.Cap, data cap.TemplateData) (Plan, error) {
 	envOwner := map[string]string{}
 	fileOwner := map[string]string{}
 	blockOwner := map[string]string{}
+	blockOwners := map[string]bool{}
 	keyOwner := map[string]string{}
 	for _, c := range caps {
 		for _, k := range sortedKeys(c.Guest.Env) {
@@ -95,6 +96,15 @@ func Render(caps []cap.Cap, data cap.TemplateData) (Plan, error) {
 			if owner, dup := fileOwner[blk.Path]; dup {
 				return Plan{}, fmt.Errorf("cap %s writes %s as a file while cap %s manages a block in it", owner, blk.Path, c.Name)
 			}
+			if blockOwners[blk.Path+"#"+c.Name] {
+				return Plan{}, fmt.Errorf("cap %s declares two blocks for %s", c.Name, blk.Path)
+			}
+			for other, owner := range keyOwner {
+				if strings.HasPrefix(other, blk.Path+"#") {
+					return Plan{}, fmt.Errorf("cap %s merges JSON into %s while cap %s manages a block in it", owner, blk.Path, c.Name)
+				}
+			}
+			blockOwners[blk.Path+"#"+c.Name] = true
 			content, err := cap.RenderGuest(blk.Content, data)
 			if err != nil {
 				return Plan{}, fmt.Errorf("cap %s: block %s: %w", c.Name, blk.Path, err)
@@ -116,6 +126,9 @@ func Render(caps []cap.Cap, data cap.TemplateData) (Plan, error) {
 			}
 			if owner, dup := fileOwner[m.Path]; dup {
 				return Plan{}, fmt.Errorf("cap %s writes %s as a file while cap %s merges JSON into it", owner, m.Path, c.Name)
+			}
+			if owner, dup := blockOwner[m.Path]; dup {
+				return Plan{}, fmt.Errorf("cap %s manages a block in %s while cap %s merges JSON into it", owner, m.Path, c.Name)
 			}
 			for other, owner := range keyOwner {
 				if nested(id, other) {

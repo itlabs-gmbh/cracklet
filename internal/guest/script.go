@@ -197,9 +197,7 @@ func (p Plan) mergedJSON(st State) (map[string]string, error) {
 	return out, nil
 }
 
-// writeEnv replaces the managed block in /etc/environment. The new file is
-// assembled in a temp file and moved into place, so a failing step leaves the
-// original untouched; the block itself travels base64 encoded like any file.
+// writeEnv replaces the managed block in /etc/environment.
 func (p Plan) writeEnv(b *strings.Builder) {
 	var block strings.Builder
 	if len(p.Env) > 0 {
@@ -209,18 +207,12 @@ func (p Plan) writeEnv(b *strings.Builder) {
 		}
 		block.WriteString(markerEnd + "\n")
 	}
-	b.WriteString("tmp=$(mktemp)\n")
-	b.WriteString("if [ -f " + EnvFile + " ]; then sed '/^" + markerBegin + "$/,/^" + markerEnd + "$/d' " + EnvFile + " > \"$tmp\"; fi\n")
-	b.WriteString("base64 -d >> \"$tmp\" <<'CRACKLET_B64'\n")
-	b.WriteString(base64.StdEncoding.EncodeToString([]byte(block.String())) + "\n")
-	b.WriteString("CRACKLET_B64\n")
-	b.WriteString("chmod 0644 \"$tmp\" && mv \"$tmp\" " + EnvFile + "\n")
+	rewriteSection(b, EnvFile, "^"+markerBegin+"$", "^"+markerEnd+"$", block.String())
 }
 
 // writeBlock replaces the section tagged cracklet:<owner> in a file with
-// content (an empty content just removes it). The file is rebuilt in a temp
-// file and moved into place; a missing file is created. Markers are matched
-// by their tag so the comment syntax may change between versions.
+// content (an empty content just removes it). Markers are matched by their
+// tag so the comment syntax may change between versions.
 func writeBlock(b *strings.Builder, p, owner, comment, content string) {
 	begin, end := blockMarkers(owner, comment)
 	var block strings.Builder
@@ -228,13 +220,29 @@ func writeBlock(b *strings.Builder, p, owner, comment, content string) {
 		block.WriteString(begin + "\n" + content + end + "\n")
 	}
 	tag := blockTag(owner)
+	rewriteSection(b, p, "^.* >>> "+tag+" .*$", "^.* <<< "+tag+"$", block.String())
+}
+
+// rewriteSection emits shell that removes the lines between the begin and
+// end patterns from a file and appends section instead. The new content is
+// assembled in a temp file and then copied into the existing file, so its
+// mode, owner and inode are preserved; a missing file is created with 0644.
+// A file that does not end in a newline gets one first, otherwise the begin
+// marker would attach to the last foreign line and take it along on the
+// next replacement.
+func rewriteSection(b *strings.Builder, p, beginPat, endPat, section string) {
+	q := shQuote(p)
 	b.WriteString("install -d -m 0755 " + shQuote(path.Dir(p)) + "\n")
+	b.WriteString("[ -f " + q + " ] || install -m 0644 /dev/null " + q + "\n")
 	b.WriteString("tmp=$(mktemp)\n")
-	b.WriteString("if [ -f " + shQuote(p) + " ]; then sed '/^.* >>> " + tag + " .*$/,/^.* <<< " + tag + "$/d' " + shQuote(p) + " > \"$tmp\"; fi\n")
+	b.WriteString("sed '/" + beginPat + "/,/" + endPat + "/d' " + q + " > \"$tmp\"\n")
+	// $(...) strips trailing newlines, so the output is empty exactly when
+	// the file is empty or already ends in a newline.
+	b.WriteString("if [ -n \"$(tail -c1 \"$tmp\")\" ]; then echo >> \"$tmp\"; fi\n")
 	b.WriteString("base64 -d >> \"$tmp\" <<'CRACKLET_B64'\n")
-	b.WriteString(base64.StdEncoding.EncodeToString([]byte(block.String())) + "\n")
+	b.WriteString(base64.StdEncoding.EncodeToString([]byte(section)) + "\n")
 	b.WriteString("CRACKLET_B64\n")
-	b.WriteString("chmod 0644 \"$tmp\" && mv \"$tmp\" " + shQuote(p) + "\n")
+	b.WriteString("cat \"$tmp\" > " + q + " && rm -f \"$tmp\"\n")
 }
 
 func blockTag(owner string) string { return "cracklet:" + owner }

@@ -63,6 +63,9 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 	if err != nil {
 		return VMInfo{}, err
 	}
+	if err := a.pruneVanished(ctx); err != nil {
+		return VMInfo{}, fmt.Errorf("clear grants left by removed VMs: %w", err)
+	}
 	args := []string{"new", name, strconv.Itoa(spec.VCPUs), strconv.Itoa(spec.MemMiB), disk, spec.Mode(), spec.ProfileName()}
 	if spec.Owner != "" { // a slot needs an owner, see Spec.Validate
 		// gc measures ages with this clock; the Lima VM's may lag after sleep
@@ -79,10 +82,10 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 	if err != nil {
 		return VMInfo{}, err
 	}
-	// The broker authorises by VM name, so grants and token left behind by an
-	// earlier VM of this name (a failed cleanup, or gc keeping them because
-	// this VM already existed when it re-checked) must not carry over. The
-	// agent created the VM, so nothing here belongs to a live one.
+	// pruneVanished cleared leftovers before the VM ran, but an earlier VM of
+	// this name may have been removed only after that (by gc, whose own
+	// prune then sees this VM and keeps the state). The agent created the
+	// VM, so nothing stored under its name belongs to a live one.
 	if err := a.grantStore().Remove(info.Name); err != nil {
 		return info, fmt.Errorf("%s was created, but clearing grants left by an earlier VM of that name failed: %w", info.Name, err)
 	}

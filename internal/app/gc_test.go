@@ -335,8 +335,43 @@ func TestVMInfoJSONKeepsMetadataKeys(t *testing.T) {
 	}
 }
 
+func TestNewVMPrunesLeftoversBeforeTheVMRuns(t *testing.T) {
+	store := grant.Store{}
+	var leftoverAtCreate []string
+	a, _, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.HasSuffix(joined, config.AgentPath+" ls"):
+			return []byte(`[{"name":"agent1","state":"running"}]`), nil
+		case strings.Contains(joined, config.AgentPath+" new "):
+			// the broker reads grants by name as soon as the VM runs
+			leftoverAtCreate, _ = store.Names()
+			return []byte(`{"name":"vm3","state":"running"}`), nil
+		}
+		return defaultHandler(nil)(name, args)
+	})
+	store.Dir = a.paths.VMsDir()
+	for _, vmName := range []string{"agent1", "vm3"} { // vm3: an earlier VM the agent will auto-name again
+		if err := store.Save(vmName, grant.Set{{Cap: "claude"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := a.NewVM(context.Background(), vm.Spec{VCPUs: 2, MemMiB: 1024}); err != nil {
+		t.Fatalf("NewVM: %v", err)
+	}
+	if strings.Join(leftoverAtCreate, ",") != "agent1" {
+		t.Errorf("state left when the VM started: %v, want only the live agent1", leftoverAtCreate)
+	}
+	if set, _ := store.Load("agent1"); len(set) != 1 {
+		t.Error("grants of a live VM must survive")
+	}
+}
+
 func TestNewVMStartsWithoutLeftoverGrants(t *testing.T) {
+	// paseo-1 still existed when NewVM pruned and was replaced right after
+	// (gc removing it); the clear after creation catches that ordering
 	a, _, _ := newTestApp(t, defaultHandler(map[string]string{
+		"ls":  `[{"name":"paseo-1","state":"running","owner":"paseo"}]`,
 		"new": `{"name":"paseo-1","state":"running","owner":"paseo","slot":"1","created_at":"2026-10-07T12:00:00Z"}`,
 	}))
 	store := grant.Store{Dir: a.paths.VMsDir()}

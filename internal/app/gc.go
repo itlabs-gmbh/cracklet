@@ -179,6 +179,27 @@ func (a *App) pruneHostState(ctx context.Context, listed map[string]bool, dryRun
 	})
 }
 
+// pruneVanished removes the host state of every VM that does not exist, so a
+// VM about to be created under a reused name (given, or picked by the agent)
+// starts without the grants of its predecessor: the broker authorises by
+// name and would serve them as soon as the VM runs.
+func (a *App) pruneVanished(ctx context.Context) error {
+	names, err := a.grantStore().Names()
+	if err != nil || len(names) == 0 {
+		return err // nothing to prune spares the agent call
+	}
+	vms, err := a.agentVMs(ctx)
+	if err != nil {
+		return err
+	}
+	listed := make(map[string]bool, len(vms))
+	for _, v := range vms {
+		listed[v.Name] = true
+	}
+	_, err = a.pruneHostState(ctx, listed, false)
+	return err
+}
+
 // describeOwned renders a VM gc acts on, e.g. "paseo-1 (owner paseo, slot 1, 3h old)".
 func (a *App) describeOwned(v VMInfo, now time.Time) string {
 	parts := []string{"owner " + v.Owner}

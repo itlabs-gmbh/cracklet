@@ -79,6 +79,13 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 	if err != nil {
 		return VMInfo{}, err
 	}
+	// The broker authorises by VM name, so grants and token left behind by an
+	// earlier VM of this name (a failed cleanup, or gc keeping them because
+	// this VM already existed when it re-checked) must not carry over. The
+	// agent created the VM, so nothing here belongs to a live one.
+	if err := a.grantStore().Remove(info.Name); err != nil {
+		return info, fmt.Errorf("%s was created, but clearing grants left by an earlier VM of that name failed: %w", info.Name, err)
+	}
 	a.printf("%s is running at %s\n  cracklet ssh %s\n  ssh %s.%s\n", info.Name, info.IP, info.Name, info.Name, config.Instance)
 	if len(spec.Forwards) > 0 {
 		if info, err = a.Forward(ctx, info.Name, spec.Forwards); err != nil {

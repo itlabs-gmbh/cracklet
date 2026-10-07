@@ -334,3 +334,46 @@ func TestVMInfoJSONKeepsMetadataKeys(t *testing.T) {
 		t.Errorf("metadata keys missing: %s", data)
 	}
 }
+
+func TestNewVMStartsWithoutLeftoverGrants(t *testing.T) {
+	a, _, _ := newTestApp(t, defaultHandler(map[string]string{
+		"new": `{"name":"paseo-1","state":"running","owner":"paseo","slot":"1","created_at":"2026-10-07T12:00:00Z"}`,
+	}))
+	store := grant.Store{Dir: a.paths.VMsDir()}
+	// state of an earlier paseo-1 that gc kept because the new one already existed
+	if err := store.Save("paseo-1", grant.Set{{Cap: "github", Scope: "org/private"}}); err != nil {
+		t.Fatal(err)
+	}
+	oldToken, err := store.Token("paseo-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.NewVM(context.Background(), vm.Spec{Name: "paseo-1", VCPUs: 2, MemMiB: 1024, Owner: "paseo", Slot: "1"}); err != nil {
+		t.Fatalf("NewVM: %v", err)
+	}
+	if set, _ := store.Load("paseo-1"); len(set) != 0 {
+		t.Errorf("a new VM must not inherit the grants of an earlier VM with its name, got %v", set)
+	}
+	if tok, _ := store.Token("paseo-1"); tok == oldToken {
+		t.Error("a new VM must not inherit the placeholder token either")
+	}
+}
+
+func TestNewVMKeepsGrantsWhenTheNameIsTaken(t *testing.T) {
+	a, _, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
+		if strings.Contains(strings.Join(args, " "), config.AgentPath+" new ") {
+			return nil, errors.New("agent new: VM 'paseo-1' already exists")
+		}
+		return defaultHandler(nil)(name, args)
+	})
+	store := grant.Store{Dir: a.paths.VMsDir()}
+	if err := store.Save("paseo-1", grant.Set{{Cap: "claude"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.NewVM(context.Background(), vm.Spec{Name: "paseo-1", VCPUs: 2, MemMiB: 1024}); err == nil {
+		t.Fatal("expected the agent's error")
+	}
+	if set, _ := store.Load("paseo-1"); len(set) != 1 {
+		t.Error("a failed new must not touch the grants of the existing VM")
+	}
+}

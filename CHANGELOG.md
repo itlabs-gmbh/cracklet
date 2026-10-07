@@ -60,6 +60,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- A new microVM never inherits the grants or placeholder token left on the Mac
+  by an earlier VM of the same name; the broker authorises by name, so such
+  leftovers would have handed the new VM the old one's capabilities.
 - Firewall chains are rebuilt atomically with `iptables-restore`; CGNAT
   (`100.64.0.0/10`) is blocked alongside the other private ranges.
 - Guests are internet-only: tap-to-tap traffic, the Lima VM's own services,

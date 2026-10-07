@@ -7,6 +7,7 @@ import (
 	"io"
 	"path"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/itlabs-gmbh/cracklet/internal/runner"
@@ -62,6 +63,42 @@ func (c *Client) Create(ctx context.Context, templatePath string) error {
 func (c *Client) Start(ctx context.Context) error {
 	if err := c.r.Run(ctx, "limactl", "start", "--tty=false", c.Instance); err != nil {
 		return fmt.Errorf("start lima instance: %w", err)
+	}
+	return nil
+}
+
+// Stop shuts the instance down gracefully.
+func (c *Client) Stop(ctx context.Context) error {
+	if err := c.r.Run(ctx, "limactl", "stop", c.Instance); err != nil {
+		return fmt.Errorf("stop lima instance: %w", err)
+	}
+	return nil
+}
+
+// Resize changes the size of an existing instance; zero fields stay as they are.
+type Resize struct {
+	CPUs      int
+	MemoryGiB int
+	DiskGiB   int
+}
+
+// Edit applies r to the stopped instance's lima.yaml; it takes effect on the next start.
+// Lima grows the disk image on start, the guest's growpart extends the root filesystem.
+func (c *Client) Edit(ctx context.Context, r Resize) error {
+	args := []string{"edit", "--tty=false"}
+	for _, f := range []struct {
+		flag  string
+		value int
+	}{{"--cpus", r.CPUs}, {"--memory", r.MemoryGiB}, {"--disk", r.DiskGiB}} {
+		if f.value != 0 {
+			args = append(args, f.flag, strconv.Itoa(f.value))
+		}
+	}
+	if len(args) == 2 {
+		return nil
+	}
+	if err := c.r.Run(ctx, "limactl", append(args, c.Instance)...); err != nil {
+		return fmt.Errorf("resize lima instance: %w", err)
 	}
 	return nil
 }

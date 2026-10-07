@@ -21,6 +21,9 @@ type Instance struct {
 	Status       Status `json:"status"`
 	Dir          string `json:"dir"`
 	SSHLocalPort int    `json:"sshLocalPort"`
+	CPUs         int    `json:"cpus"`
+	Memory       int64  `json:"memory"` // bytes
+	Disk         int64  `json:"disk"`   // bytes
 }
 
 // ParseList decodes limactl's JSON output, which is either newline-delimited

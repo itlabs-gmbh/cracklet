@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -212,6 +213,50 @@ func TestPrepareAndDoctorWiring(t *testing.T) {
 	root.SetArgs([]string{"prepare", "--cpus", "0"})
 	if err := root.Execute(); err == nil {
 		t.Fatal("prepare must reject --cpus 0")
+	}
+}
+
+func TestPrepareResizesOnlyExplicitFlags(t *testing.T) {
+	handler := func(name string, args []string) ([]byte, error) {
+		joined := name + " " + strings.Join(args, " ")
+		switch {
+		case name == "sw_vers":
+			return []byte("26.7\n"), nil
+		case joined == "sysctl -n machdep.cpu.brand_string":
+			return []byte("Apple M4 Pro\n"), nil
+		case joined == "sysctl -n kern.hv_support":
+			return []byte("1\n"), nil
+		case strings.HasPrefix(joined, "limactl list"):
+			return []byte(`{"name":"cracklet","status":"Running","cpus":6,"memory":8589934592,"disk":42949672960}` + "\n"), nil
+		case strings.Contains(joined, "sha256sum"):
+			return []byte(agent.Checksum() + "\n"), nil
+		case strings.Contains(joined, config.AgentPath+" ls"):
+			return []byte(`[]`), nil
+		}
+		return nil, nil
+	}
+	fake := runner.NewFake(handler)
+	paths := config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}
+	for _, p := range []string{paths.KeyPath(), paths.PubKeyPath()} {
+		if err := os.WriteFile(p, []byte("key"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := newRoot(func(out io.Writer) (*app.App, error) {
+		return app.New(fake, paths, out,
+			app.WithPlatform("darwin", "arm64"),
+			app.WithLookPath(func(string) (string, error) { return "/usr/local/bin/x", nil }),
+			app.WithEnvd(func(context.Context) ([]byte, error) { return []byte("envd"), nil })), nil
+	})
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	root.SetArgs([]string{"prepare", "--memory", "16"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	// --cpus defaults to 4 but was not given, so the 6-CPU VM keeps its CPUs.
+	if !fake.Called("limactl edit --tty=false --memory 16 cracklet") {
+		t.Errorf("only the explicit --memory may be applied:\n%s", fake.Dump())
 	}
 }
 

@@ -40,6 +40,7 @@ func TestDerivedPaths(t *testing.T) {
 		p.PubKeyPath():       filepath.Join("/h", "id_ed25519.pub"),
 		p.SSHConfigPath():    filepath.Join("/h", "ssh_config"),
 		p.LimaTemplatePath(): filepath.Join("/h", "lima.yaml"),
+		p.LimaLockPath():     filepath.Join("/h", "lima.lock"),
 	}
 	for got, want := range cases {
 		if got != want {

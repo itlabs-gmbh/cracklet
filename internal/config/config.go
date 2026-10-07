@@ -86,6 +86,9 @@ func (p Paths) SSHConfigPath() string { return filepath.Join(p.Home, "ssh_config
 // LimaTemplatePath is the rendered Lima template used to create the instance.
 func (p Paths) LimaTemplatePath() string { return filepath.Join(p.Home, "lima.yaml") }
 
+// LimaLockPath serializes Lima VM restarts against microVM starts across cracklet processes.
+func (p Paths) LimaLockPath() string { return filepath.Join(p.Home, "lima.lock") }
+
 // CapsDir holds the user's capability files (one <name>.toml each).
 func (p Paths) CapsDir() string { return filepath.Join(p.Home, "caps") }
 

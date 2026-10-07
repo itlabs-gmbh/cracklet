@@ -18,6 +18,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
   owner are never collected, nor are VMs `ls` reports as `creating`; the agent
   re-checks owner and creation time under its lock before removing, so a VM
   recreated under the same name survives.
+- `cracklet prepare --cpus/--memory/--disk` resizes an existing Lima VM in
+  place (stop, `limactl edit`, start) instead of only applying at creation.
+  Only explicitly given flags count, running microVMs block the restart, a
+  host-side lock keeps `new`/`start` from racing it, and the disk can only grow.
 - `cracklet exec NAME -- command [arg...]` runs a command with every argument
   shell-quoted, so the guest receives exactly that argv. `cracklet ssh NAME cmd`
   keeps plain-ssh semantics and passes a shell command line.

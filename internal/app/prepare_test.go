@@ -197,17 +197,6 @@ func TestPrepareRejectsBadSizingBeforeSideEffects(t *testing.T) {
 	}
 }
 
-func TestPrepareWarnsWhenSizingIsIgnored(t *testing.T) {
-	app, _, out, paths := prepareApp(t, hostHandler("Running", agent.Checksum()), true)
-	writeDummyKeys(t, paths)
-	if err := app.Prepare(context.Background(), PrepareOptions{CPUs: 8, MemoryGiB: 16, DiskGiB: 100}); err != nil {
-		t.Fatalf("Prepare: %v", err)
-	}
-	if !strings.Contains(out.String(), "only apply when the Lima VM is created") {
-		t.Errorf("expected a note about ignored sizing flags, got:\n%s", out.String())
-	}
-}
-
 func TestDoctorWithoutLimaDoesNotFail(t *testing.T) {
 	app, fake, out, _ := prepareApp(t, hostHandler("", agent.Checksum()), false)
 	if err := app.Doctor(context.Background()); err != nil {

@@ -309,43 +309,63 @@ func TestScriptsRunUnderBash(t *testing.T) {
 	}
 }
 
-// TestFailedWriteKeepsOriginal makes the target directory read-only so the
-// temp file cannot be created: the script must fail and the file must be
-// byte-identical afterwards.
+// TestFailedWriteKeepsOriginal runs the apply script with a tool on PATH
+// that fails mid-write, standing in for a full disk, and checks the target
+// is never left truncated. Two tools are faked: base64 -d, which is where
+// the current implementation writes, and cat, which the former
+// `cat "$tmp" > target` used and which truncated the target first.
 func TestFailedWriteKeepsOriginal(t *testing.T) {
-	if _, err := exec.LookPath("bash"); err != nil || os.Geteuid() == 0 {
-		t.Skip("needs bash and a non-root user")
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
 	}
-	root := t.TempDir()
-	dir := filepath.Join(root, "etc")
-	_ = os.MkdirAll(dir, 0o755)
-	target := filepath.Join(dir, "gitconfig")
-	original := "[user]\n\tname = Keep Me\n"
-	_ = os.WriteFile(target, []byte(original), 0o600)
-	_ = os.Chmod(dir, 0o555)
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	for _, tool := range []string{"base64", "cat"} {
+		t.Run(tool, func(t *testing.T) {
+			root := t.TempDir()
+			rooted := func(p string) string { return filepath.Join(root, p) }
+			_ = os.MkdirAll(rooted("/etc/cracklet"), 0o755)
+			target := rooted("/etc/gitconfig")
+			original := "[user]\n\tname = Keep Me\n"
+			_ = os.WriteFile(target, []byte(original), 0o600)
 
-	plan, err := Render([]cap.Cap{blockLike()}, data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	script, err := plan.ApplyScript(State{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Only the gitconfig part matters here; cut the script at the env rewrite.
-	script = script[:strings.Index(script, "sed '/^"+markerBegin)]
-	script = script[:strings.LastIndex(script, "install -d")]
-	out, err := exec.Command("bash", "-c", rewriteRoot(script, root)).CombinedOutput()
-	if err == nil {
-		t.Fatalf("script should fail when the temp file cannot be created:\n%s", out)
-	}
-	got, _ := os.ReadFile(target)
-	if string(got) != original {
-		t.Errorf("original must be untouched, got %q", got)
-	}
-	if info, _ := os.Stat(target); info.Mode().Perm() != 0o600 {
-		t.Errorf("mode changed to %o", info.Mode().Perm())
+			bin := t.TempDir()
+			reached := filepath.Join(bin, "reached")
+			fake := "#!/bin/sh\ntouch " + reached + "; printf 'partial'; exit 1\n"
+			if tool == "base64" {
+				// Only decoding fails; encoding stays real for the read script.
+				fake = "#!/bin/sh\ncase \"$1\" in -d) touch " + reached + "; printf 'partial'; exit 1;; esac\nexec /usr/bin/base64 \"$@\"\n"
+			}
+			if err := os.WriteFile(filepath.Join(bin, tool), []byte(fake), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			plan, err := Render([]cap.Cap{blockLike()}, data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script, err := plan.ApplyScript(State{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "-c", rewriteRoot(script, root))
+			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
+			out, runErr := cmd.CombinedOutput()
+			_, wasReached := os.Stat(reached)
+
+			got, _ := os.ReadFile(target)
+			withBlock := strings.HasPrefix(string(got), original) && strings.Contains(string(got), "<<< cracklet:github")
+			if string(got) != original && !withBlock {
+				t.Errorf("target must be either untouched or complete, got %q\n%s", got, out)
+			}
+			if info, _ := os.Stat(target); info.Mode().Perm() != 0o600 {
+				t.Errorf("mode changed to %o", info.Mode().Perm())
+			}
+			if wasReached == nil && runErr == nil {
+				t.Errorf("a failing write must fail the script:\n%s", out)
+			}
+			if tool == "base64" && wasReached != nil {
+				t.Errorf("script never reached the write step:\n%s", out)
+			}
+		})
 	}
 }
 

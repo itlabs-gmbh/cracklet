@@ -29,7 +29,9 @@ func newNewCmd(get func() *app.App) *cobra.Command {
 	}
 	cmd.Flags().IntVar(&spec.VCPUs, "vcpus", config.DefaultVCPUs, "number of vCPUs")
 	cmd.Flags().IntVar(&spec.MemMiB, "mem", config.DefaultMemMiB, "memory in MiB")
-	cmd.Flags().StringVar(&spec.Disk, "disk", config.DefaultDisk, "root disk size, e.g. 2G or 512M")
+	cmd.Flags().StringVar(&spec.Disk, "disk", "", "root disk size, e.g. 4G (default: the profile's image size; anything else cold-boots)")
+	cmd.Flags().StringVar(&spec.Profile, "profile", vm.ProfileBase,
+		"guest image: "+strings.Join(vm.ProfileNames(), ", ")+" (build it first with 'cracklet prepare --profile')")
 	cmd.Flags().StringArrayVarP(&spec.Forwards, "port", "p", nil, "forward localhost:[HOST:]GUEST to the VM (repeatable)")
 	cmd.Flags().BoolVar(&spec.Fresh, "fresh", false, "cold-boot instead of restoring the golden snapshot")
 	cmd.Flags().StringArrayVar(&spec.Grants, "grant", nil, "grant a capability right away, e.g. claude or github:org/repo (repeatable)")

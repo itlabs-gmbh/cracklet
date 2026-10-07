@@ -23,6 +23,7 @@ type VMInfo struct {
 	State    string       `json:"state"`
 	VCPUs    int          `json:"vcpus"`
 	MemMiB   int          `json:"mem_mib"`
+	Profile  string       `json:"profile"`
 	Forwards []vm.Forward `json:"forwards"`
 	// Grants are the host-side grants of the VM (not reported by the agent).
 	Grants []string `json:"grants,omitempty"`
@@ -48,11 +49,12 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 	if name == "" {
 		name = "-" // the agent picks the first free vm<N>
 	}
-	disk, err := vm.NormalizeSize(spec.Disk)
+	disk, err := vm.NormalizeSize(spec.DiskSize())
 	if err != nil {
 		return VMInfo{}, err
 	}
-	out, err := a.agentOutput(ctx, "new", name, strconv.Itoa(spec.VCPUs), strconv.Itoa(spec.MemMiB), disk, spec.Mode())
+	out, err := a.agentOutput(ctx, "new", name, strconv.Itoa(spec.VCPUs), strconv.Itoa(spec.MemMiB), disk,
+		spec.Mode(), spec.ProfileName())
 	if err != nil {
 		if ctx.Err() != nil {
 			a.cleanupInterrupted(spec.Name)

@@ -65,7 +65,7 @@ func TestNewPassesFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	if !fake.Called("limactl shell cracklet -- sudo " + config.AgentPath + " new box 3 2048 4G snapshot") {
+	if !fake.Called("limactl shell cracklet -- sudo " + config.AgentPath + " new box 3 2048 4G snapshot base") {
 		t.Errorf("flags not forwarded (disk must be canonical):\n%s", fake.Dump())
 	}
 }
@@ -75,7 +75,7 @@ func TestNewDefaultsAndAutoName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	if !fake.Called("limactl shell cracklet -- sudo " + config.AgentPath + " new - 2 1024 2G snapshot") {
+	if !fake.Called("limactl shell cracklet -- sudo " + config.AgentPath + " new - 2 1024 2G snapshot base") {
 		t.Errorf("defaults not applied:\n%s", fake.Dump())
 	}
 }
@@ -306,7 +306,7 @@ func TestNewFreshFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new --fresh: %v", err)
 	}
-	if !fake.CalledWithSuffix(config.AgentPath + " new box 2 1024 2G fresh") {
+	if !fake.CalledWithSuffix(config.AgentPath + " new box 2 1024 2G fresh base") {
 		t.Errorf("--fresh not forwarded:\n%s", fake.Dump())
 	}
 }
@@ -323,5 +323,25 @@ func TestTunnelWiring(t *testing.T) {
 		if strings.HasPrefix(c, "ssh ") {
 			t.Errorf("no ssh without grants: %s", c)
 		}
+	}
+}
+
+func TestNewProfileDefaultsDiskToImageSize(t *testing.T) {
+	_, fake, err := run(t, "new", "agent", "--profile", "paseo")
+	if err != nil {
+		t.Fatalf("new --profile: %v", err)
+	}
+	if !fake.CalledWithSuffix(config.AgentPath + " new agent 2 1024 8G snapshot paseo") {
+		t.Errorf("profile and its image size not forwarded:\n%s", fake.Dump())
+	}
+}
+
+func TestNewRejectsUnknownProfile(t *testing.T) {
+	_, fake, err := run(t, "new", "--profile", "nope")
+	if err == nil || !strings.Contains(err.Error(), "unknown profile") {
+		t.Fatalf("expected unknown profile error, got %v", err)
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("an invalid profile must be rejected before the agent runs:\n%s", fake.Dump())
 	}
 }

@@ -41,7 +41,6 @@ const (
 
 	DefaultVCPUs  = 2
 	DefaultMemMiB = 1024
-	DefaultDisk   = "2G"
 
 	// BrokerGuestPort is where the broker tunnel appears inside a microVM
 	// (127.0.0.1:PORT) while `cracklet ssh` is open.

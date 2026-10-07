@@ -1,9 +1,11 @@
 package grant
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -165,5 +167,84 @@ func TestStoreRejectsCorruptGrants(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(s.Dir, "vm1", "grants"), []byte("Bad Grant\n"), 0o600)
 	if _, err := s.Load("vm1"); err == nil {
 		t.Errorf("corrupt grants must fail loudly")
+	}
+}
+
+func TestStoreNamesListsVMsWithState(t *testing.T) {
+	s := Store{Dir: filepath.Join(t.TempDir(), "vms")}
+	if names, err := s.Names(); err != nil || len(names) != 0 {
+		t.Fatalf("a missing store has no VMs, got %v, %v", names, err)
+	}
+	for _, vm := range []string{"web", "api"} {
+		if _, err := s.Token(vm); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unlock, err := s.Lock("gone") // leaves gone.lock behind, which is no VM state
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	if err := os.Mkdir(filepath.Join(s.Dir, "Not_A_VM"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	names, err := s.Names()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(names, ",") != "api,web" {
+		t.Errorf("Names() = %v, want [api web]", names)
+	}
+}
+
+func TestStorePruneRemovesOnlyVanishedVMs(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	for _, vm := range []string{"old", "reborn"} {
+		if err := s.Save(vm, Set{{Cap: "claude"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	alive := func() (map[string]bool, error) {
+		// The lock must be held here, otherwise a grant could slip in
+		// between this check and the removal.
+		f, err := os.OpenFile(filepath.Join(s.Dir, "old.lock"), os.O_RDWR, 0)
+		if err != nil {
+			t.Fatalf("lock file missing: %v", err)
+		}
+		defer f.Close()
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+			t.Error("Prune must hold the VM's lock while it checks liveness")
+		}
+		return map[string]bool{"reborn": true}, nil
+	}
+	removed, err := s.Prune([]string{"old", "reborn"}, alive)
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if strings.Join(removed, ",") != "old" {
+		t.Errorf("removed %v, want [old]", removed)
+	}
+	if set, _ := s.Load("old"); len(set) != 0 {
+		t.Errorf("state of old should be gone, got %v", set)
+	}
+	if set, _ := s.Load("reborn"); len(set) != 1 {
+		t.Errorf("a VM that exists again keeps its grants, got %v", set)
+	}
+}
+
+func TestStorePruneKeepsEverythingWhenLivenessFails(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if err := s.Save("old", Set{{Cap: "claude"}}); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := s.Prune([]string{"old"}, func() (map[string]bool, error) { return nil, errors.New("agent down") })
+	if err == nil || len(removed) != 0 {
+		t.Fatalf("Prune = %v, %v; want an error and nothing removed", removed, err)
+	}
+	if set, _ := s.Load("old"); len(set) != 1 {
+		t.Error("state must survive a failed liveness check")
+	}
+	if _, err := s.Prune([]string{"../etc"}, func() (map[string]bool, error) { return nil, nil }); err == nil {
+		t.Error("Prune must reject invalid names")
 	}
 }

@@ -9,6 +9,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- VM metadata: `cracklet new --owner NAME [--slot N]` labels a VM managed by a
+  tool, and every new VM records its creation time. `ls` shows OWNER and AGE
+  columns, `inspect` and `--json` report `owner`, `slot` and `created_at`.
+- `cracklet gc` removes orphaned owned VMs, selected by `--owner` and
+  `--older-than` with `--keep` exemptions and `--dry-run`, and deletes the
+  grants and tokens left on the Mac for VMs that no longer exist. VMs without an
+  owner are never collected, nor are VMs `ls` reports as `creating`; the agent
+  re-checks owner and creation time under its lock before removing, so a VM
+  recreated under the same name survives.
 - `cracklet exec NAME -- command [arg...]` runs a command with every argument
   shell-quoted, so the guest receives exactly that argv. `cracklet ssh NAME cmd`
   keeps plain-ssh semantics and passes a shell command line.

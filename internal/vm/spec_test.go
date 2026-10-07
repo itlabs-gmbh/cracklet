@@ -139,3 +139,37 @@ func TestValidateSpecProfile(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateLabel(t *testing.T) {
+	for _, l := range []string{"paseo-cracklet", "3", "paseo.3", "Task_7", "a"} {
+		if err := ValidateLabel("owner", l); err != nil {
+			t.Errorf("ValidateLabel(%q) unexpected error: %v", l, err)
+		}
+	}
+	tooLong := "a123456789012345678901234567890123456789012345678901234567890123"
+	for _, l := range []string{"", "-", "-x", ".x", "a b", "a;b", "a/b", "a:b", "a$b", "ä", tooLong} {
+		if err := ValidateLabel("owner", l); err == nil {
+			t.Errorf("ValidateLabel(%q) expected error", l)
+		}
+	}
+}
+
+func TestValidateSpecMetadata(t *testing.T) {
+	base := Spec{Name: "vm1", VCPUs: 2, MemMiB: 1024}
+	good := []Spec{base, {Name: "vm1", VCPUs: 2, MemMiB: 1024, Owner: "paseo"}, {Name: "vm1", VCPUs: 2, MemMiB: 1024, Owner: "paseo", Slot: "3"}}
+	for _, s := range good {
+		if err := s.Validate(); err != nil {
+			t.Errorf("Validate(%+v) unexpected error: %v", s, err)
+		}
+	}
+	bad := []Spec{
+		{Name: "vm1", VCPUs: 2, MemMiB: 1024, Owner: "a b"},
+		{Name: "vm1", VCPUs: 2, MemMiB: 1024, Owner: "paseo", Slot: "-"},
+		{Name: "vm1", VCPUs: 2, MemMiB: 1024, Slot: "3"}, // a slot belongs to an owner's pool
+	}
+	for _, s := range bad {
+		if err := s.Validate(); err == nil {
+			t.Errorf("Validate(%+v) expected error", s)
+		}
+	}
+}

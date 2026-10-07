@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -144,6 +145,180 @@ func TestAgentVMJSONReportsBrokenEntries(t *testing.T) {
 	}
 	if !strings.Contains(out, `"state":"broken"`) || !strings.Contains(out, `"name":"half"`) {
 		t.Errorf("unexpected JSON: %s", out)
+	}
+}
+
+func TestAgentValidateLabel(t *testing.T) {
+	root := t.TempDir()
+	if _, err := runAgentFuncs(t, root, `validate_label paseo-cracklet owner; validate_label 3 slot; validate_label - slot`); err != nil {
+		t.Errorf("valid labels rejected: %v", err)
+	}
+	for _, bad := range []string{"", "-x", "a b", "a;b", "a/b", "$(id)"} {
+		if _, err := runAgentFuncs(t, root, `validate_label "`+bad+`" owner`); err == nil {
+			t.Errorf("invalid label %q accepted", bad)
+		}
+	}
+}
+
+func TestAgentVMJSONReportsMetadata(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available")
+	}
+	root := t.TempDir()
+	for _, name := range []string{"owned", "manual", "legacy"} {
+		if err := os.MkdirAll(filepath.Join(root, "vms", name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := runAgentFuncs(t, root, `
+		for n in owned manual legacy; do atomic_write "$(vm_dir $n)/index" 3; write_config $n 3 2 1024; done
+		write_meta owned paseo 3; write_meta manual - -
+		vm_json owned; vm_json manual; vm_json legacy`)
+	if err != nil {
+		t.Fatalf("vm_json failed: %v\n%s", err, out)
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("unexpected output:\n%s", out)
+	}
+	created := regexp.MustCompile(`"created_at":"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ"`)
+	if !strings.Contains(lines[0], `"owner":"paseo","slot":"3"`) || !created.MatchString(lines[0]) {
+		t.Errorf("owned VM: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], `"owner":null,"slot":null`) || !created.MatchString(lines[1]) {
+		t.Errorf("a VM made by hand still records its creation time: %s", lines[1])
+	}
+	if !strings.Contains(lines[2], `"owner":null,"slot":null,"created_at":null`) {
+		t.Errorf("VMs from before metadata report nulls: %s", lines[2])
+	}
+}
+
+func TestAgentVMJSONToleratesDamagedMetadata(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available")
+	}
+	root := t.TempDir()
+	dir := filepath.Join(root, "vms", "odd")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte(`{"owner":7,"slot":["x"],"created_at":"yesterday"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runAgentFuncs(t, root, `atomic_write "$(vm_dir odd)/index" 4; write_config odd 4 2 1024; vm_json odd`)
+	if err != nil {
+		t.Fatalf("vm_json must not fail on damaged metadata: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, `"owner":null,"slot":null,"created_at":null`) || !strings.Contains(out, `"state":"stopped"`) {
+		t.Errorf("unexpected JSON: %s", out)
+	}
+}
+
+func TestAgentBrokenVMKeepsItsOwner(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "vms", "half"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runAgentFuncs(t, root, `write_meta half paseo 2; vm_json half`)
+	if err != nil {
+		t.Fatalf("vm_json failed: %v\n%s", err, out)
+	}
+	// gc finds leftovers of an interrupted creation through their owner
+	if !strings.Contains(out, `"state":"broken"`) || !strings.Contains(out, `"owner":"paseo","slot":"2"`) {
+		t.Errorf("unexpected JSON: %s", out)
+	}
+}
+
+func TestAgentMetaRejectsImpossibleDates(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available")
+	}
+	root := t.TempDir()
+	for name, date := range map[string]string{"bad1": "9999-99-99T99:99:99Z", "bad2": "2026-02-30T00:00:00Z", "good": "2026-02-28T23:59:59Z"} {
+		dir := filepath.Join(root, "vms", name)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte(`{"owner":"x","created_at":"`+date+`"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := runAgentFuncs(t, root, `meta_json bad1; meta_json bad2; meta_json good`)
+	if err != nil {
+		t.Fatalf("meta_json failed: %v\n%s", err, out)
+	}
+	// one unparsable date would make the CLI reject the whole listing
+	want := `{"owner":"x","slot":null,"created_at":null}` + "\n" + `{"owner":"x","slot":null,"created_at":null}` + "\n" +
+		`{"owner":"x","slot":null,"created_at":"2026-02-28T23:59:59Z"}`
+	if out != want {
+		t.Errorf("got:\n%s\nwant:\n%s", out, want)
+	}
+}
+
+func TestAgentWriteMetaUsesGivenCreationTime(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "vms", "box"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runAgentFuncs(t, root, `write_meta box paseo 1 2026-10-07T12:00:00Z; meta_json box`)
+	if err != nil || out != `{"owner":"paseo","slot":"1","created_at":"2026-10-07T12:00:00Z"}` {
+		t.Errorf("got %q, %v", out, err)
+	}
+	if _, err := runAgentFuncs(t, root, `write_meta box paseo 1 "2026-10-07 12:00"`); err == nil {
+		t.Error("a malformed creation time must be rejected")
+	}
+}
+
+func TestAgentReportsVMsInCreation(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "vms", "half"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	setup := `: > "$(vm_dir half)/creating"; write_meta half paseo 2; `
+	out, err := runAgentFuncs(t, root, setup+`agent_busy() { return 0; }; vm_json half`)
+	if err != nil || !strings.Contains(out, `"state":"creating"`) {
+		t.Errorf("a VM whose creation is running must be reported as creating: %s, %v", out, err)
+	}
+	// nothing holds the agent lock: the marker is a leftover of a killed agent
+	out, err = runAgentFuncs(t, root, setup+`agent_busy() { return 1; }; vm_json half`)
+	if err != nil || !strings.Contains(out, `"state":"broken"`) {
+		t.Errorf("a leftover must be reported as broken: %s, %v", out, err)
+	}
+}
+
+func TestAgentGuardedRemoveChecksMetadata(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "vms", "box"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stubs := `stop_vm() { :; }; remove_host_entry() { :; }; write_meta box paseo 1 2026-10-07T12:00:00Z; `
+	for _, call := range []string{`cmd_rm box other 2026-10-07T12:00:00Z`, `cmd_rm box paseo 2026-10-07T12:00:01Z`, `cmd_rm box paseo -`} {
+		if out, err := runAgentFuncs(t, root, stubs+call); err == nil {
+			t.Errorf("%s must refuse a VM that changed since it was listed: %s", call, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "vms", "box")); err != nil {
+		t.Fatal("a refused removal must keep the VM")
+	}
+	out, err := runAgentFuncs(t, root, stubs+`cmd_rm box paseo 2026-10-07T12:00:00Z`)
+	if err != nil || out != "removed" {
+		t.Errorf("matching removal: %q, %v", out, err)
+	}
+	out, err = runAgentFuncs(t, root, `cmd_rm box paseo 2026-10-07T12:00:00Z`)
+	if err != nil || out != "gone" {
+		t.Errorf("a VM someone else removed is not an error: %q, %v", out, err)
 	}
 }
 

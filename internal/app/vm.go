@@ -27,6 +27,11 @@ type VMInfo struct {
 	Forwards []vm.Forward `json:"forwards"`
 	// Grants are the host-side grants of the VM (not reported by the agent).
 	Grants []string `json:"grants,omitempty"`
+	// Owner and Slot label VMs managed by a tool; empty for VMs made by hand.
+	Owner string `json:"owner"`
+	Slot  string `json:"slot"`
+	// CreatedAt is nil for VMs created before cracklet recorded it.
+	CreatedAt *time.Time `json:"created_at"`
 }
 
 // NewVM creates and boots a microVM.
@@ -53,8 +58,12 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 	if err != nil {
 		return VMInfo{}, err
 	}
-	out, err := a.agentOutput(ctx, "new", name, strconv.Itoa(spec.VCPUs), strconv.Itoa(spec.MemMiB), disk,
-		spec.Mode(), spec.ProfileName())
+	args := []string{"new", name, strconv.Itoa(spec.VCPUs), strconv.Itoa(spec.MemMiB), disk, spec.Mode(), spec.ProfileName()}
+	if spec.Owner != "" { // a slot needs an owner, see Spec.Validate
+		// gc measures ages with this clock; the Lima VM's may lag after sleep
+		args = append(args, spec.Owner, orDash(spec.Slot), a.now().UTC().Format(time.RFC3339))
+	}
+	out, err := a.agentOutput(ctx, args...)
 	if err != nil {
 		if ctx.Err() != nil {
 			a.cleanupInterrupted(spec.Name)
@@ -118,14 +127,19 @@ func (a *App) RemoveVM(ctx context.Context, name string) error {
 	if err := a.readyForAgent(ctx); err != nil {
 		return err
 	}
-	if _, err := a.agentOutput(ctx, "rm", name); err != nil {
-		return err
-	}
-	if err := a.grantStore().Remove(name); err != nil {
+	if err := a.removeVM(ctx, name); err != nil {
 		return err
 	}
 	a.printf("%s removed\n", name)
 	return nil
+}
+
+// removeVM deletes a VM and its host-side state; the agent must be ready.
+func (a *App) removeVM(ctx context.Context, name string) error {
+	if _, err := a.agentOutput(ctx, "rm", name); err != nil {
+		return err
+	}
+	return a.grantStore().Remove(name)
 }
 
 // ListVMs returns all microVMs known to the agent.
@@ -133,13 +147,9 @@ func (a *App) ListVMs(ctx context.Context) ([]VMInfo, error) {
 	if err := a.readyForAgent(ctx); err != nil {
 		return nil, err
 	}
-	out, err := a.agentOutput(ctx, "ls")
+	vms, err := a.agentVMs(ctx)
 	if err != nil {
 		return nil, err
-	}
-	var vms []VMInfo
-	if err := json.Unmarshal(out, &vms); err != nil {
-		return nil, fmt.Errorf("parse agent output %q: %w", string(out), err)
 	}
 	store := a.grantStore()
 	for i := range vms {
@@ -158,6 +168,27 @@ func (a *App) InspectVM(ctx context.Context, name string) (VMInfo, error) {
 		return VMInfo{}, err
 	}
 	return a.describe(ctx, name)
+}
+
+// agentVMs lists the VMs as the agent reports them, without grants.
+func (a *App) agentVMs(ctx context.Context) ([]VMInfo, error) {
+	out, err := a.agentOutput(ctx, "ls")
+	if err != nil {
+		return nil, err
+	}
+	var vms []VMInfo
+	if err := json.Unmarshal(out, &vms); err != nil {
+		return nil, fmt.Errorf("parse agent output %q: %w", string(out), err)
+	}
+	return vms, nil
+}
+
+// orDash maps an unset optional agent argument to the agent's "-".
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 func parseVM(out []byte) (VMInfo, error) {

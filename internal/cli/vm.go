@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -43,6 +44,8 @@ func newNewCmd(get func() *app.App) *cobra.Command {
 	cmd.Flags().StringArrayVarP(&spec.Forwards, "port", "p", nil, "forward localhost:[HOST:]GUEST to the VM (repeatable)")
 	cmd.Flags().BoolVar(&spec.Fresh, "fresh", false, "cold-boot instead of restoring the golden snapshot")
 	cmd.Flags().StringArrayVar(&spec.Grants, "grant", nil, "grant a capability right away, e.g. claude or github:org/repo (repeatable)")
+	cmd.Flags().StringVar(&spec.Owner, "owner", "", "label the tool or person managing the VM; owned VMs can be collected by 'cracklet gc'")
+	cmd.Flags().StringVar(&spec.Slot, "slot", "", "the VM's position in its owner's pool, e.g. 3 (needs --owner)")
 	return cmd
 }
 
@@ -164,10 +167,12 @@ func newLsCmd(get func() *app.App) *cobra.Command {
 				return writeJSON(cmd, vms)
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tSTATE\tIP\tVCPUS\tMEM\tPORTS\tGRANTS\tSSH")
+			fmt.Fprintln(w, "NAME\tSTATE\tIP\tVCPUS\tMEM\tPORTS\tGRANTS\tOWNER\tAGE\tSSH")
+			now := time.Now()
 			for _, v := range vms {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%dM\t%s\t%s\t%s\n",
-					v.Name, v.State, v.IP, v.VCPUs, v.MemMiB, forwardLabels(v), grantLabels(v), sshHint(v))
+				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%dM\t%s\t%s\t%s\t%s\t%s\n",
+					v.Name, v.State, v.IP, v.VCPUs, v.MemMiB, forwardLabels(v), grantLabels(v),
+					ownerLabel(v), ageLabel(v, now), sshHint(v))
 			}
 			return w.Flush()
 		},
@@ -207,8 +212,40 @@ func printVM(cmd *cobra.Command, v app.VMInfo) error {
 	fmt.Fprintf(w, "Memory:\t%dM\n", v.MemMiB)
 	fmt.Fprintf(w, "Ports:\t%s\n", forwardLabels(v))
 	fmt.Fprintf(w, "Grants:\t%s\n", grantLabels(v))
+	fmt.Fprintf(w, "Owner:\t%s\n", dashIfEmpty(v.Owner))
+	fmt.Fprintf(w, "Slot:\t%s\n", dashIfEmpty(v.Slot))
+	fmt.Fprintf(w, "Created:\t%s\n", createdLabel(v, time.Now()))
 	fmt.Fprintf(w, "SSH:\t%s\n", sshHint(v))
 	return w.Flush()
+}
+
+// ownerLabel renders owner and slot as "owner/slot" for the ls table.
+func ownerLabel(v app.VMInfo) string {
+	if v.Slot != "" {
+		return v.Owner + "/" + v.Slot
+	}
+	return dashIfEmpty(v.Owner)
+}
+
+func ageLabel(v app.VMInfo, now time.Time) string {
+	if v.CreatedAt == nil {
+		return "-"
+	}
+	return app.HumanAge(now.Sub(*v.CreatedAt))
+}
+
+func createdLabel(v app.VMInfo, now time.Time) string {
+	if v.CreatedAt == nil {
+		return "-"
+	}
+	return v.CreatedAt.Local().Format(time.RFC3339) + " (" + ageLabel(v, now) + " ago)"
+}
+
+func dashIfEmpty(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 func sshHint(v app.VMInfo) string {

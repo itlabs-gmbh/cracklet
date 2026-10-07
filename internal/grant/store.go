@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -151,6 +152,62 @@ func (s Store) Remove(vm string) error {
 		return fmt.Errorf("remove vm state: %w", err)
 	}
 	return nil
+}
+
+// Names lists the VMs that have host-side state, sorted. Lock files and
+// entries that are not valid VM names are ignored.
+func (s Store) Names() ([]string, error) {
+	entries, err := os.ReadDir(s.Dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list vm state: %w", err)
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() && cap.ValidateName(e.Name()) == nil {
+			names = append(names, e.Name()) // ReadDir sorts by name
+		}
+	}
+	return names, nil
+}
+
+// Prune removes the state of every VM in names that alive does not report.
+// The locks of all of them are held while alive runs, so a VM that is
+// created and granted concurrently is either reported by alive or gets its
+// state only after the removal. Nothing is removed when alive fails.
+func (s Store) Prune(names []string, alive func() (map[string]bool, error)) ([]string, error) {
+	sorted := append([]string(nil), names...)
+	sort.Strings(sorted) // one global order, so two pruners cannot deadlock
+	for _, vm := range sorted {
+		if _, err := s.vmDir(vm); err != nil {
+			return nil, err
+		}
+	}
+	for _, vm := range sorted {
+		unlock, err := s.Lock(vm)
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
+	}
+	live, err := alive()
+	if err != nil {
+		return nil, err
+	}
+	var removed []string
+	for _, vm := range sorted {
+		if live[vm] {
+			continue
+		}
+		dir, _ := s.vmDir(vm) // validated above
+		if err := os.RemoveAll(dir); err != nil {
+			return removed, fmt.Errorf("remove vm state: %w", err)
+		}
+		removed = append(removed, vm)
+	}
+	return removed, nil
 }
 
 // writeAtomic writes through a uniquely named temp file so two concurrent

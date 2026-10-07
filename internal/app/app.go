@@ -32,6 +32,8 @@ type App struct {
 	// brokerWatch is how often a session sharing another session's broker
 	// checks whether it is still there.
 	brokerWatch time.Duration
+	// now is the clock gc measures VM ages against.
+	now func() time.Time
 }
 
 // EnvdSource yields the linux/arm64 cracklet-envd binary that Prepare ships
@@ -86,7 +88,7 @@ func WithEnvd(src EnvdSource) Option {
 func New(r runner.Runner, paths config.Paths, out io.Writer, opts ...Option) *App {
 	a := &App{r: r, lima: lima.NewClient(r, config.Instance), paths: paths, out: out,
 		lookPath: exec.LookPath, probe: waitForHostPort, portBusy: hostPortBusy, tunnelRetry: defaultTunnelRetry,
-		brokerWatch: defaultBrokerWatch}
+		brokerWatch: defaultBrokerWatch, now: time.Now}
 	a.envd = a.loadEnvd
 	for _, opt := range opts {
 		opt(a)

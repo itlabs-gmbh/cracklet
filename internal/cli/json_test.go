@@ -16,7 +16,12 @@ import (
 // check that --json keeps stdout machine-readable.
 func runSplit(t *testing.T, handler runner.FakeHandler, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
-	fake := runner.NewFake(handler)
+	return runSplitWith(t, runner.NewFake(handler), args...)
+}
+
+// runSplitWith is runSplit with a fake the test keeps to inspect the calls.
+func runSplitWith(t *testing.T, fake *runner.Fake, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
 	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
 	root := newRoot(func(w io.Writer) (*app.App, error) {
 		return app.New(fake, config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}, w), nil

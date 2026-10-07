@@ -106,6 +106,12 @@ validate_int_range() { # value min max label
 
 validate_disk() { [[ $1 =~ ^[0-9]{1,6}[MG]$ ]] || die "invalid disk size '$1' (use e.g. 512M or 4G)"; }
 validate_url()  { [[ $1 == https://* ]] || die "URL must use https: $1"; }
+validate_label() { # value kind; "-" means unset. Must match labelRe in internal/vm.
+  [[ $1 == - || $1 =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$ ]] || die "invalid $2 '$1' (letters, digits, '.', '_', '-')"
+}
+validate_time() { # UTC timestamp as the CLI sends it; "-" means unset
+  [[ $1 == - || $1 =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || die "invalid time '$1'"
+}
 
 validate_profile() {
   local p
@@ -208,19 +214,60 @@ fetch() { # url dest
 # vm_json never fails: a VM with missing metadata is reported as "broken" so
 # that one damaged directory cannot hide the healthy ones from `cracklet ls`.
 vm_json() { # name
-  local name=$1 dir idx state config profile
+  local name=$1 dir idx state config profile meta
   dir=$(vm_dir "$name"); idx=$(vm_index "$name"); config=$dir/config.json
   profile=$(cat "$dir/profile" 2>/dev/null || echo base)   # VMs from before profiles are base
+  meta=$(meta_json "$name")
   if unit_active "$name"; then state=running; else state=stopped; fi
-  if ! is_index "$idx" || [[ ! -s $config ]]; then
-    jq -cn --arg name "$name" \
-      '{name: $name, index: null, ip: null, state: "broken", vcpus: null, mem_mib: null, profile: null, forwards: []}'
+  # The creating marker outlives `new` only when the agent was killed; then
+  # nothing holds the lock and the VM is a leftover like any other broken one.
+  if [[ -e $dir/creating ]] && agent_busy; then
+    state=creating
+  elif [[ -e $dir/creating ]] || ! is_index "$idx" || [[ ! -s $config ]]; then
+    state=broken
+  fi
+  if [[ $state == creating || $state == broken ]]; then
+    jq -cn --arg name "$name" --arg state "$state" --argjson meta "$meta" \
+      '{name: $name, index: null, ip: null, state: $state, vcpus: null, mem_mib: null, profile: null, forwards: []} + $meta'
     return 0
   fi
   jq -c --arg name "$name" --argjson index "$idx" --arg ip "$(idx_ip "$idx")" --arg state "$state" \
-    --arg profile "$profile" --argjson forwards "$(forwards_json "$name")" \
+    --arg profile "$profile" --argjson forwards "$(forwards_json "$name")" --argjson meta "$meta" \
     '{name: $name, index: $index, ip: $ip, state: $state, vcpus: ."machine-config".vcpu_count,
-      mem_mib: ."machine-config".mem_size_mib, profile: $profile, forwards: $forwards}' "$config"
+      mem_mib: ."machine-config".mem_size_mib, profile: $profile, forwards: $forwards} + $meta' "$config"
+}
+
+# write_meta records who manages a VM and when it was created, so cracklet gc
+# and tools that keep a pool of VMs can recognise the ones they lost track of.
+# The CLI stamps owned VMs with the Mac's clock, the one gc measures ages
+# with; the Lima clock can lag behind after the Mac slept.
+write_meta() { # name owner slot [created] ("-" means unset)
+  local owner=$2 slot=$3 created=${4:--} meta
+  validate_label "$owner" owner
+  validate_label "$slot" slot
+  validate_time "$created"
+  [[ $slot == - || $owner != - ]] || die "a slot needs an owner"
+  [[ $owner != - ]] || owner=
+  [[ $slot != - ]] || slot=
+  [[ $created != - ]] || created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  meta=$(jq -cn --arg owner "$owner" --arg slot "$slot" --arg created "$created" \
+    '{owner: (if $owner == "" then null else $owner end), slot: (if $slot == "" then null else $slot end),
+      created_at: $created}') || die "cannot render metadata for $1"
+  atomic_write "$(vm_dir "$1")/meta.json" "$meta"
+}
+
+# meta_json never fails: missing (VMs from before metadata) or damaged
+# metadata reads as unknown, and only well-typed values are passed on.
+meta_json() { # name
+  local out
+  # jq still prints a result for a missing file before failing, so the
+  # fallback replaces its output instead of being appended to it. A date
+  # must survive a round trip, which rejects e.g. February 30 that the CLI
+  # could not parse.
+  out=$(jq -cs '.[0] | {owner: ((.owner | strings) // null), slot: ((.slot | strings) // null),
+    created_at: ((.created_at | strings | select(. as $t | try (fromdateiso8601 | todateiso8601 == $t) catch false)) // null)}' \
+    "$(vm_dir "$1")/meta.json" 2>/dev/null) || out='{"owner":null,"slot":null,"created_at":null}'
+  echo "$out"
 }
 
 forwards_json() { # name
@@ -691,11 +738,15 @@ grow_disk() { # path size (validated, uppercase)
   out=$(resize2fs "$path" 2>&1) || die "resize2fs failed: $out"
 }
 
-cmd_new() { # NAME|- VCPUS MEM_MIB DISK [snapshot|fresh [PROFILE]]
-  [[ $# -ge 4 && $# -le 6 ]] || die "usage: new NAME|- VCPUS MEM_MIB DISK [snapshot|fresh [PROFILE]]"
-  local name=$1 vcpus=$2 mem=$3 disk mode=${5:-snapshot} profile=${6:-base} idx dir image
+cmd_new() { # NAME|- VCPUS MEM_MIB DISK [snapshot|fresh [PROFILE [OWNER|- [SLOT|- [CREATED|-]]]]]
+  [[ $# -ge 4 && $# -le 9 ]] || die "usage: new NAME|- VCPUS MEM_MIB DISK [snapshot|fresh [PROFILE [OWNER|- [SLOT|- [CREATED|-]]]]]"
+  local name=$1 vcpus=$2 mem=$3 disk mode=${5:-snapshot} profile=${6:-base} owner=${7:--} slot=${8:--} created=${9:--}
+  local idx dir image
   disk=$(to_upper "$4")
   [[ $mode == snapshot || $mode == fresh ]] || die "mode must be snapshot or fresh"
+  validate_label "$owner" owner
+  validate_label "$slot" slot
+  validate_time "$created"
   validate_profile "$profile"
   # a grown disk cannot be restored from a snapshot taken with the image size
   [[ $disk == "$(profile_disk_size "$profile")" ]] || mode=fresh
@@ -716,8 +767,10 @@ cmd_new() { # NAME|- VCPUS MEM_MIB DISK [snapshot|fresh [PROFILE]]
   fi
   mkdir "$dir" 2>/dev/null || die "VM '$name' already exists"
   NEW_VM_NAME=$name                           # from here on, failures roll back
+  : > "$dir/creating"                         # keeps cracklet gc away until the VM is complete
   atomic_write "$dir/index" "$idx"
   atomic_write "$dir/profile" "$profile"
+  write_meta "$name" "$owner" "$slot" "$created"   # early, so leftovers of a killed agent keep their owner
   write_config "$name" "$idx" "$vcpus" "$mem"
   if [[ $mode == snapshot ]]; then
     cp --sparse=always "$(golden_dir "$profile" "$vcpus" "$mem")/rootfs.ext4" "$dir/rootfs.ext4"
@@ -729,6 +782,7 @@ cmd_new() { # NAME|- VCPUS MEM_MIB DISK [snapshot|fresh [PROFILE]]
     grow_disk "$dir/rootfs.ext4" "$disk"
     start_vm "$name"
   fi
+  rm -f "$dir/creating"
   NEW_VM_DONE=1
   vm_json "$name"
 }
@@ -943,11 +997,24 @@ stop_vm() { # name [force]
 cmd_start() { require_vm "$1"; start_vm "$1"; vm_json "$1"; }
 cmd_stop()  { require_vm "$1"; stop_vm "$1"; vm_json "$1"; }
 
-cmd_rm() {
+# cmd_rm with OWNER and CREATED is cracklet gc's removal: it runs under the
+# agent lock and removes the VM only if it is still the one gc listed, never
+# one that was removed and recreated under the same name in the meantime.
+# Prints "removed", or "gone" when someone else removed the VM first.
+cmd_rm() { # NAME [OWNER CREATED|-]
+  if [[ $# -eq 3 ]]; then
+    validate_name "$1"
+    validate_label "$2" owner
+    validate_time "$3"
+    if [[ ! -d $(vm_dir "$1") ]]; then echo gone; return 0; fi
+    [[ $(meta_json "$1" | jq -r '"\(.owner // "-") \(.created_at // "-")"') == "$2 $3" ]] ||
+      die "VM '$1' changed since it was listed, keeping it"
+  fi
   require_vm "$1"
   stop_vm "$1" force
   remove_host_entry "$1"
   rm -rf "$(vm_dir "$1")"
+  if [[ $# -eq 3 ]]; then echo removed; fi
 }
 
 cmd_ls() {
@@ -1059,6 +1126,10 @@ cmd_unforward() { # NAME HOSTPORT...
 
 # --- main --------------------------------------------------------------------
 
+# agent_busy reports whether another agent invocation holds the lock; only
+# commands that do not take it themselves (ls) may ask.
+agent_busy() { ! flock -n "$LOCK_FILE" true 2>/dev/null; }
+
 acquire_lock() {
   exec 9>"$LOCK_FILE"
   flock -w "$LOCK_WAIT_SECONDS" 9 || die "another cracklet operation is still running"
@@ -1078,7 +1149,7 @@ main() {
     new)     cmd_new "$@" ;;
     start)   [[ $# -eq 1 ]] || die "usage: start NAME"; cmd_start "$1" ;;
     stop)    [[ $# -eq 1 ]] || die "usage: stop NAME"; cmd_stop "$1" ;;
-    rm)      [[ $# -eq 1 ]] || die "usage: rm NAME"; cmd_rm "$1" ;;
+    rm)      [[ $# -eq 1 || $# -eq 3 ]] || die "usage: rm NAME [OWNER CREATED|-]"; cmd_rm "$@" ;;
     ls)      cmd_ls ;;
     forward)   [[ $# -ge 2 ]] || die "usage: forward NAME [HOST:]GUEST..."; cmd_forward "$@" ;;
     unforward) [[ $# -ge 2 ]] || die "usage: unforward NAME HOSTPORT..."; cmd_unforward "$@" ;;

@@ -29,9 +29,16 @@ const gcList = `[
 
 // gcHandler serves gcList and records which VMs the agent removed; failRm
 // makes the removal of that VM fail. paseo-4 was removed by someone else
-// after the listing, so the agent reports it gone.
+// after the listing, so the agent reports it gone. Removed VMs vanish from
+// later listings.
 func gcHandler(removed *[]string, failRm string) runner.FakeHandler {
-	base := defaultHandler(map[string]string{"ls": gcList})
+	return gcHandlerReborn(removed, failRm, "")
+}
+
+// gcHandlerReborn is gcHandler where reborn is created again under the same
+// name right after gc removed it, as a concurrent `new --grant` would.
+func gcHandlerReborn(removed *[]string, failRm, reborn string) runner.FakeHandler {
+	vanished := map[string]bool{}
 	return func(name string, args []string) ([]byte, error) {
 		joined := strings.Join(args, " ")
 		if _, rest, ok := strings.Cut(joined, config.AgentPath+" rm "); ok {
@@ -40,13 +47,33 @@ func gcHandler(removed *[]string, failRm string) runner.FakeHandler {
 			case failRm:
 				return nil, errors.New("agent rm: VM is wedged")
 			case "paseo-4":
+				vanished[vmName] = true
 				return []byte("gone\n"), nil
 			}
 			*removed = append(*removed, rest)
+			vanished[vmName] = vmName != reborn
 			return []byte("removed\n"), nil
 		}
-		return base(name, args)
+		if strings.HasSuffix(joined, config.AgentPath+" ls") {
+			return listWithout(vanished), nil
+		}
+		return defaultHandler(nil)(name, args)
 	}
+}
+
+func listWithout(vanished map[string]bool) []byte {
+	var vms []map[string]any
+	if err := json.Unmarshal([]byte(gcList), &vms); err != nil {
+		panic(err)
+	}
+	kept := []map[string]any{}
+	for _, v := range vms {
+		if !vanished[v["name"].(string)] {
+			kept = append(kept, v)
+		}
+	}
+	out, _ := json.Marshal(kept)
+	return out
 }
 
 func firstWords(calls []string) string {
@@ -184,6 +211,48 @@ func TestGCRemovesStateOfCollectedVMs(t *testing.T) {
 	}
 	if set, _ := store.Load("paseo-1"); len(set) != 0 {
 		t.Errorf("grants of a collected VM must go with it, got %v", set)
+	}
+}
+
+func TestGCKeepsStateOfAVMRecreatedMeanwhile(t *testing.T) {
+	var removed []string
+	a, _ := newGCApp(t, gcHandlerReborn(&removed, "", "paseo-1"))
+	store := grant.Store{Dir: a.paths.VMsDir()}
+	if err := store.Save("paseo-1", grant.Set{{Cap: "claude"}}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := a.GC(context.Background(), GCOptions{Owner: "paseo", Keep: []string{"paseo-2", "undated"}})
+	if err != nil {
+		t.Fatalf("GC: %v", err)
+	}
+	if names(res.VMs) != "paseo-1" {
+		t.Fatalf("paseo-1 should have been collected, got %q", names(res.VMs))
+	}
+	// the grants now belong to the new paseo-1 and must survive
+	if set, _ := store.Load("paseo-1"); len(set) != 1 {
+		t.Errorf("grants of the recreated VM were deleted")
+	}
+	if len(res.HostState) != 0 {
+		t.Errorf("no leftovers expected, got %v", res.HostState)
+	}
+}
+
+func TestGCPrunesStateOfAVMGoneMeanwhile(t *testing.T) {
+	var removed []string
+	a, _ := newGCApp(t, gcHandler(&removed, ""))
+	store := grant.Store{Dir: a.paths.VMsDir()}
+	if err := store.Save("paseo-4", grant.Set{{Cap: "claude"}}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := a.GC(context.Background(), GCOptions{Owner: "paseo"})
+	if err != nil {
+		t.Fatalf("GC: %v", err)
+	}
+	if set, _ := store.Load("paseo-4"); len(set) != 0 {
+		t.Errorf("leftover grants of a VM removed by someone else must go in the same run")
+	}
+	if strings.Join(res.HostState, ",") != "paseo-4" || strings.Contains(names(res.VMs), "paseo-4") {
+		t.Errorf("paseo-4 is a host-state leftover, not a collected VM: %+v", res)
 	}
 }
 

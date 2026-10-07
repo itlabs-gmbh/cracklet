@@ -72,8 +72,9 @@ func (o GCOptions) collects(v VMInfo, now time.Time) bool {
 }
 
 // GC removes the owned microVMs opts selects and then the host-side state
-// of VMs that no longer exist. A failed removal does not stop the others;
-// the errors are returned together with what was removed.
+// of VMs that no longer exist, including the ones it just removed. A failed
+// removal does not stop the others; the errors are returned together with
+// what was removed.
 func (a *App) GC(ctx context.Context, opts GCOptions) (GCResult, error) {
 	if err := opts.validate(); err != nil {
 		return GCResult{}, err
@@ -88,7 +89,11 @@ func (a *App) GC(ctx context.Context, opts GCOptions) (GCResult, error) {
 	res := GCResult{VMs: []VMInfo{}, HostState: []string{}, DryRun: opts.DryRun}
 	var errs []error
 	now := a.now()
+	// listed are the VMs known to exist; removed and gone ones leave it, so
+	// their host state is pruned below with a re-check under the grant locks
+	// that keeps the state of a VM recreated under the same name meanwhile.
 	listed := make(map[string]bool, len(vms))
+	collected := map[string]bool{}
 	for _, v := range vms {
 		listed[v.Name] = true
 		if !opts.collects(v, now) {
@@ -100,21 +105,26 @@ func (a *App) GC(ctx context.Context, opts GCOptions) (GCResult, error) {
 				errs = append(errs, fmt.Errorf("remove %s: %w", v.Name, err))
 				continue
 			}
+			delete(listed, v.Name)
 			if gone {
 				continue // removed by someone else since the listing
 			}
 		}
 		a.printf("%s %s\n", verb(opts.DryRun), a.describeOwned(v, now))
 		res.VMs = append(res.VMs, v)
+		collected[v.Name] = true
 	}
 	pruned, err := a.pruneHostState(ctx, listed, opts.DryRun)
 	if err != nil {
 		errs = append(errs, err)
 	}
 	for _, name := range pruned {
+		if collected[name] {
+			continue // its state went with the VM reported above
+		}
 		a.printf("%s host state of %s\n", verb(opts.DryRun), name)
+		res.HostState = append(res.HostState, name)
 	}
-	res.HostState = append(res.HostState, pruned...)
 	if len(res.VMs) == 0 && len(res.HostState) == 0 && len(errs) == 0 {
 		a.printf("nothing to collect\n")
 	}
@@ -124,7 +134,8 @@ func (a *App) GC(ctx context.Context, opts GCOptions) (GCResult, error) {
 // removeListed removes a VM only if it is still the one gc listed: the
 // agent compares owner and creation time under its lock, so a VM removed
 // and recreated under the same name in the meantime survives. gone reports
-// that the VM no longer existed.
+// that the VM no longer existed. The host state is left to pruneHostState:
+// removing it here could hit the grants of a VM recreated right after.
 func (a *App) removeListed(ctx context.Context, v VMInfo) (gone bool, err error) {
 	created := "-"
 	if v.CreatedAt != nil {
@@ -134,10 +145,7 @@ func (a *App) removeListed(ctx context.Context, v VMInfo) (gone bool, err error)
 	if err != nil {
 		return false, err
 	}
-	if strings.TrimSpace(string(out)) == "gone" {
-		return true, nil
-	}
-	return false, a.grantStore().Remove(v.Name)
+	return strings.TrimSpace(string(out)) == "gone", nil
 }
 
 // pruneHostState removes the grants and tokens of VMs the agent does not

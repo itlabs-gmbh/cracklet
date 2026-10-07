@@ -87,13 +87,16 @@ func TestCapInitAndLint(t *testing.T) {
 }
 
 func TestCapAddDownloadsAndInstalls(t *testing.T) {
-	body := "name = \"remote\"\n[proxy]\nupstream = \"https://x.example\"\n"
+	body := "name = \"remote\"\n[proxy]\nupstream = \"https://x.example\"\n[proxy.headers]\nAuthorization = \"Bearer {{ secret \\\"keychain:cracklet/claude-token\\\" }}\"\n"
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/bad" {
+		switch r.URL.Path {
+		case "/bad":
 			_, _ = w.Write([]byte("name = ["))
-			return
+		case "/claude.toml":
+			_, _ = w.Write([]byte(strings.Replace(body, `"remote"`, `"claude"`, 1)))
+		default:
+			_, _ = w.Write([]byte(body))
 		}
-		_, _ = w.Write([]byte(body))
 	}))
 	defer srv.Close()
 	http.DefaultClient = srv.Client()
@@ -106,8 +109,15 @@ func TestCapAddDownloadsAndInstalls(t *testing.T) {
 	if err := app.CapAdd(context.Background(), srv.URL+"/bad", true, strings.NewReader("")); err == nil {
 		t.Errorf("invalid downloads must be rejected")
 	}
+	if err := app.CapAdd(context.Background(), srv.URL+"/claude.toml", true, strings.NewReader("")); err == nil || !strings.Contains(err.Error(), "embedded capability") {
+		t.Errorf("downloads must not shadow embedded caps, got %v", err)
+	}
 	if err := app.CapAdd(context.Background(), srv.URL+"/remote.toml", false, strings.NewReader("n\n")); err == nil || !strings.Contains(err.Error(), "not installed") {
 		t.Errorf("declining must not install, got %v", err)
+	}
+	if !strings.Contains(out.String(), "sends the secret keychain:cracklet/claude-token in the Authorization header") ||
+		!strings.Contains(out.String(), "proxies guest requests to https://x.example") {
+		t.Errorf("confirmation should spell out the consequences:\n%s", out.String())
 	}
 	if err := app.CapAdd(context.Background(), srv.URL+"/remote.toml", false, strings.NewReader("y\n")); err != nil {
 		t.Fatalf("CapAdd: %v", err)

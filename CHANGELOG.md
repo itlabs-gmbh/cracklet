@@ -28,7 +28,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - `cracklet ls` shows a GRANTS column.
 - `cracklet tunnel NAME` serves a VM's broker without an interactive session,
   reconnecting until interrupted or the VM stops. `cracklet ssh` reuses a
-  running broker instead of failing on the already forwarded guest port.
+  running broker instead of failing on the already forwarded guest port, and
+  takes the broker over when the session or tunnel that owned it ends.
 - Apache-2.0 license, contributing guide, code of conduct, security policy,
   issue and pull request templates, and a CI workflow.
 - `cracklet new` prints a ready-to-use `ssh NAME.cracklet` command.

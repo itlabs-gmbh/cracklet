@@ -29,6 +29,9 @@ type App struct {
 	tunnel   Tunnel
 	// tunnelRetry is the pause before `cracklet tunnel` reconnects.
 	tunnelRetry time.Duration
+	// brokerWatch is how often a session sharing another session's broker
+	// checks whether it is still there.
+	brokerWatch time.Duration
 }
 
 // EnvdSource yields the linux/arm64 cracklet-envd binary that Prepare ships
@@ -82,7 +85,8 @@ func WithEnvd(src EnvdSource) Option {
 // New wires an App.
 func New(r runner.Runner, paths config.Paths, out io.Writer, opts ...Option) *App {
 	a := &App{r: r, lima: lima.NewClient(r, config.Instance), paths: paths, out: out,
-		lookPath: exec.LookPath, probe: waitForHostPort, portBusy: hostPortBusy, tunnelRetry: defaultTunnelRetry}
+		lookPath: exec.LookPath, probe: waitForHostPort, portBusy: hostPortBusy, tunnelRetry: defaultTunnelRetry,
+		brokerWatch: defaultBrokerWatch}
 	a.envd = a.loadEnvd
 	a.tunnel = a.startBroker
 	for _, opt := range opts {

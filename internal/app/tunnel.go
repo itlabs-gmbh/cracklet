@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"time"
 
 	"github.com/itlabs-gmbh/cracklet/internal/broker"
 	"github.com/itlabs-gmbh/cracklet/internal/config"
@@ -40,13 +42,55 @@ func (a *App) sshExtraArgs(ctx context.Context, name string) ([]string, func(), 
 	// A running broker belongs to a `cracklet tunnel` or another session,
 	// which already holds the guest port; a second -R would only fail.
 	if broker.Alive(a.paths.SocketPath(name)) {
-		return args, func() {}, nil
+		return args, a.standby(ctx, name), nil
 	}
 	socket, stop, err := a.tunnel(ctx, name)
 	if err != nil {
 		return nil, nil, err
 	}
 	return append(args, brokerForward(socket)...), stop, nil
+}
+
+// defaultBrokerWatch is how often a session sharing a broker checks for it.
+const defaultBrokerWatch = 2 * time.Second
+
+// standby keeps a session that shares another session's broker served: once
+// that broker goes away with its owner, standby starts its own broker and
+// forward and holds them until the returned stop is called. It runs quietly,
+// since the terminal belongs to the interactive session; the audit log still
+// records each takeover.
+func (a *App) standby(ctx context.Context, name string) func() {
+	ctx, cancel := context.WithCancel(ctx)
+	quiet := *a
+	quiet.out = io.Discard
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// holdTunnel also returns when a concurrent standby won the socket or
+		// the VM stopped; watching again covers both.
+		for quiet.waitForBrokerGone(ctx, name) {
+			_ = quiet.holdTunnel(ctx, name)
+			if !sleepCtx(ctx, quiet.brokerWatch) {
+				return
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+// waitForBrokerGone blocks while a broker answers on the VM's socket and
+// reports false if ctx ended first.
+func (a *App) waitForBrokerGone(ctx context.Context, name string) bool {
+	socket := a.paths.SocketPath(name)
+	for broker.Alive(socket) {
+		if !sleepCtx(ctx, a.brokerWatch) {
+			return false
+		}
+	}
+	return ctx.Err() == nil
 }
 
 // needsBroker reports whether any grant is served by the broker; ssh-agent

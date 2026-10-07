@@ -155,15 +155,20 @@ func TestTunnelNeedsBrokerGrant(t *testing.T) {
 	}
 }
 
-func TestSSHSkipsForwardWhenBrokerAlreadyServes(t *testing.T) {
+// newSharedBrokerApp returns an App with a short home (Unix socket limits on
+// macOS), a claude grant for agent1, and a stand-in broker already answering
+// on agent1's socket. closeBroker makes that broker go away.
+func newSharedBrokerApp(t *testing.T, handle runner.FakeHandler) (app *App, fake *runner.Fake, closeBroker func()) {
+	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "cracklet-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	script := &tunnelScript{states: []string{"running"}}
-	fake := runner.NewFake(script.handle)
-	app := New(fake, config.Paths{Home: dir, LimaHome: "/tmp/lima"}, &strings.Builder{}, WithEnvd(fakeEnvd), WithTunnel(fakeTunnel))
+	fake = runner.NewFake(handle)
+	app = New(fake, config.Paths{Home: dir, LimaHome: "/tmp/lima"}, &strings.Builder{}, WithEnvd(fakeEnvd), WithTunnel(fakeTunnel))
+	app.tunnelRetry = time.Millisecond
+	app.brokerWatch = time.Millisecond
 	set, _ := grant.ParseSet([]string{"claude"})
 	if err := app.grantStore().Save("agent1", set); err != nil {
 		t.Fatal(err)
@@ -175,7 +180,6 @@ func TestSSHSkipsForwardWhenBrokerAlreadyServes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
 	go func() {
 		for {
 			conn, err := ln.Accept()
@@ -185,12 +189,62 @@ func TestSSHSkipsForwardWhenBrokerAlreadyServes(t *testing.T) {
 			_ = conn.Close()
 		}
 	}()
+	var once sync.Once
+	closeBroker = func() { once.Do(func() { _ = ln.Close() }) }
+	t.Cleanup(closeBroker)
+	return app, fake, closeBroker
+}
+
+func TestSSHSkipsForwardWhenBrokerAlreadyServes(t *testing.T) {
+	script := &tunnelScript{states: []string{"running"}}
+	app, fake, _ := newSharedBrokerApp(t, script.handle)
 	if err := app.SSH(context.Background(), "agent1", nil); err != nil {
 		t.Fatalf("SSH: %v", err)
 	}
-	last := fake.Calls()[len(fake.Calls())-1]
-	if strings.Contains(last, "-R ") {
-		t.Errorf("the session owning the broker already holds the guest port: %s", last)
+	for _, c := range fake.Calls() {
+		if strings.Contains(c, "-R ") {
+			t.Errorf("the session owning the broker already holds the guest port: %s", c)
+		}
+	}
+}
+
+func TestSSHTakesOverBrokerWhenOwnerLeaves(t *testing.T) {
+	script := &tunnelScript{states: []string{"running"}}
+	var (
+		closeBroker func()
+		fake        *runner.Fake
+		took        = make(chan string, 1)
+	)
+	handle := func(name string, args []string) ([]byte, error) {
+		if name == "ssh" && len(args) > 0 && args[0] != "-N" {
+			// The interactive session: its peer ends, the takeover must follow.
+			closeBroker()
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				for _, c := range fake.Calls() {
+					if strings.HasPrefix(c, "ssh -N ") {
+						took <- c
+						return nil, nil
+					}
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			return nil, nil
+		}
+		return script.handle(name, args)
+	}
+	var app *App
+	app, fake, closeBroker = newSharedBrokerApp(t, handle)
+	if err := app.SSH(context.Background(), "agent1", nil); err != nil {
+		t.Fatalf("SSH: %v", err)
+	}
+	select {
+	case c := <-took:
+		if !strings.Contains(c, "-R 127.0.0.1:7777:/tmp/fake-agent1.sock") {
+			t.Errorf("takeover must forward the broker: %s", c)
+		}
+	default:
+		t.Fatalf("no takeover after the broker owner left:\n%s", fake.Dump())
 	}
 }
 

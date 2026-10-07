@@ -225,24 +225,26 @@ func writeBlock(b *strings.Builder, p, owner, comment, content string) {
 
 // rewriteSection emits shell that removes the lines between the begin and
 // end patterns from a file and appends section instead. The new content is
-// assembled in a temp file and then copied into the existing file, so its
-// mode, owner and inode are preserved; a missing file is created with 0644.
-// A file that does not end in a newline gets one first, otherwise the begin
-// marker would attach to the last foreign line and take it along on the
-// next replacement.
+// built in a temp file next to the target that was cloned from it with
+// `cp -p`, so mode and owner carry over, and is moved into place only after
+// every write succeeded: a failure (disk full, read-only directory) leaves
+// the original untouched and, under set -e, fails the script and with it
+// the grant. A missing file is created with 0644. A retained content that
+// does not end in a newline gets one first, otherwise the begin marker
+// would attach to the last foreign line and take it along next time.
 func rewriteSection(b *strings.Builder, p, beginPat, endPat, section string) {
 	q := shQuote(p)
-	b.WriteString("install -d -m 0755 " + shQuote(path.Dir(p)) + "\n")
-	b.WriteString("[ -f " + q + " ] || install -m 0644 /dev/null " + q + "\n")
-	b.WriteString("tmp=$(mktemp)\n")
-	b.WriteString("sed '/" + beginPat + "/,/" + endPat + "/d' " + q + " > \"$tmp\"\n")
+	dir := shQuote(path.Dir(p))
+	b.WriteString("install -d -m 0755 " + dir + "\n")
+	b.WriteString("tmp=$(mktemp " + dir + "/.cracklet.XXXXXX)\n")
+	b.WriteString("if [ -f " + q + " ]; then cp -p " + q + " \"$tmp\"; sed '/" + beginPat + "/,/" + endPat + "/d' " + q + " > \"$tmp\"; else chmod 0644 \"$tmp\"; fi\n")
 	// $(...) strips trailing newlines, so the output is empty exactly when
 	// the file is empty or already ends in a newline.
 	b.WriteString("if [ -n \"$(tail -c1 \"$tmp\")\" ]; then echo >> \"$tmp\"; fi\n")
 	b.WriteString("base64 -d >> \"$tmp\" <<'CRACKLET_B64'\n")
 	b.WriteString(base64.StdEncoding.EncodeToString([]byte(section)) + "\n")
 	b.WriteString("CRACKLET_B64\n")
-	b.WriteString("cat \"$tmp\" > " + q + " && rm -f \"$tmp\"\n")
+	b.WriteString("mv -f \"$tmp\" " + q + "\n")
 }
 
 func blockTag(owner string) string { return "cracklet:" + owner }

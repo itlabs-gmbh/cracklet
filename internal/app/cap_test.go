@@ -163,8 +163,8 @@ func TestSecretSetAndRemove(t *testing.T) {
 	if err := app.SecretSet(context.Background(), "claude-token", "value"); err != nil {
 		t.Fatal(err)
 	}
-	if !fake.Called("security add-generic-password -U -s cracklet -a claude-token -w") {
-		t.Errorf("unexpected calls:\n%s", fake.Dump())
+	if in, ok := fake.Input("security -i"); !ok || !strings.Contains(in, "-a claude-token -w \"value\"") {
+		t.Errorf("secret should go to security -i via stdin, got %q:\n%s", in, fake.Dump())
 	}
 	if !strings.Contains(out.String(), "keychain:cracklet/claude-token") {
 		t.Errorf("output:\n%s", out.String())

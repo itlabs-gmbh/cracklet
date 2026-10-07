@@ -165,14 +165,40 @@ func newSSHCmd(get func() *app.App) *cobra.Command {
 		Short: "Open a shell in a microVM (or run a command)",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			remote := args[1:]
-			// Allow `cracklet ssh NAME -- cmd` as well as `cracklet ssh NAME cmd`.
-			if len(remote) > 0 && remote[0] == "--" {
-				remote = remote[1:]
-			}
-			return get().SSH(cmd.Context(), args[0], remote)
+			return get().SSH(cmd.Context(), args[0], remoteArgs(args))
 		},
 	}
 	cmd.Flags().SetInterspersed(false)
 	return cmd
+}
+
+func newExecCmd(get func() *app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "exec NAME -- command [arg...]",
+		Short: "Run a command in a microVM with its arguments passed verbatim",
+		Long: `exec runs a command in a microVM with every argument quoted, so the guest
+receives exactly the argument vector given here. Unlike 'cracklet ssh NAME cmd',
+no word is re-split or expanded by the guest shell; scripts and plugins can pass
+untrusted strings safely. Stdin, stdout, stderr and the exit status are
+forwarded like with ssh.`,
+		Example: "  cracklet exec dev -- sh -c 'echo $HOME | wc -c'\n" +
+			"  cracklet exec dev -- git commit -m \"it's done\"",
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return get().Exec(cmd.Context(), args[0], remoteArgs(args))
+		},
+	}
+	cmd.Flags().SetInterspersed(false)
+	return cmd
+}
+
+// remoteArgs returns everything after NAME. A single leading "--" is
+// cracklet's own separator (`cracklet ssh NAME -- cmd`); a later one belongs
+// to the remote command.
+func remoteArgs(args []string) []string {
+	remote := args[1:]
+	if len(remote) > 0 && remote[0] == "--" {
+		return remote[1:]
+	}
+	return remote
 }

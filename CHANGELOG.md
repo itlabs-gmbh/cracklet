@@ -9,6 +9,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `cracklet prepare --cpus/--memory/--disk` resizes an existing Lima VM in
+  place (stop, `limactl edit`, start) instead of only applying at creation.
+  Only explicitly given flags count, running microVMs block the restart, a
+  host-side lock keeps `new`/`start` from racing it, and the disk can only grow.
+
 - `cracklet exec NAME -- command [arg...]` runs a command with every argument
   shell-quoted, so the guest receives exactly that argv. `cracklet ssh NAME cmd`
   keeps plain-ssh semantics and passes a shell command line.

@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/itlabs-gmbh/cracklet/internal/config"
+	"github.com/itlabs-gmbh/cracklet/internal/shquote"
 	"github.com/itlabs-gmbh/cracklet/internal/sshcfg"
 	"github.com/itlabs-gmbh/cracklet/internal/vm"
 )
@@ -33,11 +34,30 @@ func (e *RemoteExitError) Error() string {
 	return fmt.Sprintf("remote command exited with status %d", e.Code)
 }
 
-// SSH opens an interactive session (or runs command) on a microVM.
+// SSH opens an interactive session (or runs command) on a microVM. Like plain
+// ssh, the words of command are joined with spaces and interpreted by the
+// guest shell, so pipes and quoting in them are shell syntax.
 func (a *App) SSH(ctx context.Context, name string, command []string) error {
 	if err := vm.ValidateName(name); err != nil {
 		return err
 	}
+	return a.session(ctx, name, command)
+}
+
+// Exec runs argv on a microVM exactly as given: every word is quoted, so the
+// guest shell sees the same argument vector instead of re-splitting it.
+func (a *App) Exec(ctx context.Context, name string, argv []string) error {
+	if err := vm.ValidateName(name); err != nil {
+		return err
+	}
+	if len(argv) == 0 {
+		return errors.New("exec needs a command to run, e.g. 'cracklet exec NAME -- uname -a'")
+	}
+	return a.session(ctx, name, []string{shquote.Join(argv)})
+}
+
+// session runs ssh with the broker tunnel attached and maps its exit status.
+func (a *App) session(ctx context.Context, name string, command []string) error {
 	if err := a.requireRunning(ctx); err != nil {
 		return err
 	}

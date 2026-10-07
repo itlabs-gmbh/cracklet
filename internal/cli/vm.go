@@ -15,6 +15,7 @@ import (
 
 func newNewCmd(get func() *app.App) *cobra.Command {
 	spec := vm.Spec{}
+	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "new [name]",
 		Short: "Create and boot a microVM",
@@ -23,10 +24,17 @@ func newNewCmd(get func() *app.App) *cobra.Command {
 			if len(args) == 1 {
 				spec.Name = args[0]
 			}
-			_, err := get().NewVM(cmd.Context(), spec)
-			return err
+			info, err := get().NewVM(cmd.Context(), spec)
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				return writeJSON(cmd, info)
+			}
+			return nil
 		},
 	}
+	addJSONFlag(cmd, &asJSON)
 	cmd.Flags().IntVar(&spec.VCPUs, "vcpus", config.DefaultVCPUs, "number of vCPUs")
 	cmd.Flags().IntVar(&spec.MemMiB, "mem", config.DefaultMemMiB, "memory in MiB")
 	cmd.Flags().StringVar(&spec.Disk, "disk", "", "root disk size, e.g. 4G (default: the profile's image size; anything else cold-boots)")
@@ -138,7 +146,8 @@ func newStopCmd(get func() *app.App) *cobra.Command {
 }
 
 func newLsCmd(get func() *app.App) *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
 		Short:   "List microVMs",
@@ -148,15 +157,62 @@ func newLsCmd(get func() *app.App) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if asJSON {
+				if vms == nil {
+					vms = []app.VMInfo{} // print [] rather than null
+				}
+				return writeJSON(cmd, vms)
+			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "NAME\tSTATE\tIP\tVCPUS\tMEM\tPORTS\tGRANTS\tSSH")
 			for _, v := range vms {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%dM\t%s\t%s\tssh %s.%s\n",
-					v.Name, v.State, v.IP, v.VCPUs, v.MemMiB, forwardLabels(v), grantLabels(v), v.Name, config.Instance)
+				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%dM\t%s\t%s\t%s\n",
+					v.Name, v.State, v.IP, v.VCPUs, v.MemMiB, forwardLabels(v), grantLabels(v), sshHint(v))
 			}
 			return w.Flush()
 		},
 	}
+	addJSONFlag(cmd, &asJSON)
+	return cmd
+}
+
+func newInspectCmd(get func() *app.App) *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "inspect NAME",
+		Short: "Show the details of a microVM",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			info, err := get().InspectVM(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				return writeJSON(cmd, info)
+			}
+			return printVM(cmd, info)
+		},
+	}
+	addJSONFlag(cmd, &asJSON)
+	return cmd
+}
+
+func printVM(cmd *cobra.Command, v app.VMInfo) error {
+	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	fmt.Fprintf(w, "Name:\t%s\n", v.Name)
+	fmt.Fprintf(w, "State:\t%s\n", v.State)
+	fmt.Fprintf(w, "IP:\t%s\n", v.IP)
+	fmt.Fprintf(w, "Profile:\t%s\n", v.Profile)
+	fmt.Fprintf(w, "vCPUs:\t%d\n", v.VCPUs)
+	fmt.Fprintf(w, "Memory:\t%dM\n", v.MemMiB)
+	fmt.Fprintf(w, "Ports:\t%s\n", forwardLabels(v))
+	fmt.Fprintf(w, "Grants:\t%s\n", grantLabels(v))
+	fmt.Fprintf(w, "SSH:\t%s\n", sshHint(v))
+	return w.Flush()
+}
+
+func sshHint(v app.VMInfo) string {
+	return "ssh " + v.Name + "." + config.Instance
 }
 
 func newSSHCmd(get func() *app.App) *cobra.Command {

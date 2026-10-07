@@ -111,6 +111,29 @@ func TestPrepareCreatesInstanceAndImages(t *testing.T) {
 	}
 }
 
+func TestPrepareBuildsRequestedProfiles(t *testing.T) {
+	app, fake, _, paths := prepareApp(t, hostHandler("Running", agent.Checksum()), true)
+	writeDummyKeys(t, paths)
+	o := PrepareOptions{CPUs: 4, MemoryGiB: 8, DiskGiB: 40, Profiles: []string{"paseo", "base", "paseo"}}
+	if err := app.Prepare(context.Background(), o); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if !fake.CalledWithSuffix(config.RootfsSHA256 + " 2 1024 paseo") {
+		t.Errorf("extra profiles must be passed once, base implicitly:\n%s", fake.Dump())
+	}
+}
+
+func TestPrepareRejectsUnknownProfileBeforeSideEffects(t *testing.T) {
+	app, fake, _, _ := prepareApp(t, hostHandler("", agent.Checksum()), true)
+	o := PrepareOptions{CPUs: 4, MemoryGiB: 8, DiskGiB: 40, Profiles: []string{"nope"}}
+	if err := app.Prepare(context.Background(), o); err == nil {
+		t.Fatal("expected profile error")
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("invalid profiles must be rejected before anything runs, got:\n%s", fake.Dump())
+	}
+}
+
 func TestPrepareStartsStoppedInstanceAndInstallsLima(t *testing.T) {
 	app, fake, _, paths := prepareApp(t, hostHandler("Stopped", agent.Checksum()), false)
 	writeDummyKeys(t, paths)

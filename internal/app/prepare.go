@@ -14,13 +14,16 @@ import (
 	"github.com/itlabs-gmbh/cracklet/internal/config"
 	"github.com/itlabs-gmbh/cracklet/internal/host"
 	"github.com/itlabs-gmbh/cracklet/internal/lima"
+	"github.com/itlabs-gmbh/cracklet/internal/vm"
 )
 
-// PrepareOptions size the Lima VM created by Prepare.
+// PrepareOptions size the Lima VM created by Prepare and pick the guest
+// image profiles to build besides the always-built base image.
 type PrepareOptions struct {
 	CPUs      int
 	MemoryGiB int
 	DiskGiB   int
+	Profiles  []string
 }
 
 func (o PrepareOptions) template() lima.TemplateOptions {
@@ -28,13 +31,34 @@ func (o PrepareOptions) template() lima.TemplateOptions {
 }
 
 func (o PrepareOptions) isDefault() bool {
-	return o == PrepareOptions{CPUs: config.DefaultLimaCPUs, MemoryGiB: config.DefaultLimaMemoryGiB, DiskGiB: config.DefaultLimaDiskGiB}
+	return o.template() == lima.TemplateOptions{CPUs: config.DefaultLimaCPUs, MemoryGiB: config.DefaultLimaMemoryGiB, DiskGiB: config.DefaultLimaDiskGiB}
+}
+
+// extraProfiles validates the requested profiles and returns them without
+// duplicates and without base, which the agent always builds.
+func (o PrepareOptions) extraProfiles() ([]string, error) {
+	extra := make([]string, 0, len(o.Profiles))
+	seen := map[string]bool{vm.ProfileBase: true}
+	for _, p := range o.Profiles {
+		if err := vm.ValidateProfile(p); err != nil {
+			return nil, err
+		}
+		if !seen[p] {
+			seen[p] = true
+			extra = append(extra, p)
+		}
+	}
+	return extra, nil
 }
 
 // Prepare makes the host ready: preflight, Lima instance, agent, images, ssh config.
 // Every step is idempotent so the command can be re-run after a failure.
 func (a *App) Prepare(ctx context.Context, o PrepareOptions) error {
 	if err := o.template().Validate(); err != nil {
+		return err
+	}
+	profiles, err := o.extraProfiles()
+	if err != nil {
 		return err
 	}
 	if err := a.preflight(ctx); err != nil {
@@ -56,11 +80,12 @@ func (a *App) Prepare(ctx context.Context, o PrepareOptions) error {
 		return err
 	}
 	a.printf("==> Installing Firecracker %s, building guest images and the golden snapshot (this can take a few minutes)\n", config.FirecrackerVersion)
-	if err := a.agentRun(ctx, "prepare",
+	args := append([]string{"prepare",
 		config.FirecrackerVersion, config.FirecrackerSHA256,
 		config.KernelURL, config.KernelSHA256,
 		config.RootfsURL, config.RootfsSHA256,
-		strconv.Itoa(config.DefaultVCPUs), strconv.Itoa(config.DefaultMemMiB)); err != nil {
+		strconv.Itoa(config.DefaultVCPUs), strconv.Itoa(config.DefaultMemMiB)}, profiles...)
+	if err := a.agentRun(ctx, args...); err != nil {
 		return err
 	}
 	if err := a.writeSSHConfig(); err != nil {

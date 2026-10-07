@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -16,12 +17,23 @@ const (
 	MaxMemMiB = 262144
 	// MaxVCPUs caps the vCPU count per microVM.
 	MaxVCPUs = 32
-	// MinDisk matches the size of the base root filesystem image; disks can only grow.
-	MinDisk = "2G"
 	// MaxDisk caps the root disk at 1 TiB.
 	MaxDisk       = "1024G"
 	maxNameLength = 31
+
+	// ProfileBase is the plain Ubuntu guest image.
+	ProfileBase = "base"
+	// ProfilePaseo adds Node 22, the Paseo CLI, Claude Code, git and gh.
+	ProfilePaseo = "paseo"
 )
+
+// profileDisks is the size each profile image is built with. It is the
+// smallest disk a VM of that profile can have (disks only grow) and the only
+// size the golden snapshot can be restored with. Must match the agent.
+var profileDisks = map[string]string{
+	ProfileBase:  "2G",
+	ProfilePaseo: "8G",
+}
 
 var (
 	nameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
@@ -34,8 +46,11 @@ type Spec struct {
 	Name   string
 	VCPUs  int
 	MemMiB int
-	// Disk is the root disk size, e.g. "2G" or "512M".
+	// Disk is the root disk size, e.g. "2G" or "512M"; empty means the
+	// profile's image size.
 	Disk string
+	// Profile selects the guest image; empty means ProfileBase.
+	Profile string
 	// Forwards are port forwards to set up after boot, as "[HOST:]GUEST".
 	Forwards []string
 	// Fresh forces a cold boot instead of restoring the golden snapshot.
@@ -50,6 +65,53 @@ func (s Spec) Mode() string {
 		return "fresh"
 	}
 	return "snapshot"
+}
+
+// ProfileName is the profile the agent should use for this spec.
+func (s Spec) ProfileName() string {
+	if s.Profile == "" {
+		return ProfileBase
+	}
+	return s.Profile
+}
+
+// DiskSize is the requested disk, defaulting to the profile's image size so
+// that the VM can be restored from the golden snapshot.
+func (s Spec) DiskSize() string {
+	if s.Disk != "" {
+		return s.Disk
+	}
+	disk, _ := ProfileDisk(s.ProfileName()) // unknown profiles fail in Validate
+	return disk
+}
+
+// ProfileNames lists the known guest image profiles.
+func ProfileNames() []string {
+	names := make([]string, 0, len(profileDisks))
+	for name := range profileDisks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// ValidateProfile rejects profiles the agent cannot build.
+func ValidateProfile(name string) error {
+	if _, ok := profileDisks[name]; !ok {
+		return fmt.Errorf("unknown profile %q (available: %s)", name, strings.Join(ProfileNames(), ", "))
+	}
+	return nil
+}
+
+// ProfileDisk is the image size of a profile; empty means ProfileBase.
+func ProfileDisk(name string) (string, error) {
+	if name == "" {
+		name = ProfileBase
+	}
+	if err := ValidateProfile(name); err != nil {
+		return "", err
+	}
+	return profileDisks[name], nil
 }
 
 // ValidateName enforces DNS-label-like names so they are safe in hostnames, unit names and paths.
@@ -109,14 +171,19 @@ func (s Spec) Validate() error {
 	if s.MemMiB < MinMemMiB || s.MemMiB > MaxMemMiB {
 		return fmt.Errorf("memory must be between %d and %d MiB, got %d", MinMemMiB, MaxMemMiB, s.MemMiB)
 	}
-	size, err := ParseSize(s.Disk)
+	minDisk, err := ProfileDisk(s.ProfileName())
 	if err != nil {
 		return err
 	}
-	minSize, _ := ParseSize(MinDisk)
+	size, err := ParseSize(s.DiskSize())
+	if err != nil {
+		return err
+	}
+	minSize, _ := ParseSize(minDisk)
 	maxSize, _ := ParseSize(MaxDisk)
 	if size < minSize || size > maxSize {
-		return fmt.Errorf("disk must be between %s (the base image size) and %s, got %s", MinDisk, MaxDisk, s.Disk)
+		return fmt.Errorf("disk must be between %s (the %s image size) and %s, got %s",
+			minDisk, s.ProfileName(), MaxDisk, s.DiskSize())
 	}
 	for _, f := range s.Forwards {
 		if _, err := ParseForward(f); err != nil {

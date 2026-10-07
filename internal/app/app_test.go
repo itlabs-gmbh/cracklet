@@ -66,7 +66,7 @@ func TestNewRunsAgentWithSpec(t *testing.T) {
 	if info.IP != "172.16.1.2" || info.Name != "vm1" {
 		t.Errorf("unexpected info: %+v", info)
 	}
-	want := "limactl shell cracklet -- sudo " + config.AgentPath + " new vm1 2 1024 2G snapshot"
+	want := "limactl shell cracklet -- sudo " + config.AgentPath + " new vm1 2 1024 2G snapshot base"
 	if !fake.Called(want) {
 		t.Errorf("expected call %q, got:\n%s", want, fake.Dump())
 	}
@@ -198,7 +198,7 @@ func TestNewForwardsCanonicalDiskSize(t *testing.T) {
 	if _, err := app.NewVM(context.Background(), vm.Spec{Name: "vm1", VCPUs: 1, MemMiB: 256, Disk: " 4g "}); err != nil {
 		t.Fatalf("NewVM: %v", err)
 	}
-	if !fake.CalledWithSuffix(config.AgentPath + " new vm1 1 256 4G snapshot") {
+	if !fake.CalledWithSuffix(config.AgentPath + " new vm1 1 256 4G snapshot base") {
 		t.Errorf("disk size must be canonicalised, got:\n%s", fake.Dump())
 	}
 }

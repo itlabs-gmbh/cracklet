@@ -79,13 +79,31 @@ syscalls, without spawning a process: right after a restore every page the
 guest touches is a nested page fault, so even `ip addr add` costs hundreds of
 milliseconds there.
 
-`--fresh` forces a cold boot; a `--disk` larger than the base image implies it.
-Snapshots are keyed on the base image, kernel, Firecracker version and the
+`--fresh` forces a cold boot; a `--disk` other than the profile's image size
+implies it. Snapshots are keyed on the profile image, kernel, Firecracker version and the
 agent revision, so they rebuild automatically after `cracklet prepare` changes any
 of them. `cracklet-envd` is cross-compiled for linux/arm64 and embedded into cracklet
 (`make envd`). A cracklet installed with `go install ...@latest` has no embedded copy;
 `cracklet prepare` then cross-compiles the daemon from the module cache with your Go
 toolchain, at the same module version as the CLI.
+
+### Image profiles
+
+`--profile` picks the guest image. `base` is the plain Ubuntu 24.04 image (curl
+and python3, 2G). `paseo` adds Node 22, `@getpaseo/cli`, Claude Code (native
+installer), git, gh and rsync on an 8G image. Build a profile once, then use it:
+
+```sh
+cracklet prepare --profile paseo   # chroot install from apt/npm/claude.ai, a few minutes
+cracklet new agent --profile paseo # restores the paseo golden snapshot
+```
+
+A profile image is built at its full size because a golden snapshot can only
+be restored onto a disk of exactly that size; `--disk` defaults to it.
+`paseo.service` (`paseo daemon run --home /root/.paseo`) is installed but not
+enabled, so the snapshot carries no daemon keypair; start it per VM with
+`systemctl enable --now paseo`. Package versions are the newest available when
+the image is built; a new base image or agent revision rebuilds the profile.
 
 ### Port forwarding
 

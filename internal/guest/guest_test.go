@@ -1,0 +1,256 @@
+package guest
+
+import (
+	"encoding/base64"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/itlabs-gmbh/cracklet/internal/cap"
+)
+
+var data = cap.TemplateData{VM: "agent1", BrokerURL: "http://127.0.0.1:7777", PseudoToken: "tok"}
+
+func claudeLike() cap.Cap {
+	return cap.Cap{Name: "claude", Guest: cap.Guest{
+		Env:       map[string]string{"ANTHROPIC_BASE_URL": "{{ .BrokerURL }}/claude", "CLAUDE_CODE_OAUTH_TOKEN": "sk-{{ .PseudoToken }}"},
+		JSONMerge: []cap.JSONMerge{{Path: "/root/.claude.json", Key: "hasCompletedOnboarding", Value: true}},
+	}}
+}
+
+func mcpLike() cap.Cap {
+	return cap.Cap{Name: "devtools", Guest: cap.Guest{
+		JSONMerge: []cap.JSONMerge{{Path: "/root/.claude.json", Key: "mcpServers.devtools",
+			Value: map[string]any{"type": "http", "url": "{{ .BrokerURL }}/devtools"}}},
+	}}
+}
+
+func fileLike() cap.Cap {
+	return cap.Cap{Name: "github", Guest: cap.Guest{
+		Files: []cap.File{{Path: "/etc/gitconfig", Content: "[url \"{{ .BrokerURL }}/github/\"]\n\tinsteadOf = https://github.com/\n"}},
+	}}
+}
+
+func TestRenderMergesCapsAndRejectsConflicts(t *testing.T) {
+	plan, err := Render([]cap.Cap{claudeLike(), mcpLike(), fileLike()}, data)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if plan.Env["ANTHROPIC_BASE_URL"] != "http://127.0.0.1:7777/claude" || plan.Env["CLAUDE_CODE_OAUTH_TOKEN"] != "sk-tok" {
+		t.Errorf("env = %v", plan.Env)
+	}
+	if len(plan.Files) != 1 || plan.Files[0].Mode != "0644" || !strings.Contains(plan.Files[0].Content, "http://127.0.0.1:7777/github/") {
+		t.Errorf("files = %+v", plan.Files)
+	}
+	if len(plan.Merges) != 2 || plan.Merges[1].Value.(map[string]any)["url"] != "http://127.0.0.1:7777/devtools" {
+		t.Errorf("merges = %+v", plan.Merges)
+	}
+	want := []string{"file:/etc/gitconfig", "json:/root/.claude.json#hasCompletedOnboarding", "json:/root/.claude.json#mcpServers.devtools"}
+	if strings.Join(plan.Manifest(), ",") != strings.Join(want, ",") {
+		t.Errorf("manifest = %v", plan.Manifest())
+	}
+
+	dupEnv := claudeLike()
+	dupEnv.Name = "other"
+	if _, err := Render([]cap.Cap{claudeLike(), dupEnv}, data); err == nil || !strings.Contains(err.Error(), "both set ANTHROPIC_BASE_URL") {
+		t.Errorf("duplicate env should fail, got %v", err)
+	}
+	dupFile := fileLike()
+	dupFile.Name = "other"
+	if _, err := Render([]cap.Cap{fileLike(), dupFile}, data); err == nil || !strings.Contains(err.Error(), "both write /etc/gitconfig") {
+		t.Errorf("duplicate file should fail, got %v", err)
+	}
+	badEnv := cap.Cap{Name: "x", Guest: cap.Guest{Env: map[string]string{"A": `has "quote"`}}}
+	if _, err := Render([]cap.Cap{badEnv}, data); err == nil {
+		t.Errorf("env values with quotes must be rejected")
+	}
+	for _, bad := range []string{"/etc/with space", "/tmp/x;id", "/tmp/$(id)", "/tmp/a|b", "/etc/../root/x", "relative"} {
+		badPath := cap.Cap{Name: "x", Guest: cap.Guest{Files: []cap.File{{Path: bad}}}}
+		if _, err := Render([]cap.Cap{badPath}, data); err == nil {
+			t.Errorf("path %q must be rejected", bad)
+		}
+	}
+	stale := Plan{}.staleFiles(State{Manifest: []string{"file:/tmp/x;id", "file:/etc/ok"}})
+	if len(stale) != 1 || stale[0] != "/etc/ok" {
+		t.Errorf("unsafe manifest entries must be ignored, got %v", stale)
+	}
+}
+
+func TestParseState(t *testing.T) {
+	enc := func(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+	out := ManifestPath + "\n" + enc("file:/etc/gitconfig\njson:/root/.claude.json#old\n") + "\n" +
+		"/root/.claude.json\n" + enc(`{"old":1}`) + "\n" +
+		"/missing.json\n\n"
+	st, err := ParseState([]byte(out))
+	if err != nil {
+		t.Fatalf("ParseState: %v", err)
+	}
+	if len(st.Manifest) != 2 || st.Files["/root/.claude.json"] != `{"old":1}` {
+		t.Errorf("state = %+v", st)
+	}
+	if _, ok := st.Files["/missing.json"]; ok {
+		t.Errorf("missing files must be absent")
+	}
+	if _, err := ParseState([]byte("odd\n")); err == nil {
+		t.Errorf("odd line count must fail")
+	}
+	if _, err := ParseState([]byte("/x\n!!!\n")); err == nil {
+		t.Errorf("bad base64 must fail")
+	}
+}
+
+func TestApplyScriptRemovesStaleAndMergesJSON(t *testing.T) {
+	plan, err := Render([]cap.Cap{claudeLike()}, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := State{
+		Manifest: []string{"file:/etc/gitconfig", "json:/root/.claude.json#mcpServers.devtools", "json:/root/.claude.json#hasCompletedOnboarding"},
+		Files:    map[string]string{"/root/.claude.json": `{"mcpServers":{"devtools":{"type":"http"},"mine":{"type":"stdio"}},"projects":{"x":1}}`},
+	}
+	script, err := plan.ApplyScript(st)
+	if err != nil {
+		t.Fatalf("ApplyScript: %v", err)
+	}
+	if !strings.Contains(script, "rm -f '/etc/gitconfig'\n") {
+		t.Errorf("stale file should be removed:\n%s", script)
+	}
+	merged := decodeHeredoc(t, script, "/root/.claude.json")
+	for _, want := range []string{`"hasCompletedOnboarding": true`, `"mine"`, `"projects"`} {
+		if !strings.Contains(merged, want) {
+			t.Errorf("merged JSON should contain %s:\n%s", want, merged)
+		}
+	}
+	if strings.Contains(merged, `"devtools"`) {
+		t.Errorf("stale key should be deleted:\n%s", merged)
+	}
+	if !strings.Contains(decodeEnvBlock(t, script), `ANTHROPIC_BASE_URL="http://127.0.0.1:7777/claude"`) {
+		t.Errorf("env block missing:\n%s", script)
+	}
+	manifest := decodeHeredoc(t, script, ManifestPath)
+	if manifest != "json:/root/.claude.json#hasCompletedOnboarding\n" {
+		t.Errorf("manifest = %q", manifest)
+	}
+
+	bad := State{Files: map[string]string{"/root/.claude.json": "[1,2]"}}
+	if _, err := plan.ApplyScript(bad); err == nil || !strings.Contains(err.Error(), "not a JSON object") {
+		t.Errorf("non-object JSON must fail, got %v", err)
+	}
+}
+
+func TestEmptyPlanClearsEnvBlock(t *testing.T) {
+	script, err := Plan{Env: map[string]string{}}.ApplyScript(State{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decodeEnvBlock(t, script) != "" {
+		t.Errorf("empty plan should not write markers:\n%s", script)
+	}
+	if !strings.Contains(script, "sed '/^"+markerBegin) {
+		t.Errorf("old block should still be stripped:\n%s", script)
+	}
+}
+
+// TestScriptsRunUnderBash executes the generated scripts against a fake root
+// so quoting and heredocs are verified by a real shell, not by eye.
+func TestScriptsRunUnderBash(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	root := t.TempDir()
+	rooted := func(p string) string { return filepath.Join(root, p) }
+	_ = os.MkdirAll(rooted("/etc"), 0o755)
+	_ = os.MkdirAll(rooted("/root"), 0o755)
+	_ = os.WriteFile(rooted(EnvFile), []byte("PATH=/usr/bin\n"+markerBegin+"\nOLD=\"1\"\n"+markerEnd+"\n"), 0o644)
+	_ = os.WriteFile(rooted("/root/.claude.json"), []byte(`{"projects":{"keep":true}}`), 0o600)
+
+	plan, err := Render([]cap.Cap{claudeLike(), fileLike()}, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := rewriteRoot(plan.ReadScript(), root)
+	out, err := exec.Command("bash", "-c", read).Output()
+	if err != nil {
+		t.Fatalf("read script: %v\n%s", err, out)
+	}
+	st, err := ParseState(out)
+	if err != nil {
+		t.Fatalf("ParseState: %v\n%s", err, out)
+	}
+	st = unrootState(st, root)
+	if !strings.Contains(st.Files["/root/.claude.json"], "keep") {
+		t.Fatalf("read script should return existing JSON, got %+v", st)
+	}
+	apply, err := plan.ApplyScript(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("bash", "-c", rewriteRoot(apply, root)).CombinedOutput(); err != nil {
+		t.Fatalf("apply script: %v\n%s", err, out)
+	}
+	env, _ := os.ReadFile(rooted(EnvFile))
+	if !strings.Contains(string(env), "PATH=/usr/bin\n") || strings.Contains(string(env), "OLD=") ||
+		!strings.Contains(string(env), `CLAUDE_CODE_OAUTH_TOKEN="sk-tok"`) {
+		t.Errorf("environment file:\n%s", env)
+	}
+	js, _ := os.ReadFile(rooted("/root/.claude.json"))
+	if !strings.Contains(string(js), `"keep": true`) || !strings.Contains(string(js), `"hasCompletedOnboarding": true`) {
+		t.Errorf("claude.json:\n%s", js)
+	}
+	git, _ := os.ReadFile(rooted("/etc/gitconfig"))
+	if !strings.Contains(string(git), "insteadOf = https://github.com/") {
+		t.Errorf("gitconfig:\n%s", git)
+	}
+	manifest, _ := os.ReadFile(rooted(ManifestPath))
+	if !strings.Contains(string(manifest), "file:/etc/gitconfig") {
+		t.Errorf("manifest:\n%s", manifest)
+	}
+}
+
+// rewriteRoot points every absolute guest path in a script at a temp root.
+func rewriteRoot(script, root string) string {
+	re := regexp.MustCompile(`([\s='])/(etc|root)(/|\s|'|$)`)
+	return re.ReplaceAllString(script, "${1}"+root+"/${2}${3}")
+}
+
+func unrootState(st State, root string) State {
+	out := State{Manifest: st.Manifest, Files: map[string]string{}}
+	for p, c := range st.Files {
+		out.Files[strings.TrimPrefix(p, root)] = c
+	}
+	return out
+}
+
+func decodeEnvBlock(t *testing.T, script string) string {
+	t.Helper()
+	marker := "base64 -d >> \"$tmp\" <<'CRACKLET_B64'\n"
+	i := strings.Index(script, marker)
+	if i < 0 {
+		t.Fatalf("no env heredoc in:\n%s", script)
+	}
+	rest := script[i+len(marker):]
+	data, err := base64.StdEncoding.DecodeString(rest[:strings.Index(rest, "\n")])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func decodeHeredoc(t *testing.T, script, path string) string {
+	t.Helper()
+	marker := "base64 -d > '" + path + "' <<'CRACKLET_B64'\n"
+	i := strings.Index(script, marker)
+	if i < 0 {
+		t.Fatalf("no heredoc for %s in:\n%s", path, script)
+	}
+	rest := script[i+len(marker):]
+	enc := rest[:strings.Index(rest, "\n")]
+	data, err := base64.StdEncoding.DecodeString(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}

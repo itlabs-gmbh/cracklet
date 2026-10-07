@@ -58,6 +58,13 @@ func (f *Fake) RunWithInput(_ context.Context, input io.Reader, name string, arg
 	return err
 }
 
+// OutputWithInput implements Runner and captures what was streamed to stdin.
+func (f *Fake) OutputWithInput(_ context.Context, input io.Reader, name string, args ...string) ([]byte, error) {
+	data, _ := io.ReadAll(input)
+	f.record(name, args, string(data))
+	return f.handler(name, args)
+}
+
 // Calls returns every recorded invocation as a space-joined command line.
 func (f *Fake) Calls() []string {
 	f.mu.Lock()

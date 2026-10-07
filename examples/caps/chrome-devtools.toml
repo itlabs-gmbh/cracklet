@@ -1,0 +1,22 @@
+# Run the Chrome DevTools MCP server on the Mac (where your browser is) and
+# let Claude Code inside the guest use it as an HTTP MCP server.
+#
+#   cp examples/caps/chrome-devtools.toml ~/.cracklet/caps/
+#   cracklet cap lint chrome-devtools
+#   cracklet grant agent1 chrome-devtools
+#
+# The broker starts `npx chrome-devtools-mcp` lazily on the first request and
+# bridges its stdio to Streamable HTTP. Server-initiated requests (sampling,
+# elicitation) are answered with a JSON-RPC error.
+
+name = "chrome-devtools"
+description = "Chrome DevTools MCP running on the Mac, bridged into the guest"
+
+[mcp]
+command = "npx"
+args = ["-y", "chrome-devtools-mcp@latest"]
+
+[[guest.json_merge]]
+path = "/root/.claude.json"
+key = "mcpServers.chrome-devtools"
+value = { type = "http", url = "{{ .BrokerURL }}/chrome-devtools" }

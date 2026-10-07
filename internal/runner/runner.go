@@ -24,6 +24,8 @@ type Runner interface {
 	Run(ctx context.Context, name string, args ...string) error
 	// RunWithInput runs a command with the given stdin; stdout/stderr go to the terminal.
 	RunWithInput(ctx context.Context, input io.Reader, name string, args ...string) error
+	// OutputWithInput runs a command with the given stdin and returns its stdout.
+	OutputWithInput(ctx context.Context, input io.Reader, name string, args ...string) ([]byte, error)
 }
 
 // Exec is the production Runner backed by os/exec.
@@ -41,8 +43,14 @@ func NewExec() *Exec {
 // Output implements Runner. Stderr is both streamed and captured so that error
 // messages carry the command's own diagnostics.
 func (e *Exec) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return e.OutputWithInput(ctx, nil, name, args...)
+}
+
+// OutputWithInput implements Runner.
+func (e *Exec) OutputWithInput(ctx context.Context, input io.Reader, name string, args ...string) ([]byte, error) {
 	var captured bytes.Buffer
 	cmd := newCommand(ctx, name, args...)
+	cmd.Stdin = input
 	cmd.Stderr = io.MultiWriter(e.Stderr, &captured)
 	out, err := cmd.Output()
 	if err != nil {

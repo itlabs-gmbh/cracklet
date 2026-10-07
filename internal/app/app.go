@@ -25,6 +25,7 @@ type App struct {
 	probe    PortProbe
 	portBusy PortCheck
 	envd     EnvdSource
+	tunnel   Tunnel
 }
 
 // EnvdSource yields the linux/arm64 cracklet-envd binary that Prepare ships
@@ -80,6 +81,7 @@ func New(r runner.Runner, paths config.Paths, out io.Writer, opts ...Option) *Ap
 	a := &App{r: r, lima: lima.NewClient(r, config.Instance), paths: paths, out: out,
 		lookPath: exec.LookPath, probe: waitForHostPort, portBusy: hostPortBusy}
 	a.envd = a.loadEnvd
+	a.tunnel = a.startBroker
 	for _, opt := range opts {
 		opt(a)
 	}

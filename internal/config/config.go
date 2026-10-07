@@ -42,6 +42,10 @@ const (
 	DefaultVCPUs  = 2
 	DefaultMemMiB = 1024
 	DefaultDisk   = "2G"
+
+	// BrokerGuestPort is where the broker tunnel appears inside a microVM
+	// (127.0.0.1:PORT) while `cracklet ssh` is open.
+	BrokerGuestPort = 7777
 )
 
 // Paths describes the host-side directories cracklet works with.
@@ -82,6 +86,21 @@ func (p Paths) SSHConfigPath() string { return filepath.Join(p.Home, "ssh_config
 
 // LimaTemplatePath is the rendered Lima template used to create the instance.
 func (p Paths) LimaTemplatePath() string { return filepath.Join(p.Home, "lima.yaml") }
+
+// CapsDir holds the user's capability files (one <name>.toml each).
+func (p Paths) CapsDir() string { return filepath.Join(p.Home, "caps") }
+
+// VMsDir holds per-VM host-side state (grants, placeholder token).
+func (p Paths) VMsDir() string { return filepath.Join(p.Home, "vms") }
+
+// RunDir holds the broker sockets.
+func (p Paths) RunDir() string { return filepath.Join(p.Home, "run") }
+
+// SocketPath is the broker socket for a VM.
+func (p Paths) SocketPath(vm string) string { return filepath.Join(p.RunDir(), vm+".sock") }
+
+// AuditLog records every broker decision.
+func (p Paths) AuditLog() string { return filepath.Join(p.Home, "audit.log") }
 
 // LimaSSHConfig is the ssh_config Lima writes for an instance.
 func (p Paths) LimaSSHConfig(instance string) string {

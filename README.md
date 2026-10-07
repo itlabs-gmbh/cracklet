@@ -112,6 +112,65 @@ Then `ssh dev.cracklet` works from anywhere, including `scp`, `rsync` and your I
 The alias uses the Lima VM as an SSH jump host (`ProxyCommand ssh -W`), so no
 port forwarding or `sudo` is needed on macOS.
 
+### Capabilities: credentials and MCPs without copying secrets
+
+A microVM is isolated from your Mac on purpose. When an agent inside needs
+GitHub, Claude Code or an MCP server that only runs on the Mac, cracklet opens
+one controlled hole: a **broker** that hands out *connections, never secrets*.
+
+```sh
+cracklet secret set claude-token          # paste the output of `claude setup-token`
+cracklet secret set github-token          # a fine-grained token for the repos you grant
+cracklet grant agent1 claude github:itlabs-gmbh/cracklet ssh-agent
+cracklet ssh agent1                       # the broker lives as long as this session
+cracklet grants agent1
+cracklet revoke agent1 github:itlabs-gmbh/cracklet
+```
+
+While `cracklet ssh` is open, the broker listens on a Unix socket on the Mac and
+ssh forwards it to `127.0.0.1:7777` inside the guest (`-R`). Tools in the guest
+talk to that address with a per-VM placeholder token; the broker swaps it for
+the real credential from the macOS Keychain. The socket identifies the VM, so
+there is nothing in the guest worth stealing, and the hole closes with the
+terminal. `ssh-agent` is a built-in grant that adds `-A`; pair it with
+`ssh-add -c` to confirm every signature.
+
+Grants are the only policy: default deny, one file per VM in `~/.cracklet/vms/`,
+checked on every request and logged to `~/.cracklet/audit.log`. A denied request
+answers with the exact `cracklet grant` command that would allow it.
+
+The broker is harness-neutral. It knows three primitives, and everything
+specific to Claude Code, GitHub or any other tool is a **capability file**:
+
+| Primitive | What the broker does                                                        |
+|-----------|-----------------------------------------------------------------------------|
+| `proxy`   | reverse-proxies `/<cap>/...` to an upstream and injects headers from secrets |
+| `mcp`     | runs a stdio MCP server on the Mac and serves it as an HTTP MCP endpoint     |
+| `exec`    | pipes the request through an external program (`cracklet-cap-<name>`)        |
+
+```sh
+cracklet cap ls                           # embedded: claude, github; yours in ~/.cracklet/caps
+cracklet cap show claude                  # the TOML file
+cracklet cap show github --render --vm agent1   # what the guest receives
+cracklet cap init codex                   # commented skeleton, then: cracklet cap lint codex
+cracklet cap add https://example.com/gemini.toml   # shown before it is installed
+```
+
+A capability declares the primitive plus a `[guest]` section with environment
+variables, files and JSON merges, all templated with `.BrokerURL`, `.PseudoToken`
+and `.VM`. Secrets (`keychain:`, `env:`, `cmd:`, `file:`) are only valid on the
+broker side; `cracklet cap lint` rejects them in guest sections. A user file in
+`~/.cracklet/caps/<name>.toml` replaces an embedded capability of the same name.
+See `examples/caps/` for an MCP bridge and an exec plugin.
+
+The embedded `claude` capability points `ANTHROPIC_BASE_URL` at the broker and
+sets `CLAUDE_CODE_OAUTH_TOKEN` to the placeholder, so the unmodified Claude Code
+binary in the guest sends exactly the headers of a normal subscription login.
+Usage draws on your own subscription like any other session. Anthropic's terms
+allow signing in to the unmodified binary with your own subscription, including
+in sandboxes you run; they do not allow routing other people's requests through
+your account, so keep the broker personal.
+
 ## How a microVM is wired
 
 | Piece            | Value                                                                 |
@@ -198,6 +257,9 @@ make e2e      # boots a real microVM (requires cracklet prepare), cleans up afte
 Layout: `cmd/cracklet` (entry point), `internal/cli` (cobra commands),
 `internal/app` (workflows), `internal/lima` (limactl wrapper + template),
 `internal/agent` (embedded guest script), `internal/host` (preflight),
+`internal/broker` (per-VM capability broker), `internal/cap` (capability files,
+embedded defaults), `internal/grant` (per-VM policy), `internal/guest`
+(guest provisioning scripts), `internal/secret` (Keychain/env/cmd/file resolver),
 `internal/vm` (spec validation), `internal/sshcfg` (ssh_config rendering).
 
 ## Contributing

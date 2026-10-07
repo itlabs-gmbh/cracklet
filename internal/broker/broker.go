@@ -1,0 +1,299 @@
+// Package broker is the one controlled hole in a microVM's isolation. It
+// listens on a per-VM Unix socket on the Mac (tunnelled into the guest by
+// `cracklet ssh -R`), checks the VM's grants and hands out connections,
+// never secrets. It knows three primitives; everything else is a cap file.
+package broker
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/itlabs-gmbh/cracklet/internal/cap"
+	"github.com/itlabs-gmbh/cracklet/internal/grant"
+)
+
+// SecretResolver resolves cap secret references.
+type SecretResolver interface {
+	Resolve(ctx context.Context, ref string) (string, error)
+}
+
+// GrantSource returns the VM's current grants; it is consulted per request so
+// a `cracklet grant` or `revoke` in another terminal applies to the next
+// request of an already running broker.
+type GrantSource func() (grant.Set, error)
+
+// Broker serves one microVM.
+type Broker struct {
+	VM      string
+	Caps    cap.Set
+	Grants  GrantSource
+	Secrets SecretResolver
+	// Audit receives one line per request.
+	Audit io.Writer
+	// Data is the template data the guest was provisioned with.
+	Data cap.TemplateData
+	// Transport overrides the upstream transport (tests).
+	Transport http.RoundTripper
+	// Now is the audit clock.
+	Now func() time.Time
+
+	mu       sync.Mutex
+	handlers map[string]http.Handler
+	bridges  []*mcpBridge
+	log      *syncWriter
+	closed   bool
+}
+
+// syncWriter serialises writes from request handlers and MCP child stderr
+// copiers onto one audit writer.
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (s *syncWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
+}
+
+// logger returns the shared audit writer, or nil when auditing is off.
+func (b *Broker) logger() io.Writer {
+	if b.Audit == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.log == nil {
+		b.log = &syncWriter{w: b.Audit}
+	}
+	return b.log
+}
+
+// Handler returns the HTTP handler for the socket.
+func (b *Broker) Handler() http.Handler {
+	return http.HandlerFunc(b.serve)
+}
+
+// Close stops child processes started for MCP caps.
+func (b *Broker) Close() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.closed = true
+	for _, br := range b.bridges {
+		br.stop()
+	}
+	b.bridges = nil
+	b.handlers = nil
+}
+
+// detail writes a host-side diagnostic to the audit log. Guests only ever see
+// generic messages, so paths, commands and item names stay on the Mac.
+func (b *Broker) detail(format string, args ...any) {
+	if log := b.logger(); log != nil {
+		fmt.Fprintf(log, "  "+format+"\n", args...)
+	}
+}
+
+type decision struct {
+	cap, scope string
+	status     int
+	reason     string
+}
+
+func (b *Broker) serve(w http.ResponseWriter, r *http.Request) {
+	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+	d := b.dispatch(rec, r)
+	b.audit(r, d, rec.status)
+}
+
+// dispatch routes /<cap>/<rest> and enforces grants.
+func (b *Broker) dispatch(w http.ResponseWriter, r *http.Request) decision {
+	if reason := unsafePath(r.URL); reason != "" {
+		writeError(w, http.StatusBadRequest, reason, "")
+		return decision{status: http.StatusBadRequest, reason: "unsafe path"}
+	}
+	name, rest := splitCap(r.URL.Path)
+	if name == "" {
+		writeError(w, http.StatusNotFound, "no capability in path; the broker serves /<cap>/...", "cracklet cap ls")
+		return decision{status: http.StatusNotFound, reason: "no cap"}
+	}
+	c, ok := b.Caps[name]
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("unknown capability %q", name), "cracklet cap ls")
+		return decision{cap: name, status: http.StatusNotFound, reason: "unknown cap"}
+	}
+	scope := scopeOf(c, rest)
+	grants, err := b.Grants()
+	if err != nil {
+		b.detail("grants of %s unreadable: %v", b.VM, err)
+		writeError(w, http.StatusInternalServerError, "the broker could not read this VM's grants; see the audit log on the host", "")
+		return decision{cap: name, scope: scope, status: http.StatusInternalServerError, reason: "grants"}
+	}
+	if !grants.Allows(name, scope) {
+		hint := grant.Hint(b.VM, name, scope)
+		writeError(w, http.StatusForbidden, fmt.Sprintf("%s is not granted to %s", grant.Grant{Cap: name, Scope: scope}, b.VM), hint)
+		return decision{cap: name, scope: scope, status: http.StatusForbidden, reason: "denied"}
+	}
+	h, err := b.handlerFor(c)
+	if err != nil {
+		b.detail("cap %s: %v", name, err)
+		writeError(w, http.StatusInternalServerError, "the broker could not set up this capability; see the audit log on the host", "")
+		return decision{cap: name, scope: scope, status: http.StatusInternalServerError, reason: "setup"}
+	}
+	r2 := r.Clone(r.Context())
+	r2.URL.Path = rest
+	r2.URL.RawPath = ""
+	h.ServeHTTP(w, r2)
+	return decision{cap: name, scope: scope, reason: "allow"}
+}
+
+func (b *Broker) handlerFor(c cap.Cap) (http.Handler, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return nil, fmt.Errorf("broker is closed")
+	}
+	if h, ok := b.handlers[c.Name]; ok {
+		return h, nil
+	}
+	var h http.Handler
+	var err error
+	switch c.Kind() {
+	case cap.KindProxy:
+		h, err = b.newProxy(c)
+	case cap.KindMCP:
+		br := newMCPBridge(c, b.childLog())
+		b.bridges = append(b.bridges, br)
+		h = br
+	case cap.KindExec:
+		h = b.newExec(c)
+	default:
+		err = fmt.Errorf("capability %q has no primitive", c.Name)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if b.handlers == nil {
+		b.handlers = map[string]http.Handler{}
+	}
+	b.handlers[c.Name] = h
+	return h, nil
+}
+
+// unsafePath rejects paths that could make the scope check and the upstream
+// request disagree: dot segments (".." would escape a granted org/repo) and
+// percent-encoded slashes or dots, which upstreams may decode differently.
+func unsafePath(u *url.URL) string {
+	for _, seg := range strings.Split(u.Path, "/") {
+		if seg == "." || seg == ".." {
+			return "dot segments are not allowed in capability paths"
+		}
+	}
+	if escaped := strings.ToLower(u.EscapedPath()); strings.Contains(escaped, "%2f") || strings.Contains(escaped, "%2e") {
+		return "percent-encoded slashes and dots are not allowed in capability paths"
+	}
+	return ""
+}
+
+// splitCap separates the capability name from the rest of the path.
+func splitCap(path string) (name, rest string) {
+	trimmed := strings.TrimPrefix(path, "/")
+	name, rest, _ = strings.Cut(trimmed, "/")
+	if err := cap.ValidateName(name); err != nil {
+		return "", ""
+	}
+	return name, "/" + rest
+}
+
+// scopeOf derives the grant scope from the leading path segments, dropping a
+// trailing .git so clone URLs with and without it share a grant.
+func scopeOf(c cap.Cap, rest string) string {
+	if c.Proxy == nil || c.Proxy.ScopeSegments == 0 {
+		return ""
+	}
+	parts := strings.Split(strings.TrimPrefix(rest, "/"), "/")
+	if len(parts) < c.Proxy.ScopeSegments {
+		return ""
+	}
+	segs := make([]string, c.Proxy.ScopeSegments)
+	copy(segs, parts[:c.Proxy.ScopeSegments])
+	for i, s := range segs {
+		if s == "" {
+			return ""
+		}
+		segs[i] = strings.TrimSuffix(s, ".git")
+	}
+	return strings.Join(segs, "/")
+}
+
+func (b *Broker) audit(r *http.Request, d decision, status int) {
+	log := b.logger()
+	if log == nil {
+		return
+	}
+	now := time.Now
+	if b.Now != nil {
+		now = b.Now
+	}
+	scope := d.scope
+	if scope == "" {
+		scope = "-"
+	}
+	// %q keeps a decoded newline in the path from forging a log line.
+	fmt.Fprintf(log, "%s vm=%s cap=%s scope=%s %s %s %q %d\n",
+		now().UTC().Format(time.RFC3339), b.VM, orDash(d.cap), scope, d.reason, r.Method, r.URL.Path, status)
+}
+
+// childLog is the writer MCP children's stderr goes to. handlerFor holds mu,
+// so the shared writer is created without taking it again.
+func (b *Broker) childLog() io.Writer {
+	if b.Audit == nil {
+		return nil
+	}
+	if b.log == nil {
+		b.log = &syncWriter{w: b.Audit}
+	}
+	return b.log
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+// Flush keeps streaming responses (SSE) flowing through the recorder.
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func writeError(w http.ResponseWriter, status int, message, hint string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	body := map[string]string{"error": message}
+	if hint != "" {
+		body["hint"] = hint
+	}
+	_ = json.NewEncoder(w).Encode(body)
+}

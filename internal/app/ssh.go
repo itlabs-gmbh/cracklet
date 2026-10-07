@@ -44,7 +44,12 @@ func (a *App) SSH(ctx context.Context, name string, command []string) error {
 	if err := a.ensureSSHConfig(); err != nil {
 		return err
 	}
-	err := a.r.Run(ctx, "ssh", a.sshArgs(name, command)...)
+	extra, stop, err := a.sshExtraArgs(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer stop()
+	err = a.r.Run(ctx, "ssh", append(extra, a.sshArgs(name, command)...)...)
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
 		return err

@@ -40,6 +40,8 @@ type Spec struct {
 	Forwards []string
 	// Fresh forces a cold boot instead of restoring the golden snapshot.
 	Fresh bool
+	// Grants are capabilities to grant right after creation, as "cap[:scope]".
+	Grants []string
 }
 
 // Mode is the boot mode the agent should use for this spec.

@@ -29,7 +29,7 @@ func fakeHandler(t *testing.T) runner.FakeHandler {
 			return []byte(`{"name":"box","index":2,"ip":"172.16.2.2","state":"running"}`), nil
 		case strings.Contains(joined, config.AgentPath+" rm "):
 			return nil, nil
-		case name == "ssh":
+		case name == "ssh", name == "security":
 			return nil, nil
 		}
 		return nil, errors.New("unexpected: " + joined)

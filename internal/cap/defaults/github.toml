@@ -1,0 +1,29 @@
+# Git over HTTPS to github.com through the broker. Scoped per repository:
+#   cracklet grant <vm> github:itlabs-gmbh/cracklet
+#   cracklet grant <vm> github:*
+#
+# Store a token once (a fine-grained token limited to the repos you grant is
+# the safest choice):
+#   cracklet secret set github-token
+#
+# The guest's git config rewrites https://github.com/ to the broker, so plain
+# `git clone https://github.com/org/repo` and `git push` just work.
+
+name = "github"
+description = "git over HTTPS to github.com, scoped per org/repo"
+
+[proxy]
+upstream = "https://github.com"
+scope_segments = 2
+[proxy.headers]
+Authorization = "Bearer {{ secret \"keychain:cracklet/github-token\" }}"
+
+[[guest.files]]
+path = "/etc/gitconfig"
+mode = "0644"
+content = """
+# Managed by cracklet: route github.com through the broker.
+[url "{{ .BrokerURL }}/github/"]
+	insteadOf = https://github.com/
+	insteadOf = git@github.com:
+"""

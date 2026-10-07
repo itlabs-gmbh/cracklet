@@ -1,0 +1,19 @@
+# An exec capability: every request runs a program on the Mac with the request
+# body on stdin and CRACKLET_* variables describing it; stdout is the response.
+# This one mints a short-lived GitHub token with the gh CLI so the guest can
+# use the GitHub API without ever holding your long-lived token.
+#
+#   cp examples/caps/gh-token.toml ~/.cracklet/caps/
+#   cracklet grant agent1 gh-token
+#   # in the guest:
+#   export GH_TOKEN=$(curl -s -X POST http://127.0.0.1:7777/gh-token/)
+#
+# Variables available to the program: CRACKLET_VM, CRACKLET_CAP, CRACKLET_SCOPE,
+# CRACKLET_METHOD, CRACKLET_PATH, CRACKLET_QUERY, CRACKLET_CONTENT_TYPE.
+
+name = "gh-token"
+description = "hand out the gh CLI's current token on request"
+
+[exec]
+command = "sh"
+args = ["-c", "gh auth token"]

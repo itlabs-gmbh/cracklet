@@ -24,6 +24,8 @@ type VMInfo struct {
 	VCPUs    int          `json:"vcpus"`
 	MemMiB   int          `json:"mem_mib"`
 	Forwards []vm.Forward `json:"forwards"`
+	// Grants are the host-side grants of the VM (not reported by the agent).
+	Grants []string `json:"grants,omitempty"`
 }
 
 // NewVM creates and boots a microVM.
@@ -63,7 +65,16 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 	}
 	a.printf("%s is running at %s\n  cracklet ssh %s\n  ssh %s.%s\n", info.Name, info.IP, info.Name, info.Name, config.Instance)
 	if len(spec.Forwards) > 0 {
-		return a.Forward(ctx, info.Name, spec.Forwards)
+		if info, err = a.Forward(ctx, info.Name, spec.Forwards); err != nil {
+			return info, err
+		}
+	}
+	if len(spec.Grants) > 0 {
+		set, err := a.Grant(ctx, info.Name, spec.Grants)
+		if err != nil {
+			return info, err
+		}
+		info.Grants = set.Strings()
 	}
 	return info, nil
 }
@@ -108,6 +119,9 @@ func (a *App) RemoveVM(ctx context.Context, name string) error {
 	if _, err := a.agentOutput(ctx, "rm", name); err != nil {
 		return err
 	}
+	if err := a.grantStore().Remove(name); err != nil {
+		return err
+	}
 	a.printf("%s removed\n", name)
 	return nil
 }
@@ -124,6 +138,14 @@ func (a *App) ListVMs(ctx context.Context) ([]VMInfo, error) {
 	var vms []VMInfo
 	if err := json.Unmarshal(out, &vms); err != nil {
 		return nil, fmt.Errorf("parse agent output %q: %w", string(out), err)
+	}
+	store := a.grantStore()
+	for i := range vms {
+		set, err := store.Load(vms[i].Name)
+		if err != nil {
+			return nil, err
+		}
+		vms[i].Grants = set.Strings()
 	}
 	return vms, nil
 }

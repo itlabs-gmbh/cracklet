@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/tabwriter"
 
@@ -183,8 +184,19 @@ func (a *App) CapAdd(ctx context.Context, url string, yes bool, confirm io.Reade
 	if err != nil {
 		return err
 	}
+	// A downloaded file must not silently take over an embedded capability:
+	// a remote "claude.toml" could point the broker, and with it the stored
+	// token, at any upstream. Overriding embedded caps stays a manual step.
+	embedded, err := cap.Embedded()
+	if err != nil {
+		return err
+	}
+	if _, shadows := embedded[c.Name]; shadows {
+		return fmt.Errorf("%q is an embedded capability; downloaded files may not replace it (copy it into %s by hand if you really want that)", c.Name, a.paths.CapsDir())
+	}
 	// Control characters could hide lines from the review below.
 	a.printf("%s\n", strings.ToValidUTF8(stripControl(string(body)), "?"))
+	a.printf("%s", capSummary(c))
 	path := filepath.Join(a.paths.CapsDir(), c.Name+".toml")
 	if _, err := os.Stat(path); err == nil {
 		a.printf("note: this replaces the existing %s\n", path)
@@ -213,6 +225,36 @@ func sortedKeys(m map[string]string) []string {
 	}
 	sortStrings(keys)
 	return keys
+}
+
+// capSummary spells out what a capability would do with your secrets, so the
+// confirmation is about consequences rather than TOML.
+func capSummary(c cap.Cap) string {
+	var b strings.Builder
+	switch c.Kind() {
+	case cap.KindProxy:
+		fmt.Fprintf(&b, "=> %s proxies guest requests to %s\n", c.Name, c.Proxy.Upstream)
+		for _, k := range sortedKeys(c.Proxy.Headers) {
+			for _, ref := range secretRefs(c.Proxy.Headers[k]) {
+				fmt.Fprintf(&b, "   and sends the secret %s in the %s header\n", ref, k)
+			}
+		}
+	case cap.KindMCP:
+		fmt.Fprintf(&b, "=> %s runs %q on this Mac\n", c.Name, strings.Join(append([]string{c.MCP.Command}, c.MCP.Args...), " "))
+	case cap.KindExec:
+		fmt.Fprintf(&b, "=> %s runs %q on this Mac for every request\n", c.Name, strings.Join(append([]string{c.Exec.Command}, c.Exec.Args...), " "))
+	}
+	return b.String()
+}
+
+var secretRefRe = regexp.MustCompile(`secret\s+"([^"]+)"`)
+
+func secretRefs(tmpl string) []string {
+	var refs []string
+	for _, m := range secretRefRe.FindAllStringSubmatch(tmpl, -1) {
+		refs = append(refs, m[1])
+	}
+	return refs
 }
 
 // stripControl replaces control characters other than newline and tab.

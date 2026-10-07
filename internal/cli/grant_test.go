@@ -128,8 +128,8 @@ func TestSecretCommandsReadStdin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("secret set: %v\n%s", err, out)
 	}
-	if in, ok := fake.Input("-a claude-token -w"); !ok || in != "s3cret\ns3cret\n" {
-		t.Errorf("secret should be piped to security, got %q", in)
+	if in, ok := fake.Input("security -i"); !ok || !strings.Contains(in, `-a claude-token -w "s3cret"`) {
+		t.Errorf("secret should be piped to security -i, got %q", in)
 	}
 	if _, _, err := runIn(t, home, "\n", "secret", "set", "claude-token"); err == nil {
 		t.Errorf("empty secret must fail")

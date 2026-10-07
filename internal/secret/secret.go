@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -186,19 +187,33 @@ func (r *Resolver) now() time.Time {
 }
 
 // Store writes a value into the macOS Keychain under KeychainService/account,
-// replacing an existing item. The value travels via stdin, never argv.
+// replacing an existing item. The whole command goes to `security -i` on
+// stdin: the value never appears in argv, and unlike `-w` without an
+// argument, security does not fall back to prompting on the terminal (which
+// silently stored whatever the user typed at that prompt, usually nothing).
 func Store(ctx context.Context, r runner.Runner, account, value string) error {
 	if strings.TrimSpace(value) == "" {
 		return fmt.Errorf("refusing to store an empty secret")
 	}
-	// -U updates an existing item in place. With -w and no argument, security
-	// prompts for the password and its confirmation; both come from stdin here,
-	// so the value never appears in argv or `ps`.
-	input := strings.NewReader(value + "\n" + value + "\n")
-	if err := r.RunWithInput(ctx, input, "security", "add-generic-password", "-U", "-s", KeychainService, "-a", account, "-w"); err != nil {
+	if strings.ContainsAny(value, "\n\r") {
+		return fmt.Errorf("refusing to store a multi-line secret")
+	}
+	if !accountRe.MatchString(account) {
+		return fmt.Errorf("secret name %q must be lowercase letters, digits and dashes", account)
+	}
+	command := "add-generic-password -U -s " + KeychainService + " -a " + account + " -w " + securityQuote(value) + "\n"
+	if err := r.RunWithInput(ctx, strings.NewReader(command), "security", "-i"); err != nil {
 		return fmt.Errorf("store secret %s: %w", account, err)
 	}
 	return nil
+}
+
+var accountRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// securityQuote quotes a word for security's interactive command parser,
+// which understands double quotes with backslash escapes.
+func securityQuote(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }
 
 // Delete removes a Keychain item written by Store.

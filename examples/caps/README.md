@@ -7,7 +7,7 @@ at the top explain what it hands into the guest and how.
 | File                   | Primitive | Shows                                              |
 |------------------------|-----------|----------------------------------------------------|
 | `chrome-devtools.toml` | `mcp`     | a stdio MCP server on the Mac bridged into the guest |
-| `gh-token.toml`        | `exec`    | an external program answering requests              |
+| `gh-api.toml`          | `exec`    | an external program answering requests (no secret leaves the Mac) |
 
 The embedded `claude` and `github` capabilities are the `proxy` examples; print
 them with `cracklet cap show claude` and `cracklet cap show github`.

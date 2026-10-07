@@ -51,7 +51,7 @@ func TestCapShowSourceAndRender(t *testing.T) {
 	if err := app.CapShow("github", true, "agent1"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "env GIT_CONFIG_KEY_0=url.http://127.0.0.1:7777/github/.insteadOf") {
+	if !strings.Contains(out.String(), "block /etc/gitconfig") || !strings.Contains(out.String(), "http://127.0.0.1:7777/github/") {
 		t.Errorf("render not shown:\n%s", out.String())
 	}
 	if err := app.CapShow("nope", false, ""); err == nil {

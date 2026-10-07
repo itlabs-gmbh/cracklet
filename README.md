@@ -151,14 +151,14 @@ specific to Claude Code, GitHub or any other tool is a **capability file**:
 ```sh
 cracklet cap ls                           # embedded: claude, github; yours in ~/.cracklet/caps
 cracklet cap show claude                  # the TOML file
-cracklet cap show github --render --vm agent1   # what the guest receives (GIT_CONFIG_* variables)
+cracklet cap show github --render --vm agent1   # what the guest receives
 cracklet cap init codex                   # commented skeleton, then: cracklet cap lint codex
 cracklet cap add https://example.com/gemini.toml   # shown before it is installed
 ```
 
 A capability declares the primitive plus a `[guest]` section with environment
-variables, files and JSON merges, all templated with `.BrokerURL`, `.PseudoToken`
-and `.VM`. Secrets (`keychain:`, `env:`, `cmd:`, `file:`) are only valid on the
+variables, files, managed blocks inside shared files (such as `/etc/gitconfig`)
+and JSON merges, all templated with `.BrokerURL`, `.PseudoToken` and `.VM`. Secrets (`keychain:`, `env:`, `cmd:`, `file:`) are only valid on the
 broker side; `cracklet cap lint` rejects them in guest sections. A user file in
 `~/.cracklet/caps/<name>.toml` replaces an embedded capability of the same name.
 See `examples/caps/` for an MCP bridge and an exec plugin.

@@ -28,6 +28,12 @@ func mcpLike() cap.Cap {
 	}}
 }
 
+func blockLike() cap.Cap {
+	return cap.Cap{Name: "github", Guest: cap.Guest{
+		Blocks: []cap.Block{{Path: "/etc/gitconfig", Content: "[url \"{{ .BrokerURL }}/github/\"]\n\tinsteadOf = https://github.com/\n"}},
+	}}
+}
+
 func fileLike() cap.Cap {
 	return cap.Cap{Name: "github", Guest: cap.Guest{
 		Files: []cap.File{{Path: "/etc/gitconfig", Content: "[url \"{{ .BrokerURL }}/github/\"]\n\tinsteadOf = https://github.com/\n"}},
@@ -94,6 +100,36 @@ func TestRenderMergesCapsAndRejectsConflicts(t *testing.T) {
 	stale := Plan{}.staleFiles(State{Manifest: []string{"file:/tmp/x;id", "file:/etc/ok"}})
 	if len(stale) != 1 || stale[0] != "/etc/ok" {
 		t.Errorf("unsafe manifest entries must be ignored, got %v", stale)
+	}
+}
+
+func TestBlocksAreManagedPerOwner(t *testing.T) {
+	plan, err := Render([]cap.Cap{blockLike()}, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Manifest()[0] != "block:/etc/gitconfig#github" {
+		t.Errorf("manifest = %v", plan.Manifest())
+	}
+	script, err := plan.ApplyScript(State{Manifest: []string{"block:/etc/gitconfig#old-cap", "block:/etc/x;y#bad"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, ">>> cracklet:old-cap ") || strings.Contains(script, "x;y") {
+		t.Errorf("stale block should be stripped, unsafe manifest entries ignored:\n%s", script)
+	}
+	if !strings.Contains(script, "sed '/^.* >>> cracklet:github .*$/,/^.* <<< cracklet:github$/d' '/etc/gitconfig'") {
+		t.Errorf("own block should be replaced:\n%s", script)
+	}
+	conflict := cap.Cap{Name: "other", Guest: cap.Guest{Files: []cap.File{{Path: "/etc/gitconfig", Content: "x"}}}}
+	for _, order := range [][]cap.Cap{{blockLike(), conflict}, {conflict, blockLike()}} {
+		if _, err := Render(order, data); err == nil {
+			t.Errorf("file and block on the same path must conflict")
+		}
+	}
+	selfMarker := cap.Cap{Name: "m", Guest: cap.Guest{Blocks: []cap.Block{{Path: "/etc/m", Content: "# <<< cracklet:m\n"}}}}
+	if _, err := Render([]cap.Cap{selfMarker}, data); err == nil {
+		t.Errorf("content containing the own marker must be rejected")
 	}
 }
 
@@ -184,8 +220,9 @@ func TestScriptsRunUnderBash(t *testing.T) {
 	_ = os.MkdirAll(rooted("/root"), 0o755)
 	_ = os.WriteFile(rooted(EnvFile), []byte("PATH=/usr/bin\n"+markerBegin+"\nOLD=\"1\"\n"+markerEnd+"\n"), 0o644)
 	_ = os.WriteFile(rooted("/root/.claude.json"), []byte(`{"projects":{"keep":true}}`), 0o600)
+	_ = os.WriteFile(rooted("/etc/gitconfig"), []byte("[user]\n\tname = Keep Me\n"), 0o644)
 
-	plan, err := Render([]cap.Cap{claudeLike(), fileLike()}, data)
+	plan, err := Render([]cap.Cap{claudeLike(), blockLike()}, data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,13 +256,38 @@ func TestScriptsRunUnderBash(t *testing.T) {
 		t.Errorf("claude.json:\n%s", js)
 	}
 	git, _ := os.ReadFile(rooted("/etc/gitconfig"))
-	if !strings.Contains(string(git), "insteadOf = https://github.com/") {
-		t.Errorf("gitconfig:\n%s", git)
+	if !strings.Contains(string(git), "name = Keep Me") || !strings.Contains(string(git), "insteadOf = https://github.com/") ||
+		!strings.Contains(string(git), "# >>> cracklet:github managed") {
+		t.Errorf("gitconfig should keep existing settings and gain the block:\n%s", git)
 	}
 	manifest, _ := os.ReadFile(rooted(ManifestPath))
-	if !strings.Contains(string(manifest), "file:/etc/gitconfig") {
+	if !strings.Contains(string(manifest), "block:/etc/gitconfig#github") {
 		t.Errorf("manifest:\n%s", manifest)
 	}
+
+	// Revoke everything: the block disappears, the user's settings stay.
+	st2, _ := ParseState(mustOutput(t, rewriteRoot(Plan{}.ReadScript(), root)))
+	st2 = unrootState(st2, root)
+	revoke, err := Plan{Env: map[string]string{}}.ApplyScript(st2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("bash", "-c", rewriteRoot(revoke, root)).CombinedOutput(); err != nil {
+		t.Fatalf("revoke script: %v\n%s", err, out)
+	}
+	git, _ = os.ReadFile(rooted("/etc/gitconfig"))
+	if !strings.Contains(string(git), "name = Keep Me") || strings.Contains(string(git), "cracklet") || strings.Contains(string(git), "insteadOf") {
+		t.Errorf("revoke should strip the block only:\n%s", git)
+	}
+}
+
+func mustOutput(t *testing.T, script string) []byte {
+	t.Helper()
+	out, err := exec.Command("bash", "-c", script).Output()
+	if err != nil {
+		t.Fatalf("script: %v", err)
+	}
+	return out
 }
 
 // rewriteRoot points every absolute guest path in a script at a temp root.
@@ -234,10 +296,22 @@ func rewriteRoot(script, root string) string {
 	return re.ReplaceAllString(script, "${1}"+root+"/${2}${3}")
 }
 
+// unrootState maps the rooted paths back. Under the temp root ParseState
+// does not recognise the manifest by its constant path, so it arrives as a
+// plain file and is parsed here.
 func unrootState(st State, root string) State {
 	out := State{Manifest: st.Manifest, Files: map[string]string{}}
 	for p, c := range st.Files {
-		out.Files[strings.TrimPrefix(p, root)] = c
+		unrooted := strings.TrimPrefix(p, root)
+		if unrooted == ManifestPath {
+			for _, l := range strings.Split(c, "\n") {
+				if l = strings.TrimSpace(l); l != "" {
+					out.Manifest = append(out.Manifest, l)
+				}
+			}
+			continue
+		}
+		out.Files[unrooted] = c
 	}
 	return out
 }

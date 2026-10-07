@@ -111,6 +111,9 @@ func TestStoreRoundTrip(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(s.Dir, "vm1")); !os.IsNotExist(err) {
 		t.Errorf("Remove should delete the directory")
 	}
+	if _, err := os.Stat(filepath.Join(s.Dir, "vm1.lock")); err != nil {
+		t.Errorf("Remove must keep the lock file so holders stay exclusive: %v", err)
+	}
 }
 
 func TestStoreLockIsExclusiveAcrossHolders(t *testing.T) {

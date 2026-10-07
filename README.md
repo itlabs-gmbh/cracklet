@@ -58,6 +58,8 @@ The Lima VM mounts nothing from the Mac; files travel over `limactl shell`.
 cracklet new                    # boots vm1 (2 vCPUs, 1 GiB RAM, 2G disk)
 cracklet new dev --vcpus 4 --mem 2048 --disk 8G
 cracklet ls
+cracklet ls --json              # also: new --json, inspect --json
+cracklet inspect dev            # details of one VM
 cracklet ssh dev                # interactive root shell
 cracklet ssh dev uname -a       # run a command
 cracklet stop dev               # keep the disk

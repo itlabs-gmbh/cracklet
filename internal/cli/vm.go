@@ -228,6 +228,21 @@ func newSSHCmd(get func() *app.App) *cobra.Command {
 	return cmd
 }
 
+func newTunnelCmd(get func() *app.App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "tunnel NAME",
+		Short: "Serve a microVM's broker without an interactive session",
+		Long: `tunnel holds the broker forward into NAME until it is interrupted or NAME
+stops, reconnecting when the connection drops. Use it when the guest is
+reached by something other than 'cracklet ssh', e.g. an editor or agent
+runner with its own ssh session. 'cracklet ssh NAME' keeps working alongside.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return get().Tunnel(cmd.Context(), args[0])
+		},
+	}
+}
+
 func newExecCmd(get func() *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "exec NAME -- command [arg...]",

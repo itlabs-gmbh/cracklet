@@ -311,6 +311,21 @@ func TestNewFreshFlag(t *testing.T) {
 	}
 }
 
+func TestTunnelWiring(t *testing.T) {
+	if _, _, err := run(t, "tunnel"); err == nil {
+		t.Error("tunnel without a name must fail")
+	}
+	_, fake, err := run(t, "tunnel", "vm1")
+	if err == nil || !strings.Contains(err.Error(), "cracklet grant vm1") {
+		t.Errorf("tunnel without broker grants should hint at grant, got %v", err)
+	}
+	for _, c := range fake.Calls() {
+		if strings.HasPrefix(c, "ssh ") {
+			t.Errorf("no ssh without grants: %s", c)
+		}
+	}
+}
+
 func TestNewProfileDefaultsDiskToImageSize(t *testing.T) {
 	_, fake, err := run(t, "new", "agent", "--profile", "paseo")
 	if err != nil {

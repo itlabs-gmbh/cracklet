@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/itlabs-gmbh/cracklet/internal/broker"
 	"github.com/itlabs-gmbh/cracklet/internal/config"
 	"github.com/itlabs-gmbh/cracklet/internal/runner"
 )
@@ -198,15 +199,18 @@ func TestStartBrokerServesSocket(t *testing.T) {
 	if socket != app.paths.SocketPath("agent1") {
 		t.Errorf("socket = %q", socket)
 	}
-	again, stopAgain, err := app.startBroker(context.Background(), "agent1")
-	if err != nil || again != socket {
-		t.Errorf("second start should reuse the socket: %q, %v", again, err)
+	if _, _, err := app.startBroker(context.Background(), "agent1"); !errors.Is(err, broker.ErrBusy) {
+		t.Errorf("a second start must find the broker owned, got %v", err)
 	}
-	stopAgain()
 	stop()
 	if _, err := os.Stat(socket); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("stop should remove the socket, got %v", err)
 	}
+	_, stopAgain, err := app.startBroker(context.Background(), "agent1")
+	if err != nil {
+		t.Fatalf("start after stop: %v", err)
+	}
+	stopAgain()
 	if _, err := os.Stat(app.paths.AuditLog()); err != nil {
 		t.Errorf("audit log should be created: %v", err)
 	}

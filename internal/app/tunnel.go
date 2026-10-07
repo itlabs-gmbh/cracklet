@@ -2,22 +2,39 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
+	"time"
 
 	"github.com/itlabs-gmbh/cracklet/internal/broker"
 	"github.com/itlabs-gmbh/cracklet/internal/config"
 	"github.com/itlabs-gmbh/cracklet/internal/grant"
+	"github.com/itlabs-gmbh/cracklet/internal/lima"
+	"github.com/itlabs-gmbh/cracklet/internal/runner"
 	"github.com/itlabs-gmbh/cracklet/internal/secret"
 )
 
-// Tunnel starts (or reuses) the broker for a VM and returns the socket to
-// forward plus a stop function. Tests replace it to avoid real sockets.
+// Tunnel makes this process the owner of a VM's broker and returns the
+// socket to forward plus a stop function that gives ownership up again. It
+// fails with broker.ErrBusy while another process owns it. Tests replace it to
+// avoid real sockets.
 type Tunnel func(ctx context.Context, name string) (socket string, stop func(), err error)
 
 // WithTunnel overrides how the broker is started (used by tests).
 func WithTunnel(t Tunnel) Option {
 	return func(a *App) { a.tunnel = t }
+}
+
+// claimTunnel runs the configured Tunnel; the production one is bound late so
+// that a copy of the App (see standby) starts brokers with its own runner and
+// output.
+func (a *App) claimTunnel(ctx context.Context, name string) (string, func(), error) {
+	if a.tunnel != nil {
+		return a.tunnel(ctx, name)
+	}
+	return a.startBroker(ctx, name)
 }
 
 // sshExtraArgs returns the ssh options that attach the broker tunnel and, if
@@ -34,38 +51,112 @@ func (a *App) sshExtraArgs(ctx context.Context, name string) ([]string, func(), 
 	if set.Contains(grant.Grant{Cap: grant.SSHAgent}) {
 		args = append(args, "-A")
 	}
-	if len(set.Caps()) == 1 && set.Caps()[0] == grant.SSHAgent {
+	if !needsBroker(set) {
 		return args, func() {}, nil
 	}
-	socket, stop, err := a.tunnel(ctx, name)
-	if err != nil {
+	socket, stop, err := a.claimTunnel(ctx, name)
+	switch {
+	case errors.Is(err, broker.ErrBusy):
+		// A `cracklet tunnel` or another session owns the broker and its
+		// forward; this session takes over if that owner ends first.
+		return args, a.standby(ctx, name), nil
+	case err != nil:
 		return nil, nil, err
 	}
-	// Without ExitOnForwardFailure a squatter on the guest port would leave
-	// the session running with no tunnel and only a warning.
-	args = append(args, "-o", "ExitOnForwardFailure=yes", "-R", fmt.Sprintf("127.0.0.1:%d:%s", config.BrokerGuestPort, socket))
-	return args, stop, nil
+	return append(args, brokerForward(socket)...), stop, nil
 }
 
-// startBroker is the production Tunnel: it serves the VM's broker on a Unix
-// socket for as long as the ssh session lives. A broker left by another
-// session of the same VM is reused.
+// defaultBrokerWatch is how often a session waiting for a broker's owner to
+// leave tries to take it over.
+const defaultBrokerWatch = 2 * time.Second
+
+// standby keeps a session served whose broker is owned elsewhere: holdTunnel
+// waits for the owner to leave, then claims broker and forward together and
+// holds them until the returned stop is called. The terminal belongs to the
+// interactive session, so standby neither prints nor lets its commands write
+// there; takeovers and failures go to the audit log.
+func (a *App) standby(ctx context.Context, name string) func() {
+	ctx, cancel := context.WithCancel(ctx)
+	quiet := *a
+	quiet.out = io.Discard
+	quiet.r = runner.Silenced(a.r)
+	quiet.lima = lima.NewClient(quiet.r, config.Instance)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			err := quiet.holdTunnel(ctx, name)
+			if err == nil || ctx.Err() != nil {
+				return // the VM stopped, or the session ended
+			}
+			quiet.auditTunnel(name, "failed", err.Error())
+			if !sleepCtx(ctx, maxTunnelRetry) {
+				return
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+// needsBroker reports whether any grant is served by the broker; ssh-agent
+// alone is plain agent forwarding.
+func needsBroker(set grant.Set) bool {
+	for _, c := range set.Caps() {
+		if c != grant.SSHAgent {
+			return true
+		}
+	}
+	return false
+}
+
+// brokerForward maps the guest's broker port onto the host socket. Without
+// ExitOnForwardFailure a squatter on the guest port would leave ssh running
+// with no tunnel and only a warning.
+func brokerForward(socket string) []string {
+	return []string{"-o", "ExitOnForwardFailure=yes", "-R", fmt.Sprintf("127.0.0.1:%d:%s", config.BrokerGuestPort, socket)}
+}
+
+// startBroker is the production Tunnel: it claims the VM's broker and serves
+// it on a Unix socket until stop, which removes the socket before giving
+// ownership up, so the next owner never finds a stale one in use.
 func (a *App) startBroker(ctx context.Context, name string) (string, func(), error) {
 	socket := a.paths.SocketPath(name)
-	if broker.Alive(socket) {
-		return socket, func() {}, nil
-	}
-	caps, err := a.loadCaps()
+	release, err := broker.Claim(socket)
 	if err != nil {
 		return "", nil, err
+	}
+	// A cracklet from before ownership locks may still serve this socket.
+	if broker.Alive(socket) {
+		release()
+		return "", nil, broker.ErrBusy
+	}
+	stop, err := a.serveBroker(ctx, name, socket)
+	if err != nil {
+		release()
+		return "", nil, err
+	}
+	return socket, func() {
+		stop()
+		release()
+	}, nil
+}
+
+// serveBroker listens on socket and serves the VM's broker until stop.
+func (a *App) serveBroker(ctx context.Context, name, socket string) (func(), error) {
+	caps, err := a.loadCaps()
+	if err != nil {
+		return nil, err
 	}
 	data, err := a.templateData(name)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	audit, err := os.OpenFile(a.paths.AuditLog(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		return "", nil, fmt.Errorf("open audit log: %w", err)
+		return nil, fmt.Errorf("open audit log: %w", err)
 	}
 	store := a.grantStore()
 	b := &broker.Broker{
@@ -80,7 +171,7 @@ func (a *App) startBroker(ctx context.Context, name string) (string, func(), err
 	ln, err := broker.Listen(socket)
 	if err != nil {
 		_ = audit.Close()
-		return "", nil, err
+		return nil, err
 	}
 	serveCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -90,12 +181,11 @@ func (a *App) startBroker(ctx context.Context, name string) (string, func(), err
 			a.printf("broker for %s stopped: %v\n", name, err)
 		}
 	}()
-	stop := func() {
+	return func() {
 		cancel()
 		<-done
 		b.Close()
 		_ = audit.Close()
 		_ = os.Remove(socket)
-	}
-	return socket, stop, nil
+	}, nil
 }

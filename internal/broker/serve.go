@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -22,6 +23,36 @@ func Alive(socketPath string) bool {
 	}
 	_ = conn.Close()
 	return true
+}
+
+// ErrBusy reports that another process owns the VM's broker.
+var ErrBusy = errors.New("another session serves this VM's broker")
+
+// Claim makes this process the owner of the broker behind socketPath, or
+// returns ErrBusy. Only the owner may listen on the socket and forward it into
+// the guest; owning both together is what keeps a forward from outliving the
+// broker it points to. The lock file is never removed: a fresh file would let
+// a second claim succeed while the holder of the old one still believes it
+// owns the broker.
+func Claim(socketPath string) (release func(), err error) {
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
+		return nil, fmt.Errorf("create socket directory: %w", err)
+	}
+	f, err := os.OpenFile(socketPath+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open broker lock: %w", err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, ErrBusy
+		}
+		return nil, fmt.Errorf("lock broker: %w", err)
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}, nil
 }
 
 // maxSocketPath is the longest Unix socket path macOS accepts (sun_path is 104 bytes).

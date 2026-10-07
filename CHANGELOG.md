@@ -29,6 +29,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - `cracklet secret set|rm` stores credentials in the macOS Keychain for
   capabilities to reference as `keychain:cracklet/<name>`.
 - `cracklet ls` shows a GRANTS column.
+- `cracklet tunnel NAME` serves a VM's broker without an interactive session,
+  reconnecting until interrupted or the VM stops. `cracklet ssh` reuses a
+  running broker instead of failing on the already forwarded guest port, and
+  takes the broker over when the session or tunnel that owned it ends.
 - `cracklet inspect NAME` shows one microVM; `ls`, `new` and `inspect` take
   `--json` for scripting (progress messages then go to stderr).
 - Apache-2.0 license, contributing guide, code of conduct, security policy,

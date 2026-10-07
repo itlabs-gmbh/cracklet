@@ -156,6 +156,15 @@ there is nothing in the guest worth stealing, and the hole closes with the
 terminal. `ssh-agent` is a built-in grant that adds `-A`; pair it with
 `ssh-add -c` to confirm every signature.
 
+When something other than `cracklet ssh` drives the guest, such as an editor or
+an agent runner with its own ssh session, keep the broker up with
+`cracklet tunnel agent1`. It holds only the forward, reconnects when the
+connection drops, logs `tunnel=open|closed` to the audit log and ends with
+Ctrl-C or when the VM stops. `cracklet ssh agent1` keeps working alongside it
+and uses the running broker instead of forwarding a second time; if the session
+or tunnel that owns the broker ends first, the remaining session takes it over
+within a few seconds.
+
 Grants are the only policy: default deny, one file per VM in `~/.cracklet/vms/`,
 checked on every request and logged to `~/.cracklet/audit.log`. A denied request
 answers with the exact `cracklet grant` command that would allow it.

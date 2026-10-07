@@ -1,0 +1,24 @@
+# An exec capability: every request runs a program on the Mac with the request
+# body on stdin and CRACKLET_* variables describing it; stdout is the response.
+#
+# This one answers read-only GitHub API calls with the gh CLI on the Mac. The
+# guest never sees a token; it only sees the API response. For git push/pull
+# use the embedded `github` proxy capability instead.
+#
+#   cp examples/caps/gh-api.toml ~/.cracklet/caps/
+#   cracklet grant agent1 gh-api
+#   # in the guest:
+#   curl -s http://127.0.0.1:7777/gh-api/repos/itlabs-gmbh/cracklet/pulls
+#
+# Do not hand the guest `gh auth token` or any other credential from an exec
+# program: whatever the program prints lands in the VM.
+#
+# Variables available to the program: CRACKLET_VM, CRACKLET_CAP, CRACKLET_SCOPE,
+# CRACKLET_METHOD, CRACKLET_PATH, CRACKLET_QUERY, CRACKLET_CONTENT_TYPE.
+
+name = "gh-api"
+description = "read-only GitHub API calls answered by gh on the Mac"
+
+[exec]
+command = "sh"
+args = ["-c", "[ \"$CRACKLET_METHOD\" = GET ] || { echo 'gh-api: only GET is allowed' >&2; exit 1; }; gh api \"${CRACKLET_PATH#/}${CRACKLET_QUERY:+?$CRACKLET_QUERY}\""]

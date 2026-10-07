@@ -65,6 +65,30 @@ func TestParseRejectsProblems(t *testing.T) {
 	}
 }
 
+func TestSecretRefsRequireLiterals(t *testing.T) {
+	refs, err := SecretRefs(`Bearer {{ secret "keychain:cracklet/a" }} {{ if .VM }}{{ secret "env:B" }}{{ end }}`)
+	if err != nil || strings.Join(refs, ",") != "keychain:cracklet/a,env:B" {
+		t.Fatalf("refs = %v, %v", refs, err)
+	}
+	for _, bad := range []string{
+		`{{ secret (print "env:" .VM) }}`,
+		`{{ secret .VM }}`,
+		`{{ if eq .VM "x" }}{{ secret (printf "%s" "env:A") }}{{ end }}`,
+		`{{ "env:A" | secret }}`,
+		`{{ call secret "env:A" }}`,
+		`{{ range .List }}{{ secret .X }}{{ end }}`,
+	} {
+		if _, err := SecretRefs(bad); err == nil {
+			t.Errorf("%s must be rejected", bad)
+		}
+	}
+	// Parse enforces the same rule for capability files.
+	dynamic := strings.Replace(validProxy, `{{ secret \"env:EXAMPLE_TOKEN\" }}`, `{{ secret (print \"env:\" .VM) }}`, 1)
+	if _, err := Parse(dynamic, "t"); err == nil || !strings.Contains(err.Error(), "literal reference") {
+		t.Errorf("dynamic secret references must fail Parse, got %v", err)
+	}
+}
+
 func TestLoopbackUpstreamMayUseHTTP(t *testing.T) {
 	if _, err := Parse(strings.Replace(validProxy, "https://api.example.com", "http://127.0.0.1:4000", 1), "t"); err != nil {
 		t.Fatalf("loopback http should be allowed: %v", err)

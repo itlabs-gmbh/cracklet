@@ -247,17 +247,11 @@ func capSummary(c cap.Cap) string {
 	return b.String()
 }
 
-// secretRefs finds every secret reference a header template resolves by
-// executing it with a recording resolver. Unlike a regular expression this
-// sees exactly what the template engine sees, including references built
-// from expressions, which are reported as the expression's result.
+// secretRefs lists the secrets a header template sends. The template was
+// validated by cap.Parse, which only admits literal references, so the list
+// is exact: nothing a VM name or any other data could change at runtime.
 func secretRefs(tmpl string) []string {
-	var refs []string
-	_, _ = cap.Render(tmpl, cap.TemplateData{VM: "vm", BrokerURL: "http://127.0.0.1:1", PseudoToken: "token"},
-		func(ref string) (string, error) {
-			refs = append(refs, ref)
-			return "placeholder", nil
-		})
+	refs, _ := cap.SecretRefs(tmpl)
 	return refs
 }
 

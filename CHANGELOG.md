@@ -9,6 +9,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Capability broker: `cracklet grant NAME CAP[:SCOPE]`, `revoke`, `grants` and
+  `new --grant` let a microVM use GitHub, Claude Code or host-side MCP servers
+  through a per-VM Unix socket that `cracklet ssh` forwards into the guest.
+  Credentials stay on the Mac; the guest gets a placeholder token and a
+  provisioned `/etc/environment`, files and JSON merges. Decisions are logged
+  to `~/.cracklet/audit.log`.
+- Capability files (`cracklet cap ls|show|lint|init|add`): TOML definitions
+  with three primitives (`proxy`, `mcp`, `exec`), embedded defaults for
+  `claude` and `github`, user overrides in `~/.cracklet/caps/`.
+- `cracklet secret set|rm` stores credentials in the macOS Keychain for
+  capabilities to reference as `keychain:cracklet/<name>`.
+- `cracklet ls` shows a GRANTS column.
 - Apache-2.0 license, contributing guide, code of conduct, security policy,
   issue and pull request templates, and a CI workflow.
 - `cracklet new` prints a ready-to-use `ssh NAME.cracklet` command.

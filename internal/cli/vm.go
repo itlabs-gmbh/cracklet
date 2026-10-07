@@ -32,6 +32,7 @@ func newNewCmd(get func() *app.App) *cobra.Command {
 	cmd.Flags().StringVar(&spec.Disk, "disk", config.DefaultDisk, "root disk size, e.g. 2G or 512M")
 	cmd.Flags().StringArrayVarP(&spec.Forwards, "port", "p", nil, "forward localhost:[HOST:]GUEST to the VM (repeatable)")
 	cmd.Flags().BoolVar(&spec.Fresh, "fresh", false, "cold-boot instead of restoring the golden snapshot")
+	cmd.Flags().StringArrayVar(&spec.Grants, "grant", nil, "grant a capability right away, e.g. claude or github:org/repo (repeatable)")
 	return cmd
 }
 
@@ -146,10 +147,10 @@ func newLsCmd(get func() *app.App) *cobra.Command {
 				return err
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tSTATE\tIP\tVCPUS\tMEM\tPORTS\tSSH")
+			fmt.Fprintln(w, "NAME\tSTATE\tIP\tVCPUS\tMEM\tPORTS\tGRANTS\tSSH")
 			for _, v := range vms {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%dM\t%s\tssh %s.%s\n",
-					v.Name, v.State, v.IP, v.VCPUs, v.MemMiB, forwardLabels(v), v.Name, config.Instance)
+				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%dM\t%s\t%s\tssh %s.%s\n",
+					v.Name, v.State, v.IP, v.VCPUs, v.MemMiB, forwardLabels(v), grantLabels(v), v.Name, config.Instance)
 			}
 			return w.Flush()
 		},

@@ -362,3 +362,136 @@ func TestAgentInstallMotdReplacesUbuntuBanner(t *testing.T) {
 		t.Error("customize_rootfs must call install_motd")
 	}
 }
+
+func TestAgentProfileHelpers(t *testing.T) {
+	root := t.TempDir()
+	out, err := runAgentFuncs(t, root, `
+		validate_profile base; validate_profile paseo
+		profile_image base; profile_image paseo
+		profile_disk_size base; profile_disk_size paseo
+		golden_dir paseo 2 1024`)
+	if err != nil {
+		t.Fatalf("profile helpers failed: %v\n%s", err, out)
+	}
+	want := strings.Join([]string{
+		root + "/images/rootfs-base.ext4", // unchanged so existing installs keep their image
+		root + "/images/rootfs-paseo.ext4",
+		"2G", "8G",
+		root + "/images/golden-paseo-2-1024",
+	}, "\n")
+	if out != want {
+		t.Errorf("got:\n%s\nwant:\n%s", out, want)
+	}
+	for _, bad := range []string{"Paseo", "", "../base", "node"} {
+		if _, err := runAgentFuncs(t, root, `validate_profile "`+bad+`"`); err == nil {
+			t.Errorf("profile %q accepted", bad)
+		}
+	}
+}
+
+// TestAgentRootfsStamp pins the base stamp to its pre-profile format, so an
+// upgrade does not rebuild every existing base image, and ties each profile
+// stamp to the base stamp so a new base forces the profile to follow.
+func TestAgentRootfsStamp(t *testing.T) {
+	root := t.TempDir()
+	out, err := runAgentFuncs(t, root, `rootfs_stamp base 'u|s|rev7|e|k'; rootfs_stamp paseo 'u|s|rev7|e|k'`)
+	if err != nil {
+		t.Fatalf("rootfs_stamp failed: %v\n%s", err, out)
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) != 2 || lines[0] != "u|s|rev7|e|k" || !strings.HasPrefix(lines[1], "u|s|rev7|e|k|profile=paseo|rev") {
+		t.Errorf("unexpected stamps:\n%s", out)
+	}
+}
+
+func TestAgentPaseoProfileScript(t *testing.T) {
+	root := t.TempDir()
+	out, err := runAgentFuncs(t, root, `profile_script paseo`)
+	if err != nil {
+		t.Fatalf("profile_script failed: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"set -euo pipefail",
+		"deb.nodesource.com/node_22.x",
+		"cli.github.com/packages",
+		"nodejs", " git ", " gh ", " rsync",
+		"npm install -g @getpaseo/cli",
+		"https://claude.ai/install.sh",
+		"ln -sfn /root/.local/bin/claude /usr/local/bin/claude",
+		"rm -rf /root/.paseo",
+		"/var/lib/apt/lists/",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("profile script missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "systemctl enable") || strings.Contains(out, "paseo daemon start") {
+		t.Errorf("the profile must never start the paseo daemon at build time:\n%s", out)
+	}
+	if _, err := runAgentFuncs(t, root, `profile_script base`); err == nil {
+		t.Error("base has no profile script")
+	}
+}
+
+// TestAgentPaseoUnitInstalledButDisabled guards the golden snapshot: an
+// enabled unit would start the daemon in the golden VM, and every clone would
+// then share its keypair.
+func TestAgentPaseoUnitInstalledButDisabled(t *testing.T) {
+	root := t.TempDir()
+	guest := filepath.Join(root, "guest")
+	if out, err := runAgentFuncs(t, root, `install_paseo_unit "`+guest+`"`); err != nil {
+		t.Fatalf("install_paseo_unit failed: %v\n%s", err, out)
+	}
+	unit, err := os.ReadFile(filepath.Join(guest, "etc", "systemd", "system", "paseo.service"))
+	if err != nil {
+		t.Fatalf("unit not written: %v", err)
+	}
+	for _, want := range []string{"ExecStart=/usr/bin/paseo daemon run --home /root/.paseo", "WantedBy=multi-user.target"} {
+		if !strings.Contains(string(unit), want) {
+			t.Errorf("unit missing %q:\n%s", want, unit)
+		}
+	}
+	links, _ := filepath.Glob(filepath.Join(guest, "etc", "systemd", "system", "*.wants", "paseo.service"))
+	if len(links) != 0 {
+		t.Errorf("paseo.service must not be enabled, found %v", links)
+	}
+}
+
+// TestAgentProfileCurrent ensures `new --profile` refuses an image built from
+// an older base (old cracklet-envd and authorized_keys).
+func TestAgentProfileCurrent(t *testing.T) {
+	root := t.TempDir()
+	out, err := runAgentFuncs(t, root, `
+		mkdir -p "$CRACKLET_ROOT/images"
+		echo 'b1' > "$CRACKLET_ROOT/images/rootfs-base.stamp"
+		rootfs_stamp paseo b1 > "$CRACKLET_ROOT/images/rootfs-paseo.stamp"
+		profile_current paseo && echo current
+		echo 'b2' > "$CRACKLET_ROOT/images/rootfs-base.stamp"
+		profile_current paseo || echo stale
+		rm "$CRACKLET_ROOT/images/rootfs-paseo.stamp"
+		profile_current paseo || echo missing`)
+	if err != nil || out != "current\nstale\nmissing" {
+		t.Errorf("profile_current: %q, %v", out, err)
+	}
+}
+
+// TestAgentReleaseStaleMountsWithoutLeftovers: a healthy run has nothing to
+// unmount, and that must not abort the agent under set -e/pipefail.
+func TestAgentReleaseStaleMountsWithoutLeftovers(t *testing.T) {
+	root := t.TempDir()
+	out, err := runAgentFuncs(t, root, `
+		findmnt() { echo /; echo /dev; echo "$CRACKLET_ROOT/images/build.abc/root/dev"; }
+		umount() { echo "umount $*"; }
+		release_stale_mounts; echo done
+		findmnt() { echo /; }
+		release_stale_mounts; echo done`)
+	if err != nil {
+		t.Fatalf("release_stale_mounts failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "umount -R -l "+root+"/images/build.abc/root/dev") || strings.Count(out, "done") != 2 {
+		t.Errorf("unexpected output:\n%s", out)
+	}
+	if strings.Contains(out, "umount -R -l /dev") {
+		t.Errorf("must only touch build roots:\n%s", out)
+	}
+}

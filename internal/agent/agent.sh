@@ -31,8 +31,15 @@ readonly INPUT_CHAIN=CRACKLET-INPUT    # guest -> the Lima VM itself
 # rejected so they cannot reach the LAN or the Mac's own LAN address.
 readonly PRIVATE_NETS=(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16 127.0.0.0/8)
 readonly BASE_DISK_SIZE=2G
-readonly ROOTFS_REV=7                  # bump whenever customize_rootfs changes
-readonly GOLDEN_REV=1                  # bump whenever build_golden changes
+# Image profiles; the sizes must match profileDisks in internal/vm. A profile
+# image is built at its full size because a golden snapshot can only be
+# restored onto a disk of exactly the size it was taken with.
+readonly PROFILES=(base paseo)
+readonly PASEO_DISK_SIZE=8G
+readonly ROOTFS_REV=8                  # bump whenever customize_rootfs changes
+readonly PROFILE_REV=1                 # bump whenever profile_script or install_profile changes
+readonly GOLDEN_REV=2                  # bump whenever build_golden changes
+readonly SQUASHFS_CACHE=$CRACKLET_ROOT/images/ubuntu.squashfs   # kept for later profile builds
 readonly ENVD_BIN=$CRACKLET_ROOT/cracklet-envd   # guest identity daemon, pushed by cracklet prepare
 readonly GOLDEN_INDEX=0                # the golden VM boots as 172.16.0.2 on tap cracklet0
 readonly VSOCK_CID=3
@@ -50,6 +57,7 @@ readonly VMM_OVERHEAD_MIB=256
 readonly CURL_OPTS=(--fail --silent --show-error --location --proto '=https' --retry 3 --connect-timeout 15 --max-time 900)
 
 TMP_DIRS=()
+CHROOT_MOUNTS=()
 NEW_VM_NAME=
 NEW_VM_DONE=0
 
@@ -63,8 +71,13 @@ on_exit() {
   if [[ -n $NEW_VM_NAME && $NEW_VM_DONE -ne 1 ]]; then
     discard_vm "$NEW_VM_NAME"
   fi
+  # A build root with /dev or /proc still mounted must never reach rm -rf.
+  if ! chroot_umount; then
+    log "warning: chroot mounts remain, keeping ${TMP_DIRS[*]}"
+    TMP_DIRS=()
+  fi
   if ((${#TMP_DIRS[@]} > 0)); then
-    rm -rf "${TMP_DIRS[@]}"
+    rm -rf --one-file-system "${TMP_DIRS[@]}"
   fi
   exit "$status"
 }
@@ -93,6 +106,36 @@ validate_int_range() { # value min max label
 
 validate_disk() { [[ $1 =~ ^[0-9]{1,6}[MG]$ ]] || die "invalid disk size '$1' (use e.g. 512M or 4G)"; }
 validate_url()  { [[ $1 == https://* ]] || die "URL must use https: $1"; }
+
+validate_profile() {
+  local p
+  for p in "${PROFILES[@]}"; do [[ $1 == "$p" ]] && return 0; done
+  die "unknown profile '$1' (available: ${PROFILES[*]})"
+}
+
+profile_image() { echo "$IMAGES_DIR/rootfs-$1.ext4"; }
+profile_stamp_file() { echo "$IMAGES_DIR/rootfs-$1.stamp"; }
+
+profile_disk_size() {
+  case $1 in
+    base)  echo "$BASE_DISK_SIZE" ;;
+    paseo) echo "$PASEO_DISK_SIZE" ;;
+    *)     die "unknown profile '$1'" ;;
+  esac
+}
+
+# rootfs_stamp keeps the base stamp in its original format (an upgrade must
+# not rebuild existing base images) and chains every profile to it.
+rootfs_stamp() { # profile base_stamp
+  if [[ $1 == base ]]; then echo "$2"; else echo "$2|profile=$1|rev$PROFILE_REV"; fi
+}
+
+# profile_current reports whether a profile image was built from the current
+# base image and profile revision.
+profile_current() { # profile
+  [[ $(cat "$(profile_stamp_file "$1")" 2>/dev/null) == \
+     "$(rootfs_stamp "$1" "$(cat "$(profile_stamp_file base)" 2>/dev/null)")" ]]
+}
 validate_sha()  { [[ $1 =~ ^[0-9a-f]{64}$ ]] || die "invalid sha256 '$1'"; }
 
 require_vm() {
@@ -165,18 +208,19 @@ fetch() { # url dest
 # vm_json never fails: a VM with missing metadata is reported as "broken" so
 # that one damaged directory cannot hide the healthy ones from `cracklet ls`.
 vm_json() { # name
-  local name=$1 dir idx state config
+  local name=$1 dir idx state config profile
   dir=$(vm_dir "$name"); idx=$(vm_index "$name"); config=$dir/config.json
+  profile=$(cat "$dir/profile" 2>/dev/null || echo base)   # VMs from before profiles are base
   if unit_active "$name"; then state=running; else state=stopped; fi
   if ! is_index "$idx" || [[ ! -s $config ]]; then
     jq -cn --arg name "$name" \
-      '{name: $name, index: null, ip: null, state: "broken", vcpus: null, mem_mib: null, forwards: []}'
+      '{name: $name, index: null, ip: null, state: "broken", vcpus: null, mem_mib: null, profile: null, forwards: []}'
     return 0
   fi
   jq -c --arg name "$name" --argjson index "$idx" --arg ip "$(idx_ip "$idx")" --arg state "$state" \
-    --argjson forwards "$(forwards_json "$name")" \
-    '{name: $name, index: $index, ip: $ip, state: $state,
-      vcpus: ."machine-config".vcpu_count, mem_mib: ."machine-config".mem_size_mib, forwards: $forwards}' "$config"
+    --arg profile "$profile" --argjson forwards "$(forwards_json "$name")" \
+    '{name: $name, index: $index, ip: $ip, state: $state, vcpus: ."machine-config".vcpu_count,
+      mem_mib: ."machine-config".mem_size_mib, profile: $profile, forwards: $forwards}' "$config"
 }
 
 forwards_json() { # name
@@ -194,9 +238,19 @@ forwards_json() { # name
 
 # --- prepare -----------------------------------------------------------------
 
-cmd_prepare() { # FC_VERSION FC_SHA256 KERNEL_URL KERNEL_SHA256 ROOTFS_URL ROOTFS_SHA256 VCPUS MEM_MIB
-  [[ $# -eq 8 ]] || die "usage: prepare FC_VERSION FC_SHA256 KERNEL_URL KERNEL_SHA256 ROOTFS_URL ROOTFS_SHA256 VCPUS MEM_MIB"
-  local fc_version=$1 fc_sha=$2 kernel_url=$3 kernel_sha=$4 rootfs_url=$5 rootfs_sha=$6 vcpus=$7 mem=$8
+cmd_prepare() { # FC_VERSION FC_SHA256 KERNEL_URL KERNEL_SHA256 ROOTFS_URL ROOTFS_SHA256 VCPUS MEM_MIB [PROFILE...]
+  [[ $# -ge 8 ]] || die "usage: prepare FC_VERSION FC_SHA256 KERNEL_URL KERNEL_SHA256 ROOTFS_URL ROOTFS_SHA256 VCPUS MEM_MIB [PROFILE...]"
+  local fc_version=$1 fc_sha=$2 kernel_url=$3 kernel_sha=$4 rootfs_url=$5 rootfs_sha=$6 vcpus=$7 mem=$8 profile
+  shift 8
+  local profiles=(base "$@")
+  for profile in "${profiles[@]}"; do validate_profile "$profile"; done
+  # profiles built earlier follow a new base image, or they would keep an old
+  # cracklet-envd and authorized_keys
+  for profile in "${PROFILES[@]}"; do
+    if [[ $profile != base && -f $(profile_image "$profile") && " ${profiles[*]} " != *" $profile "* ]]; then
+      profiles+=("$profile")
+    fi
+  done
   validate_int_range "$vcpus" 1 "$MAX_VCPUS" vcpus
   validate_int_range "$mem" "$MIN_MEM_MIB" "$MAX_MEM_MIB" memory
   [[ $fc_version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid firecracker version '$fc_version'"
@@ -209,10 +263,16 @@ cmd_prepare() { # FC_VERSION FC_SHA256 KERNEL_URL KERNEL_SHA256 ROOTFS_URL ROOTF
   install_packages
   install_firecracker "$fc_version" "$fc_sha"
   download_kernel "$kernel_url" "$kernel_sha"
-  build_base_rootfs "$rootfs_url" "$rootfs_sha"
+  for profile in "${profiles[@]}"; do
+    build_rootfs "$profile" "$rootfs_url" "$rootfs_sha"
+  done
   setup_host_network
+  # golden snapshots from before profiles existed are named golden-VCPUS-MEM
+  rm -rf "$IMAGES_DIR"/golden-[0-9]*
   # the default VM size gets its golden snapshot now, so the first `cracklet new` is fast
-  ensure_golden "$vcpus" "$mem"
+  for profile in "${profiles[@]}"; do
+    ensure_golden "$profile" "$vcpus" "$mem"
+  done
   log "prepare complete"
 }
 
@@ -255,30 +315,57 @@ download_kernel() { # url sha256
   atomic_write "$IMAGES_DIR/vmlinux.stamp" "$stamp"
 }
 
-build_base_rootfs() { # url sha256
-  local base=$IMAGES_DIR/rootfs-base.ext4 stamp work
-  stamp="$1|$2|rev$ROOTFS_REV|$(sha256sum "$ENVD_BIN" | cut -d' ' -f1)|$(cat "$PUBKEY_FILE")"
-  if [[ -f $base && $(cat "$IMAGES_DIR/rootfs-base.stamp" 2>/dev/null) == "$stamp" ]]; then
-    log "base rootfs already present"
+build_rootfs() { # profile url sha256
+  local profile=$1 image stamp_file stamp work size
+  image=$(profile_image "$profile"); stamp_file=$(profile_stamp_file "$profile"); size=$(profile_disk_size "$profile")
+  stamp=$(rootfs_stamp "$profile" "$2|$3|rev$ROOTFS_REV|$(sha256sum "$ENVD_BIN" | cut -d' ' -f1)|$(cat "$PUBKEY_FILE")")
+  if [[ -f $image && $(cat "$stamp_file" 2>/dev/null) == "$stamp" ]]; then
+    log "$profile rootfs already present"
     return 0
   fi
-  rm -rf "$IMAGES_DIR"/build.*
+  release_stale_mounts
+  rm -rf --one-file-system "$IMAGES_DIR"/build.*
   work=$(mktemp -d "$IMAGES_DIR/build.XXXXXX"); TMP_DIRS+=("$work")
-  fetch "$1" "$work/rootfs.squashfs"
-  verify_sha256 "$work/rootfs.squashfs" "$2"
+  fetch_squashfs "$2" "$3"
   log "extracting rootfs"
-  unsquashfs -n -q -d "$work/root" "$work/rootfs.squashfs" >/dev/null
-  customize_rootfs "$work/root"
-  log "building ext4 base image ($BASE_DISK_SIZE, sparse)"
-  truncate -s "$BASE_DISK_SIZE" "$work/rootfs.ext4"
+  unsquashfs -n -q -d "$work/root" "$SQUASHFS_CACHE" >/dev/null
+  customize_rootfs "$work/root" "$profile"
+  log "building ext4 $profile image ($size, sparse)"
+  truncate -s "$size" "$work/rootfs.ext4"
   mkfs.ext4 -q -F -d "$work/root" "$work/rootfs.ext4"
   chmod 0600 "$work/rootfs.ext4"
-  mv -f "$work/rootfs.ext4" "$base"
-  atomic_write "$IMAGES_DIR/rootfs-base.stamp" "$stamp"
+  mv -f "$work/rootfs.ext4" "$image"
+  atomic_write "$stamp_file" "$stamp"
+  rm -rf --one-file-system "$work"            # the extracted tree is gigabytes for a profile
 }
 
-customize_rootfs() { # root
-  local root=$1
+# release_stale_mounts unmounts what a killed build (SIGKILL, OOM, Lima crash)
+# left in a build root; rm --one-file-system would refuse to remove it.
+release_stale_mounts() {
+  local target
+  # grep finds nothing on every healthy run; that must not trip pipefail
+  findmnt -rn -o TARGET | { grep "^$IMAGES_DIR/build\." || true; } | sort -r | while read -r target; do
+    log "unmounting leftover $target"
+    umount -R -l "$target" || true
+  done
+}
+
+# fetch_squashfs keeps the verified upstream rootfs, so a profile added later
+# does not download it again. The checksum is verified on every use.
+fetch_squashfs() { # url sha256
+  if [[ -f $SQUASHFS_CACHE ]] && [[ $(sha256sum "$SQUASHFS_CACHE" | cut -d' ' -f1) == "$2" ]]; then
+    return 0
+  fi
+  fetch "$1" "$SQUASHFS_CACHE.tmp"
+  verify_sha256 "$SQUASHFS_CACHE.tmp" "$2"
+  mv -f "$SQUASHFS_CACHE.tmp" "$SQUASHFS_CACHE"
+}
+
+customize_rootfs() { # root profile
+  local root=$1 profile=$2
+  # upstream ships /tmp as 0755: apt's sandbox user and every non-root guest
+  # process need the sticky, world-writable default
+  install -d -m 1777 "$root/tmp" "$root/var/tmp"
   install -d -m 0700 "$root/root/.ssh"
   install -m 0600 "$PUBKEY_FILE" "$root/root/.ssh/authorized_keys"
   rm -f "$root/etc/resolv.conf"
@@ -286,9 +373,119 @@ customize_rootfs() { # root
   # The kernel configures networking from the ip= boot argument; the upstream
   # fcnet helper would only fight over the same address.
   rm -f "$root"/etc/systemd/system/*/fcnet.service "$root"/etc/systemd/system/fcnet.service
+  # before trim_boot and install_motd, which clean up what packages bring along
+  [[ $profile == base ]] || install_profile "$root" "$profile"
   trim_boot "$root"
   install_envd "$root"
   install_motd "$root"
+}
+
+# --- profiles ----------------------------------------------------------------
+# A profile is the base image plus software installed by running
+# profile_script inside the extracted root (chroot, with the Lima VM's
+# network). Nothing may start a daemon here: whatever state a daemon creates
+# ends up in the golden snapshot and is shared by every VM restored from it.
+
+install_profile() { # root profile
+  local root=$1 profile=$2
+  log "installing the $profile profile (chroot, needs internet)"
+  profile_script "$profile" > "$root/tmp/cracklet-profile.sh"
+  # keep dpkg maintainer scripts from starting services in the build root
+  printf '#!/bin/sh\nexit 101\n' > "$root/usr/sbin/policy-rc.d"
+  chmod 0755 "$root/usr/sbin/policy-rc.d"
+  chroot_mount "$root"
+  if ! chroot "$root" /usr/bin/env -i HOME=/root PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+      LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive /bin/bash /tmp/cracklet-profile.sh >&2; then
+    die "installing the $profile profile failed (see the output above)"
+  fi
+  chroot_umount || die "could not unmount the build root"
+  rm -f "$root/usr/sbin/policy-rc.d" "$root/tmp/cracklet-profile.sh"
+  case $profile in
+    paseo) install_paseo_unit "$root" ;;
+  esac
+}
+
+chroot_mount() { # root
+  local root=$1
+  # rslave in the same call: unmounting the copies later must never propagate
+  # back to the Lima VM's own /sys and /dev (/ is a shared mount under systemd)
+  mount -t proc proc "$root/proc"; CHROOT_MOUNTS+=("$root/proc")
+  mount --rbind --make-rslave /sys "$root/sys"; CHROOT_MOUNTS+=("$root/sys")
+  mount --rbind --make-rslave /dev "$root/dev"; CHROOT_MOUNTS+=("$root/dev")
+}
+
+# chroot_umount unmounts in reverse order and fails if anything stays mounted.
+chroot_umount() {
+  local i ok=0
+  for ((i = ${#CHROOT_MOUNTS[@]} - 1; i >= 0; i--)); do
+    umount -R "${CHROOT_MOUNTS[i]}" 2>/dev/null || umount -R -l "${CHROOT_MOUNTS[i]}" 2>/dev/null || ok=1
+  done
+  ((ok == 0)) && CHROOT_MOUNTS=()
+  return "$ok"
+}
+
+profile_script() { # profile
+  case $1 in
+    paseo) paseo_script ;;
+    *)     die "profile '$1' has no install script" ;;
+  esac
+}
+
+# paseo_script prints what runs inside the chroot. Node comes from NodeSource
+# (Ubuntu 24.04 ships 18) and gh from GitHub's repository, both signed apt
+# repositories; Claude Code uses the native installer, which installs into
+# root's home. The versions are the newest available when the image is built.
+paseo_script() {
+  cat <<'SCRIPT'
+set -euo pipefail
+# the Firecracker CI rootfs ships without /var/cache, /var/lib/apt and /var/log
+mkdir -p /var/cache/apt/archives/partial /var/lib/apt/lists/partial /var/cache/debconf /var/log/apt
+arch=$(dpkg --print-architecture)
+install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o /etc/apt/keyrings/nodesource.asc
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli.gpg
+chmod 0644 /etc/apt/keyrings/nodesource.asc /etc/apt/keyrings/githubcli.gpg
+echo "deb [arch=$arch signed-by=/etc/apt/keyrings/nodesource.asc] https://deb.nodesource.com/node_22.x nodistro main" \
+  > /etc/apt/sources.list.d/nodesource.list
+echo "deb [arch=$arch signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
+  > /etc/apt/sources.list.d/github-cli.list
+apt-get update -qq
+apt-get install -y -qq --no-install-recommends ca-certificates nodejs git gh rsync
+node --version | grep -q '^v22\.' || { echo "expected Node 22, got $(node --version)" >&2; exit 1; }
+npm install -g @getpaseo/cli
+test -x /usr/bin/paseo
+curl -fsSL https://claude.ai/install.sh | bash
+test -x /root/.local/bin/claude
+ln -sfn /root/.local/bin/claude /usr/local/bin/claude
+# no daemon identity, caches or package lists in the image
+rm -rf /root/.paseo /root/.npm /root/.cache
+apt-get clean
+rm -rf /var/lib/apt/lists/*
+SCRIPT
+}
+
+# install_paseo_unit installs the daemon unit without enabling it: the daemon
+# creates its keypair on first start, which must happen per VM, after restore.
+install_paseo_unit() { # root
+  local root=$1
+  install -d -m 0755 "$root/etc/systemd/system"
+  cat > "$root/etc/systemd/system/paseo.service" <<'UNIT'
+[Unit]
+Description=Paseo daemon
+After=network-online.target cracklet-envd.service
+Wants=network-online.target
+
+[Service]
+Environment=HOME=/root
+Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+WorkingDirectory=/root
+ExecStart=/usr/bin/paseo daemon run --home /root/.paseo
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+UNIT
 }
 
 # install_motd replaces Ubuntu's login banner (Landscape and Pro adverts, the
@@ -494,36 +691,41 @@ grow_disk() { # path size (validated, uppercase)
   out=$(resize2fs "$path" 2>&1) || die "resize2fs failed: $out"
 }
 
-cmd_new() { # NAME|- VCPUS MEM_MIB DISK [snapshot|fresh]
-  [[ $# -eq 4 || $# -eq 5 ]] || die "usage: new NAME|- VCPUS MEM_MIB DISK [snapshot|fresh]"
-  local name=$1 vcpus=$2 mem=$3 disk mode=${5:-snapshot} idx dir
+cmd_new() { # NAME|- VCPUS MEM_MIB DISK [snapshot|fresh [PROFILE]]
+  [[ $# -ge 4 && $# -le 6 ]] || die "usage: new NAME|- VCPUS MEM_MIB DISK [snapshot|fresh [PROFILE]]"
+  local name=$1 vcpus=$2 mem=$3 disk mode=${5:-snapshot} profile=${6:-base} idx dir image
   disk=$(to_upper "$4")
   [[ $mode == snapshot || $mode == fresh ]] || die "mode must be snapshot or fresh"
-  # a grown disk cannot be restored from a snapshot taken with the base size
-  [[ $disk == "$BASE_DISK_SIZE" ]] || mode=fresh
+  validate_profile "$profile"
+  # a grown disk cannot be restored from a snapshot taken with the image size
+  [[ $disk == "$(profile_disk_size "$profile")" ]] || mode=fresh
   validate_int_range "$vcpus" 1 "$MAX_VCPUS" vcpus
   validate_int_range "$mem" "$MIN_MEM_MIB" "$MAX_MEM_MIB" memory
   validate_disk "$disk"
-  [[ -f $IMAGES_DIR/rootfs-base.ext4 && -f $IMAGES_DIR/vmlinux ]] || die "images missing, run 'cracklet prepare' first"
+  image=$(profile_image "$profile")
+  [[ -f $IMAGES_DIR/vmlinux && -f $IMAGES_DIR/rootfs-base.ext4 ]] || die "images missing, run 'cracklet prepare' first"
+  [[ -f $image ]] || die "the $profile image is not built, run 'cracklet prepare --profile $profile' first"
+  profile_current "$profile" || die "the $profile image predates the base image, run 'cracklet prepare --profile $profile'"
   install -d -m 0700 "$VMS_DIR"
   idx=$(allocate_index)
   if [[ $name == - ]]; then name=$(free_auto_name); fi
   validate_name "$name"
   dir=$(vm_dir "$name")
   if [[ $mode == snapshot ]]; then
-    ensure_golden "$vcpus" "$mem"
+    ensure_golden "$profile" "$vcpus" "$mem"
   fi
   mkdir "$dir" 2>/dev/null || die "VM '$name' already exists"
   NEW_VM_NAME=$name                           # from here on, failures roll back
   atomic_write "$dir/index" "$idx"
+  atomic_write "$dir/profile" "$profile"
   write_config "$name" "$idx" "$vcpus" "$mem"
   if [[ $mode == snapshot ]]; then
-    cp --sparse=always "$(golden_dir "$vcpus" "$mem")/rootfs.ext4" "$dir/rootfs.ext4"
-    atomic_write "$dir/golden" "$(golden_dir "$vcpus" "$mem")"
+    cp --sparse=always "$(golden_dir "$profile" "$vcpus" "$mem")/rootfs.ext4" "$dir/rootfs.ext4"
+    atomic_write "$dir/golden" "$(golden_dir "$profile" "$vcpus" "$mem")"
     restore_vm "$name"
   else
     log "creating root disk for $name"
-    cp --sparse=always "$IMAGES_DIR/rootfs-base.ext4" "$dir/rootfs.ext4"
+    cp --sparse=always "$image" "$dir/rootfs.ext4"
     grow_disk "$dir/rootfs.ext4" "$disk"
     start_vm "$name"
   fi
@@ -586,27 +788,27 @@ wait_for_api() { # dir
 # its memory. `cracklet new` restores it in a fraction of the cold-boot time and then
 # hands the VM its real identity over vsock.
 
-golden_dir() { echo "$IMAGES_DIR/golden-$1-$2"; }   # vcpus mem
+golden_dir() { echo "$IMAGES_DIR/golden-$1-$2-$3"; }   # profile vcpus mem
 
-golden_stamp() {
-  echo "rev$GOLDEN_REV|$(cat "$IMAGES_DIR/rootfs-base.stamp")|$(cat "$IMAGES_DIR/vmlinux.stamp")|$("$FC_BIN" --version | head -1)"
+golden_stamp() { # profile
+  echo "rev$GOLDEN_REV|$1|$(cat "$(profile_stamp_file "$1")")|$(cat "$IMAGES_DIR/vmlinux.stamp")|$("$FC_BIN" --version | head -1)"
 }
 
-ensure_golden() { # vcpus mem_mib
-  local dir; dir=$(golden_dir "$1" "$2")
-  if [[ -f $dir/vmstate && -f $dir/mem && -f $dir/rootfs.ext4 && $(cat "$dir/stamp" 2>/dev/null) == "$(golden_stamp)" ]]; then
+ensure_golden() { # profile vcpus mem_mib
+  local dir; dir=$(golden_dir "$1" "$2" "$3")
+  if [[ -f $dir/vmstate && -f $dir/mem && -f $dir/rootfs.ext4 && $(cat "$dir/stamp" 2>/dev/null) == "$(golden_stamp "$1")" ]]; then
     return 0
   fi
-  build_golden "$1" "$2"
+  build_golden "$1" "$2" "$3"
 }
 
-build_golden() { # vcpus mem_mib
-  local vcpus=$1 mem=$2 dir work ip
-  dir=$(golden_dir "$vcpus" "$mem"); ip=$(idx_ip "$GOLDEN_INDEX")
-  log "building golden snapshot ($vcpus vCPU, $mem MiB); this happens once per size"
+build_golden() { # profile vcpus mem_mib
+  local profile=$1 vcpus=$2 mem=$3 dir work ip
+  dir=$(golden_dir "$profile" "$vcpus" "$mem"); ip=$(idx_ip "$GOLDEN_INDEX")
+  log "building $profile golden snapshot ($vcpus vCPU, $mem MiB); this happens once per profile and size"
   rm -rf "$dir" "$IMAGES_DIR"/golden-build.*
   work=$(mktemp -d "$IMAGES_DIR/golden-build.XXXXXX"); TMP_DIRS+=("$work")
-  cp --sparse=always "$IMAGES_DIR/rootfs-base.ext4" "$work/rootfs.ext4"
+  cp --sparse=always "$(profile_image "$profile")" "$work/rootfs.ext4"
   write_config golden "$GOLDEN_INDEX" "$vcpus" "$mem" "$work"
   create_tap "$GOLDEN_INDEX"
   run_firecracker golden "$work" "$mem" --config-file ./config.json
@@ -625,7 +827,7 @@ build_golden() { # vcpus mem_mib
   ip link del "$(idx_tap "$GOLDEN_INDEX")" 2>/dev/null || true
   rm -f "$work"/fc.sock "$work"/v.sock* "$work"/console.log
   chmod 0600 "$work"/mem "$work"/vmstate "$work"/rootfs.ext4
-  golden_stamp > "$work/stamp"
+  golden_stamp "$profile" > "$work/stamp"
   mv "$work" "$dir"
   TMP_DIRS=("${TMP_DIRS[@]/$work}")
   log "golden snapshot ready ($(du -sh "$dir/mem" | cut -f1) memory image)"

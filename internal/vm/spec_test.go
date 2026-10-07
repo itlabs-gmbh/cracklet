@@ -87,3 +87,55 @@ func TestSpecMode(t *testing.T) {
 		t.Error("Mode must map Fresh to fresh and default to snapshot")
 	}
 }
+
+func TestProfiles(t *testing.T) {
+	for name, want := range map[string]string{"": "2G", ProfileBase: "2G", ProfilePaseo: "8G"} {
+		got, err := ProfileDisk(name)
+		if err != nil || got != want {
+			t.Errorf("ProfileDisk(%q) = (%q, %v), want %q", name, got, err, want)
+		}
+	}
+	for _, bad := range []string{"Paseo", "node", "../x"} {
+		if err := ValidateProfile(bad); err == nil {
+			t.Errorf("ValidateProfile(%q) expected error", bad)
+		}
+	}
+	if got := ProfileNames(); len(got) != 2 || got[0] != ProfileBase || got[1] != ProfilePaseo {
+		t.Errorf("ProfileNames() = %v", got)
+	}
+}
+
+func TestSpecDiskDefaultsToProfileImage(t *testing.T) {
+	cases := []struct {
+		spec Spec
+		want string
+	}{
+		{Spec{}, "2G"},
+		{Spec{Profile: ProfilePaseo}, "8G"},
+		{Spec{Profile: ProfilePaseo, Disk: "12G"}, "12G"},
+	}
+	for _, c := range cases {
+		if got := c.spec.DiskSize(); got != c.want {
+			t.Errorf("DiskSize(%+v) = %q, want %q", c.spec, got, c.want)
+		}
+	}
+	if got := (Spec{}).ProfileName(); got != ProfileBase {
+		t.Errorf("empty profile must mean %q, got %q", ProfileBase, got)
+	}
+}
+
+func TestValidateSpecProfile(t *testing.T) {
+	if err := (Spec{VCPUs: 2, MemMiB: 1024, Profile: ProfilePaseo}).Validate(); err != nil {
+		t.Fatalf("paseo with default disk rejected: %v", err)
+	}
+	bad := []Spec{
+		{VCPUs: 2, MemMiB: 1024, Profile: "nope"},
+		// the paseo image is 8G and disks only grow
+		{VCPUs: 2, MemMiB: 1024, Profile: ProfilePaseo, Disk: "4G"},
+	}
+	for _, s := range bad {
+		if err := s.Validate(); err == nil {
+			t.Errorf("Validate(%+v) expected error", s)
+		}
+	}
+}

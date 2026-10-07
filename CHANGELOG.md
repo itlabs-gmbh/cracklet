@@ -9,6 +9,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Image profiles: `cracklet prepare --profile paseo` builds an 8G guest image
+  with Node 22, `@getpaseo/cli`, Claude Code, git, gh and rsync (with
+  `paseo.service` installed but disabled), and `cracklet new --profile paseo`
+  restores its own golden snapshot. `--disk` now defaults to the profile's
+  image size.
 - Capability broker: `cracklet grant NAME CAP[:SCOPE]`, `revoke`, `grants` and
   `new --grant` let a microVM use GitHub, Claude Code or host-side MCP servers
   through a per-VM Unix socket that `cracklet ssh` forwards into the guest.

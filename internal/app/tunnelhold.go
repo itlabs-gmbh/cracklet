@@ -70,13 +70,18 @@ func (a *App) Tunnel(ctx context.Context, name string) error {
 // across reconnects.
 func (a *App) holdTunnel(ctx context.Context, name string) error {
 	socket, stop, err := a.awaitBroker(ctx, name)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+	// Registered before any other return: a claim that raced with
+	// cancellation must still be given up.
+	defer stop()
 	if ctx.Err() != nil {
 		return nil
 	}
-	if err != nil {
-		return err
-	}
-	defer stop()
 	return a.keepForwarded(ctx, name, socket)
 }
 

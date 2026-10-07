@@ -380,3 +380,26 @@ func TestNextTunnelRetryBacksOff(t *testing.T) {
 		}
 	}
 }
+
+func TestHoldTunnelReleasesClaimWhenCancelledDuringTakeover(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	app, _, owner := newSharedBrokerApp(t, (&tunnelScript{states: []string{"running"}}).handle)
+	owner.release()
+	app.tunnel = func(c context.Context, name string) (string, func(), error) {
+		socket, stop, err := owner.tunnel(c, name)
+		cancel() // the session ends just as the takeover succeeds
+		return socket, stop, err
+	}
+	if err := app.holdTunnel(ctx, "agent1"); err != nil {
+		t.Fatalf("holdTunnel: %v", err)
+	}
+	if owner.isHeld() {
+		t.Fatal("a takeover that raced with cancellation must give the broker up")
+	}
+	if _, stop, err := owner.tunnel(context.Background(), "agent1"); err != nil {
+		t.Errorf("another session must be able to take over, got %v", err)
+	} else {
+		stop()
+	}
+}

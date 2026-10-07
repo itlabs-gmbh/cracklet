@@ -17,14 +17,24 @@ func Quote(s string) string {
 	if s != "" && strings.Trim(s, safe) == "" {
 		return s
 	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	return singleQuote(s)
 }
 
-// Join quotes every word of argv and joins them with spaces.
+// Join turns argv into a command line: every word is quoted and the words
+// are joined with spaces. The command name is always single-quoted, because
+// the shell treats an unquoted "time", "if" or "for" in that position as a
+// reserved word instead of running the program of that name.
 func Join(argv []string) string {
 	quoted := make([]string, len(argv))
 	for i, w := range argv {
 		quoted[i] = Quote(w)
 	}
+	if len(argv) > 0 {
+		quoted[0] = singleQuote(argv[0])
+	}
 	return strings.Join(quoted, " ")
+}
+
+func singleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

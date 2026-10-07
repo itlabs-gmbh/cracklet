@@ -1,7 +1,9 @@
 package shquote
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -48,6 +50,37 @@ func TestJoinRoundTripsThroughSh(t *testing.T) {
 	got := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
 	if !reflect.DeepEqual(got, argv) {
 		t.Errorf("round trip mismatch:\n got %q\nwant %q", got, argv)
+	}
+}
+
+func TestJoinAlwaysQuotesCommandName(t *testing.T) {
+	if got, want := Join([]string{"time", "-p", "true"}), "'time' -p true"; got != want {
+		t.Errorf("Join = %q, want %q", got, want)
+	}
+}
+
+// Reserved words are only recognised unquoted in command position, so a
+// program that happens to be called "time" or "if" must still be executed.
+func TestJoinRunsProgramsNamedLikeKeywords(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("no bash on PATH")
+	}
+	keywords := []string{"time", "if", "then", "for", "while", "until", "case", "do", "function", "select", "coproc", "!", "{", "[["}
+	dir := t.TempDir()
+	stub := []byte("#!/bin/sh\nprintf '%s|' \"${0##*/}\" \"$@\"\n")
+	for _, kw := range keywords {
+		if err := os.WriteFile(filepath.Join(dir, kw), stub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, kw := range keywords {
+		cmd := exec.Command(bash, "-c", Join([]string{kw, "-f", "%e", "x"}))
+		cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		out, err := cmd.CombinedOutput()
+		if want := kw + "|-f|%e|x|"; err != nil || string(out) != want {
+			t.Errorf("%q: got %q (err %v), want %q", kw, out, err, want)
+		}
 	}
 }
 

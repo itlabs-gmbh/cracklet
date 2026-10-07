@@ -131,6 +131,34 @@ func TestCapAddDownloadsAndInstalls(t *testing.T) {
 	}
 }
 
+func TestSecretRefsSeeWhatTheTemplateSees(t *testing.T) {
+	cases := map[string][]string{
+		`Bearer {{ secret "keychain:cracklet/a" }}`: {"keychain:cracklet/a"},
+		"Bearer {{ secret `keychain:cracklet/b` }}": {"keychain:cracklet/b"},
+		`{{ secret (print "env:" "C") }}`:           {"env:C"},
+		`{{ secret "env:D" }} {{ secret "env:E" }}`: {"env:D", "env:E"},
+		`plain`: nil,
+	}
+	for tmpl, want := range cases {
+		if got := secretRefs(tmpl); strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("secretRefs(%q) = %v, want %v", tmpl, got, want)
+		}
+	}
+}
+
+func TestStripControlRemovesHiddenCharacters(t *testing.T) {
+	in := "ok\x1b[2Khidden\u202ereversed\u200bzero\u0085c1\ttab\nline"
+	got := stripControl(in)
+	for _, bad := range []string{"\x1b", "\u202e", "\u200b", "\u0085"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("%q survived: %q", bad, got)
+		}
+	}
+	if !strings.Contains(got, "\ttab\nline") {
+		t.Errorf("tab and newline must survive: %q", got)
+	}
+}
+
 func TestSecretSetAndRemove(t *testing.T) {
 	app, out, fake := newCapApp(t)
 	if err := app.SecretSet(context.Background(), "claude-token", "value"); err != nil {

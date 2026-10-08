@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/itlabs-gmbh/cracklet/internal/cap"
@@ -79,15 +80,18 @@ func (a *App) Revoke(ctx context.Context, name string, specs []string) (grant.Se
 		return nil, err
 	}
 	defer unlock()
-	set, err := store.Load(name)
+	stored, err := store.Load(name)
 	if err != nil {
 		return nil, err
 	}
+	// Check every spec against the stored grants before withdrawing any, so
+	// overlapping specs such as 'github github:org/repo' both count.
+	set := stored
 	for _, g := range requested {
-		if !set.Contains(g) {
+		if !granted(stored, g) {
 			return nil, fmt.Errorf("%s is not granted to %s", g, name)
 		}
-		set = set.Remove(g)
+		set = withdraw(set, g)
 	}
 	if err := store.Save(name, set); err != nil {
 		return nil, err
@@ -115,6 +119,25 @@ func (a *App) Grants(name string) (grant.Set, error) {
 	return a.grantStore().Load(name)
 }
 
+// granted reports whether revoking g would withdraw anything from set. A grant
+// without a scope stands for the capability under every scope, so
+// 'revoke vm github' needs no shell-quoted wildcard; a scoped grant must match
+// exactly.
+func granted(set grant.Set, g grant.Grant) bool {
+	if g.Scope == "" {
+		return slices.Contains(set.Caps(), g.Cap)
+	}
+	return set.Contains(g)
+}
+
+// withdraw returns set without g, read the same way as in granted.
+func withdraw(set grant.Set, g grant.Grant) grant.Set {
+	if g.Scope == "" {
+		return set.RemoveCap(g.Cap)
+	}
+	return set.Remove(g)
+}
+
 // checkGrant verifies that a grant names a known capability and that a scope
 // is only given where the capability is scoped.
 func checkGrant(caps cap.Set, g grant.Grant) error {
@@ -131,7 +154,7 @@ func checkGrant(caps cap.Set, g grant.Grant) error {
 	scoped := c.Proxy != nil && c.Proxy.ScopeSegments > 0
 	switch {
 	case scoped && g.Scope == "":
-		return fmt.Errorf("%s needs a scope, e.g. %s:org/repo or %s:*", g.Cap, g.Cap, g.Cap)
+		return fmt.Errorf("%s needs a scope, e.g. %s:org/repo or '%s:*'", g.Cap, g.Cap, g.Cap)
 	case !scoped && g.Scope != "":
 		return fmt.Errorf("%s takes no scope", g.Cap)
 	}

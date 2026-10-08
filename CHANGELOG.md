@@ -7,6 +7,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.1] - 2026-10-08
+
+First public release.
+
 ### Added
 
 - VM metadata: `cracklet new --owner NAME [--slot N]` labels a VM managed by a
@@ -91,4 +95,5 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The guest CRNG is reseeded from the Lima VM's `/dev/urandom` after every
   snapshot restore so clones diverge immediately.
 
-[Unreleased]: https://github.com/itlabs-gmbh/cracklet/commits/main
+[Unreleased]: https://github.com/itlabs-gmbh/cracklet/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/itlabs-gmbh/cracklet/releases/tag/v0.0.1

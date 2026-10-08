@@ -39,6 +39,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Capability files (`cracklet cap ls|show|lint|init|add`): TOML definitions
   with three primitives (`proxy`, `mcp`, `exec`), embedded defaults for
   `claude` and `github`, user overrides in `~/.cracklet/caps/`.
+- The `github` capability also serves the `gh` CLI: API calls for
+  `api.github.com` reach the broker through `/run/cracklet/broker.sock` and use
+  the same `github-token`. REST calls under `/repos/<org>/<repo>` follow the
+  grant's scope; GraphQL, search, other calls not tied to one repository and
+  `forks`, `transfer` and `generate` need `github:*`.
+- Capability files: `[[proxy.routes]]` reach further upstreams by `Host`
+  header (public DNS names only; `wildcard_subpaths` mark endpoints that need
+  the wildcard grant), and guest templates get `.BrokerSocket`, a Unix socket that systemd
+  relays to the broker tunnel while any capability is granted.
 - `cracklet secret set|rm` stores credentials in the macOS Keychain for
   capabilities to reference as `keychain:cracklet/<name>`.
 - `cracklet ls` shows a GRANTS column.
@@ -57,6 +66,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `cracklet unforward`, backed by transient systemd socket units.
 - `Include ~/.cracklet/ssh_config` lets plain `ssh NAME.cracklet` work via the
   Lima VM as jump host.
+
+### Fixed
+
+- The `github` capability sends `Basic x-access-token:<token>` instead of
+  `Bearer`, which GitHub rejects for git over HTTPS. Capability templates gain
+  a `basicauth` function for this: `{{ secret "ref" | basicauth "user" }}`.
 
 ### Security
 

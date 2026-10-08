@@ -45,6 +45,9 @@ const (
 	// BrokerGuestPort is where the broker tunnel appears inside a microVM
 	// (127.0.0.1:PORT) while `cracklet ssh` is open.
 	BrokerGuestPort = 7777
+	// BrokerGuestSocket is a Unix socket in the microVM that relays to the
+	// tunnel port, for clients such as gh that cannot take a base URL.
+	BrokerGuestSocket = "/run/cracklet/broker.sock"
 )
 
 // Paths describes the host-side directories cracklet works with.
@@ -91,6 +94,9 @@ func (p Paths) LimaLockPath() string { return filepath.Join(p.Home, "lima.lock")
 
 // CapsDir holds the user's capability files (one <name>.toml each).
 func (p Paths) CapsDir() string { return filepath.Join(p.Home, "caps") }
+
+// CapsLock serialises installations into CapsDir.
+func (p Paths) CapsLock() string { return filepath.Join(p.Home, "caps.lock") }
 
 // VMsDir holds per-VM host-side state (grants, placeholder token).
 func (p Paths) VMsDir() string { return filepath.Join(p.Home, "vms") }

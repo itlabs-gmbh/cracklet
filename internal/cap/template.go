@@ -2,6 +2,7 @@ package cap
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -17,6 +18,9 @@ type TemplateData struct {
 	// PseudoToken is a per-VM placeholder for clients that insist on a token;
 	// the broker never checks it, the tunnel is the identity.
 	PseudoToken string
+	// BrokerSocket is a Unix socket in the guest that reaches the broker, for
+	// clients that cannot be given BrokerURL (gh's http_unix_socket).
+	BrokerSocket string
 }
 
 // SecretFunc resolves a secret reference such as keychain:cracklet/claude-token.
@@ -72,7 +76,7 @@ func render(text string, data TemplateData, secret SecretFunc) (string, error) {
 	if !strings.Contains(text, "{{") {
 		return text, nil
 	}
-	tmpl, err := template.New("cap").Option("missingkey=error").Funcs(template.FuncMap{"secret": secret}).Parse(text)
+	tmpl, err := template.New("cap").Option("missingkey=error").Funcs(funcs(secret)).Parse(text)
 	if err != nil {
 		return "", fmt.Errorf("parse template: %w", err)
 	}
@@ -81,6 +85,18 @@ func render(text string, data TemplateData, secret SecretFunc) (string, error) {
 		return "", unwrapExec(err)
 	}
 	return buf.String(), nil
+}
+
+// funcs is the function set every template sees; secret differs between the
+// broker side, the guest side and SecretRefs' static walk.
+func funcs(secret any) template.FuncMap {
+	return template.FuncMap{"secret": secret, "basicauth": basicAuth}
+}
+
+// basicAuth encodes an HTTP Basic credential. The password comes last so a
+// secret can be piped in: {{ secret "ref" | basicauth "user" }}.
+func basicAuth(user, password string) string {
+	return base64.StdEncoding.EncodeToString([]byte(user + ":" + password))
 }
 
 // unwrapExec strips text/template's "template: cap:1:10: executing ... error
@@ -97,7 +113,7 @@ func unwrapExec(err error) error {
 }
 
 // lintData has every field set so missingkey=error catches typos.
-var lintData = TemplateData{VM: "lint", BrokerURL: "http://127.0.0.1:1", PseudoToken: "lint"}
+var lintData = TemplateData{VM: "lint", BrokerURL: "http://127.0.0.1:1", PseudoToken: "lint", BrokerSocket: "/run/lint.sock"}
 
 // checkTemplate parses and dry-runs a template. Broker-side templates may use
 // secret (resolved to a placeholder); guest-side ones must not.

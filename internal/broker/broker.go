@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -119,61 +121,96 @@ func (b *Broker) serve(w http.ResponseWriter, r *http.Request) {
 	b.audit(r, d, rec.status)
 }
 
-// dispatch routes /<cap>/<rest> and enforces grants.
+// dispatch routes /<cap>/<rest>, or a request for a host a proxy route
+// claims, and enforces grants.
 func (b *Broker) dispatch(w http.ResponseWriter, r *http.Request) decision {
 	if reason := unsafePath(r.URL); reason != "" {
 		writeError(w, http.StatusBadRequest, reason, "")
 		return decision{status: http.StatusBadRequest, reason: "unsafe path"}
 	}
-	name, rest := splitCap(r.URL.Path)
-	if name == "" {
-		writeError(w, http.StatusNotFound, "no capability in path; the broker serves /<cap>/...", "cracklet cap ls")
-		return decision{status: http.StatusNotFound, reason: "no cap"}
-	}
-	c, ok := b.Caps[name]
+	t, d, ok := b.locate(w, r)
 	if !ok {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("unknown capability %q", name), "cracklet cap ls")
-		return decision{cap: name, status: http.StatusNotFound, reason: "unknown cap"}
+		return d
 	}
-	scope := scopeOf(c, rest)
+	name := t.cap.Name
 	grants, err := b.Grants()
 	if err != nil {
 		b.detail("grants of %s unreadable: %v", b.VM, err)
 		writeError(w, http.StatusInternalServerError, "the broker could not read this VM's grants; see the audit log on the host", "")
-		return decision{cap: name, scope: scope, status: http.StatusInternalServerError, reason: "grants"}
+		return decision{cap: name, scope: t.scope, status: http.StatusInternalServerError, reason: "grants"}
 	}
-	if !grants.Allows(name, scope) {
-		hint := grant.Hint(b.VM, name, scope)
-		writeError(w, http.StatusForbidden, fmt.Sprintf("%s is not granted to %s", grant.Grant{Cap: name, Scope: scope}, b.VM), hint)
-		return decision{cap: name, scope: scope, status: http.StatusForbidden, reason: "denied"}
+	if !grants.Allows(name, t.scope) {
+		hint := grant.Hint(b.VM, name, t.scope)
+		writeError(w, http.StatusForbidden, fmt.Sprintf("%s is not granted to %s", grant.Grant{Cap: name, Scope: t.scope}, b.VM), hint)
+		return decision{cap: name, scope: t.scope, status: http.StatusForbidden, reason: "denied"}
 	}
-	h, err := b.handlerFor(c)
+	h, err := b.handlerFor(t.cap, t.route)
 	if err != nil {
 		b.detail("cap %s: %v", name, err)
 		writeError(w, http.StatusInternalServerError, "the broker could not set up this capability; see the audit log on the host", "")
-		return decision{cap: name, scope: scope, status: http.StatusInternalServerError, reason: "setup"}
+		return decision{cap: name, scope: t.scope, status: http.StatusInternalServerError, reason: "setup"}
 	}
 	r2 := r.Clone(r.Context())
-	r2.URL.Path = rest
+	r2.URL.Path = t.rest
 	r2.URL.RawPath = ""
 	h.ServeHTTP(w, r2)
-	return decision{cap: name, scope: scope, reason: "allow"}
+	return decision{cap: name, scope: t.scope, reason: "allow"}
 }
 
-func (b *Broker) handlerFor(c cap.Cap) (http.Handler, error) {
+// target is where a request goes: a capability, the route it came in by (nil
+// for /<cap>/ requests), the path to forward and the grant scope it needs.
+type target struct {
+	cap   cap.Cap
+	route *cap.Route
+	rest  string
+	scope string
+}
+
+// locate resolves the request's target, answering it itself when there is none.
+func (b *Broker) locate(w http.ResponseWriter, r *http.Request) (target, decision, bool) {
+	if c, rt, ok := b.Caps.RouteFor(requestHost(r)); ok {
+		return target{cap: c, route: &rt, rest: r.URL.Path, scope: routeScope(c, rt, r.URL.Path)}, decision{}, true
+	}
+	name, rest := splitCap(r.URL.Path)
+	if name == "" {
+		writeError(w, http.StatusNotFound, "no capability in path; the broker serves /<cap>/...", "cracklet cap ls")
+		return target{}, decision{status: http.StatusNotFound, reason: "no cap"}, false
+	}
+	c, ok := b.Caps[name]
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("unknown capability %q", name), "cracklet cap ls")
+		return target{}, decision{cap: name, status: http.StatusNotFound, reason: "unknown cap"}, false
+	}
+	return target{cap: c, rest: rest, scope: scopeOf(c, rest)}, decision{}, true
+}
+
+// requestHost is the Host header without port, lowercased.
+func requestHost(r *http.Request) string {
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return strings.ToLower(host)
+}
+
+func (b *Broker) handlerFor(c cap.Cap, route *cap.Route) (http.Handler, error) {
+	key := c.Name
+	if route != nil {
+		key += "@" + route.Host
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
 		return nil, fmt.Errorf("broker is closed")
 	}
-	if h, ok := b.handlers[c.Name]; ok {
+	if h, ok := b.handlers[key]; ok {
 		return h, nil
 	}
 	var h http.Handler
 	var err error
 	switch c.Kind() {
 	case cap.KindProxy:
-		h, err = b.newProxy(c)
+		h, err = b.newProxy(c, route)
 	case cap.KindMCP:
 		br := newMCPBridge(c, b.childLog())
 		b.bridges = append(b.bridges, br)
@@ -189,7 +226,7 @@ func (b *Broker) handlerFor(c cap.Cap) (http.Handler, error) {
 	if b.handlers == nil {
 		b.handlers = map[string]http.Handler{}
 	}
-	b.handlers[c.Name] = h
+	b.handlers[key] = h
 	return h, nil
 }
 
@@ -250,6 +287,52 @@ func scopeOf(c cap.Cap, rest string) string {
 		segs[i] = strings.TrimSuffix(s, ".git")
 	}
 	return strings.Join(segs, "/")
+}
+
+// routeScope derives the scope of a request that came in by Host. A path
+// outside the route's scope_prefix, or too short to name a scope, is not tied
+// to one scope (GraphQL, search, the user) and needs the wildcard grant: a
+// scoped grant must not reach other scopes through such endpoints.
+func routeScope(c cap.Cap, rt cap.Route, path string) string {
+	n := c.Proxy.ScopeSegments
+	if n == 0 {
+		return ""
+	}
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	if rt.ScopePrefix != "" {
+		if parts[0] != rt.ScopePrefix {
+			return grant.Any
+		}
+		parts = parts[1:]
+	}
+	if len(parts) < n {
+		return grant.Any
+	}
+	for _, s := range parts[:n] {
+		if s == "" {
+			return grant.Any
+		}
+	}
+	if len(parts) > n && isWildcardSubpath(rt, parts[n]) {
+		return grant.Any
+	}
+	return strings.Join(parts[:n], "/")
+}
+
+// isWildcardSubpath matches seg against the route's wildcard_subpaths as
+// loosely as an upstream might route it: case-insensitively and only up to the
+// first character outside [A-Za-z0-9_-] (forks.json, forks;x, transfer~), so
+// the broker never reads a path more narrowly than the upstream does.
+func isWildcardSubpath(rt cap.Route, seg string) bool {
+	base := seg
+	if i := strings.IndexFunc(seg, func(r rune) bool {
+		return !(r == '-' || r == '_' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z')
+	}); i >= 0 {
+		base = seg[:i]
+	}
+	return slices.ContainsFunc(rt.WildcardSubpaths, func(w string) bool {
+		return strings.EqualFold(w, base)
+	})
 }
 
 func (b *Broker) audit(r *http.Request, d decision, status int) {

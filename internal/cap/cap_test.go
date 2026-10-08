@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -121,6 +122,35 @@ func TestEmbeddedDefaultsAreValid(t *testing.T) {
 	if set["github"].Proxy.ScopeSegments != 2 {
 		t.Errorf("github should be scoped per org/repo")
 	}
+	// GitHub rejects Bearer for git over HTTPS; only Basic works there.
+	auth, err := Render(set["github"].Proxy.Headers["Authorization"], lintData,
+		func(string) (string, error) { return "tok", nil })
+	if err != nil || auth != "Basic eC1hY2Nlc3MtdG9rZW46dG9r" {
+		t.Errorf("github Authorization = %q, %v", auth, err)
+	}
+	// gh reaches the API through the same cap and the same token.
+	_, api, ok := set.RouteFor("api.github.com")
+	if !ok || api.Upstream != "https://api.github.com" || api.ScopePrefix != "repos" ||
+		!slices.Contains(api.WildcardSubpaths, "transfer") || !slices.Contains(api.WildcardSubpaths, "forks") ||
+		!slices.Contains(api.WildcardSubpaths, "generate") {
+		t.Fatalf("github should route api.github.com, got %+v, %v", api, ok)
+	}
+	if refs := set["github"].Proxy.SecretRefs(); strings.Join(refs, ",") != "keychain:cracklet/github-token,keychain:cracklet/github-token" {
+		t.Errorf("git and gh must share the one token, got %v", refs)
+	}
+	g := set["github"].Guest
+	if g.Env["GH_TOKEN"] == "" {
+		t.Errorf("gh needs a placeholder GH_TOKEN to consider itself logged in")
+	}
+	var ghConfig bool
+	for _, b := range g.Blocks {
+		if b.Path == "/root/.config/gh/config.yml" && strings.Contains(b.Content, "http_unix_socket: {{ .BrokerSocket }}") {
+			ghConfig = true
+		}
+	}
+	if !ghConfig {
+		t.Errorf("gh must be pointed at the broker socket, blocks = %+v", g.Blocks)
+	}
 }
 
 func TestLoadUserFileOverridesEmbedded(t *testing.T) {
@@ -187,6 +217,20 @@ func TestRenderGuestAndBrokerTemplates(t *testing.T) {
 	}
 	if got, err := Render("plain", data, nil); err != nil || got != "plain" {
 		t.Fatalf("plain text should pass through, got %q, %v", got, err)
+	}
+}
+
+func TestRenderBasicAuth(t *testing.T) {
+	data := TemplateData{VM: "v", BrokerURL: "http://b", PseudoToken: "t"}
+	secret := func(string) (string, error) { return "tok", nil }
+	got, err := Render(`Basic {{ secret "env:X" | basicauth "x-access-token" }}`, data, secret)
+	// base64("x-access-token:tok")
+	if err != nil || got != "Basic eC1hY2Nlc3MtdG9rZW46dG9r" {
+		t.Fatalf("Render = %q, %v", got, err)
+	}
+	refs, err := SecretRefs(`Basic {{ secret "env:X" | basicauth "x-access-token" }}`)
+	if err != nil || strings.Join(refs, ",") != "env:X" {
+		t.Fatalf("refs = %v, %v", refs, err)
 	}
 }
 

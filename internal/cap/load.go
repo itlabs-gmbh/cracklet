@@ -138,6 +138,9 @@ func Load(dir string) (Set, error) {
 		}
 		merged[c.Name] = c
 	}
+	if err := merged.Validate(); err != nil {
+		return nil, err
+	}
 	return merged, nil
 }
 

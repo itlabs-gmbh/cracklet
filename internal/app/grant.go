@@ -145,9 +145,10 @@ func (a *App) templateData(name string) (cap.TemplateData, error) {
 		return cap.TemplateData{}, err
 	}
 	return cap.TemplateData{
-		VM:          name,
-		BrokerURL:   fmt.Sprintf("http://127.0.0.1:%d", config.BrokerGuestPort),
-		PseudoToken: token,
+		VM:           name,
+		BrokerURL:    fmt.Sprintf("http://127.0.0.1:%d", config.BrokerGuestPort),
+		PseudoToken:  token,
+		BrokerSocket: config.BrokerGuestSocket,
 	}, nil
 }
 

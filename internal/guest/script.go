@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 
@@ -84,11 +85,22 @@ func (p Plan) ApplyScript(st State) (string, error) {
 	var b strings.Builder
 	b.WriteString("set -eu\n")
 	b.WriteString("install -d -m 0755 " + path.Dir(ManifestPath) + "\n")
-	for _, stale := range p.staleFiles(st) {
-		b.WriteString("rm -f " + shQuote(stale) + "\n")
+	stale := p.staleFiles(st)
+	relayGone := !p.Relay && slices.ContainsFunc(stale, isRelayUnit)
+	if relayGone {
+		stopRelay(&b)
+	}
+	for _, f := range stale {
+		b.WriteString("rm -f " + shQuote(f) + "\n")
+	}
+	if relayGone {
+		b.WriteString("if " + asRootOnSystemd + "; then systemctl daemon-reload; fi\n")
 	}
 	for _, f := range p.Files {
 		writeFile(&b, f.Path, f.Mode, []byte(f.Content))
+	}
+	if p.Relay {
+		writeRelay(&b)
 	}
 	for _, stale := range p.staleBlocks(st) {
 		writeBlock(&b, stale.Path, stale.Owner, "", "")
@@ -120,7 +132,7 @@ func (p Plan) staleFiles(st State) []string {
 			continue
 		}
 		// The manifest is read back from the guest; never trust it blindly.
-		if path := strings.TrimPrefix(l, "file:"); validatePath(path) == nil {
+		if path := strings.TrimPrefix(l, "file:"); validateManifestPath(path) == nil {
 			stale = append(stale, path)
 		}
 	}
@@ -141,7 +153,7 @@ func (p Plan) staleBlocks(st State) []Block {
 			continue
 		}
 		path, owner, ok := strings.Cut(strings.TrimPrefix(l, "block:"), "#")
-		if !ok || validatePath(path) != nil || cap.ValidateName(owner) != nil {
+		if !ok || validateManifestPath(path) != nil || cap.ValidateName(owner) != nil {
 			continue
 		}
 		stale = append(stale, Block{Path: path, Owner: owner})

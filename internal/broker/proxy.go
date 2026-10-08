@@ -20,8 +20,13 @@ var credentialHeaders = []string{
 // alwaysKeep survive an allow_headers list because the request is unusable without them.
 var alwaysKeep = []string{"Content-Type", "Content-Length", "Content-Encoding", "Accept", "Accept-Encoding"}
 
-func (b *Broker) newProxy(c cap.Cap) (http.Handler, error) {
-	upstream, err := url.Parse(c.Proxy.Upstream)
+// newProxy serves the capability's main upstream, or route's when given.
+func (b *Broker) newProxy(c cap.Cap, route *cap.Route) (http.Handler, error) {
+	raw, headers := c.Proxy.Upstream, c.Proxy.Headers
+	if route != nil {
+		raw, headers = route.Upstream, route.Headers
+	}
+	upstream, err := url.Parse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("cap %s: parse upstream: %w", c.Name, err)
 	}
@@ -46,7 +51,7 @@ func (b *Broker) newProxy(c cap.Cap) (http.Handler, error) {
 			writeError(w, http.StatusBadGateway, c.Name+": upstream unreachable; see the audit log on the host", "")
 		},
 	}
-	inject := b.headerInjector(c)
+	inject := b.headerInjector(headers)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		headers, err := inject(r)
 		if err != nil {
@@ -58,11 +63,11 @@ func (b *Broker) newProxy(c cap.Cap) (http.Handler, error) {
 	}), nil
 }
 
-// headerInjector renders the cap's header templates per request.
-func (b *Broker) headerInjector(c cap.Cap) func(*http.Request) (map[string]string, error) {
+// headerInjector renders header templates per request.
+func (b *Broker) headerInjector(headers map[string]string) func(*http.Request) (map[string]string, error) {
 	return func(r *http.Request) (map[string]string, error) {
-		out := make(map[string]string, len(c.Proxy.Headers))
-		for k, tmpl := range c.Proxy.Headers {
+		out := make(map[string]string, len(headers))
+		for k, tmpl := range headers {
 			v, err := cap.Render(tmpl, b.Data, func(ref string) (string, error) {
 				return b.Secrets.Resolve(r.Context(), ref)
 			})

@@ -6,6 +6,7 @@ package guest
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -24,6 +25,8 @@ const (
 
 // Plan is the rendered guest configuration for one VM.
 type Plan struct {
+	// Relay installs the broker socket relay (see relay.go).
+	Relay  bool
 	Env    map[string]string
 	Files  []cap.File
 	Blocks []Block
@@ -42,7 +45,7 @@ type Block struct {
 // Render evaluates the guest sections of caps. Conflicting definitions are
 // errors: two caps may not set the same variable, file or JSON key.
 func Render(caps []cap.Cap, data cap.TemplateData) (Plan, error) {
-	plan := Plan{Env: map[string]string{}}
+	plan := Plan{Env: map[string]string{}, Relay: len(caps) > 0}
 	envOwner := map[string]string{}
 	fileOwner := map[string]string{}
 	blockOwner := map[string]string{}
@@ -64,6 +67,9 @@ func Render(caps []cap.Cap, data cap.TemplateData) (Plan, error) {
 			plan.Env[k] = v
 		}
 		for _, f := range c.Guest.Files {
+			if isRelayUnit(f.Path) {
+				return Plan{}, fmt.Errorf("cap %s: %s is reserved for the broker relay", c.Name, f.Path)
+			}
 			if owner, dup := fileOwner[f.Path]; dup {
 				return Plan{}, fmt.Errorf("caps %s and %s both write %s", owner, c.Name, f.Path)
 			}
@@ -90,6 +96,9 @@ func Render(caps []cap.Cap, data cap.TemplateData) (Plan, error) {
 			plan.Files = append(plan.Files, cap.File{Path: f.Path, Mode: mode, Content: content})
 		}
 		for _, blk := range c.Guest.Blocks {
+			if isRelayUnit(blk.Path) {
+				return Plan{}, fmt.Errorf("cap %s: %s is reserved for the broker relay", c.Name, blk.Path)
+			}
 			if err := validatePath(blk.Path); err != nil {
 				return Plan{}, fmt.Errorf("cap %s: %w", c.Name, err)
 			}
@@ -120,6 +129,9 @@ func Render(caps []cap.Cap, data cap.TemplateData) (Plan, error) {
 			plan.Blocks = append(plan.Blocks, Block{Path: blk.Path, Owner: c.Name, Comment: comment, Content: strings.TrimRight(content, "\n") + "\n"})
 		}
 		for _, m := range c.Guest.JSONMerge {
+			if isRelayUnit(m.Path) {
+				return Plan{}, fmt.Errorf("cap %s: %s is reserved for the broker relay", c.Name, m.Path)
+			}
 			id := m.Path + "#" + m.Key
 			if owner, dup := keyOwner[id]; dup {
 				return Plan{}, fmt.Errorf("caps %s and %s both set %s in %s", owner, c.Name, m.Key, m.Path)
@@ -152,6 +164,9 @@ func Render(caps []cap.Cap, data cap.TemplateData) (Plan, error) {
 // Manifest lists what the plan manages, in the format stored in the guest.
 func (p Plan) Manifest() []string {
 	var lines []string
+	if p.Relay {
+		lines = append(lines, "file:"+RelaySocketUnit, "file:"+RelayServiceUnit)
+	}
 	for _, f := range p.Files {
 		lines = append(lines, "file:"+f.Path)
 	}
@@ -181,9 +196,25 @@ func nested(a, b string) bool {
 	return strings.HasPrefix(ka, kb+".") || strings.HasPrefix(kb, ka+".")
 }
 
-func validatePath(path string) error {
-	if !pathRe.MatchString(path) || strings.Contains(path, "/../") || strings.HasSuffix(path, "/..") {
-		return fmt.Errorf("guest path %q must be absolute and consist of letters, digits, '.', '_', '-' and '/'", path)
+func validatePath(p string) error {
+	if err := validateManifestPath(p); err != nil {
+		return err
+	}
+	// Ownership, conflicts and the relay reservation compare paths as
+	// strings, so every file must have exactly one spelling.
+	if path.Clean(p) != p {
+		return fmt.Errorf("guest path %q must be in canonical form (%s)", p, path.Clean(p))
+	}
+	return nil
+}
+
+// validateManifestPath is the check for paths read back from a guest's
+// manifest: safe for the generated root scripts, but without the canonical
+// form rule, which older versions did not enforce. Their entries must still
+// be cleaned up on revoke instead of being dropped from the manifest.
+func validateManifestPath(p string) error {
+	if !pathRe.MatchString(p) || strings.Contains(p, "/../") || strings.HasSuffix(p, "/..") {
+		return fmt.Errorf("guest path %q must be absolute and consist of letters, digits, '.', '_', '-' and '/'", p)
 	}
 	return nil
 }

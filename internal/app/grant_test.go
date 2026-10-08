@@ -183,6 +183,27 @@ func TestRevokeWithoutScopeDropsEveryScope(t *testing.T) {
 	}
 }
 
+func TestRevokeChecksOverlappingSpecsAgainstStoredGrants(t *testing.T) {
+	scripts := &sshScripts{state: "/etc/cracklet/manifest\n\n"}
+	app, _ := newGrantApp(t, scripts, nil)
+	if _, err := app.Grant(context.Background(), "agent1", []string{"claude", "github:org/repo"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Revoke(context.Background(), "agent1", []string{"github", "github:x/y"}); err == nil || !strings.Contains(err.Error(), "github:x/y is not granted") {
+		t.Errorf("a spec that was never granted should fail, got %v", err)
+	}
+	if got, _ := app.Grants("agent1"); strings.Join(got.Strings(), ",") != "claude,github:org/repo" {
+		t.Errorf("a failed revoke must not change grants, got %v", got.Strings())
+	}
+	set, err := app.Revoke(context.Background(), "agent1", []string{"github", "github:org/repo"})
+	if err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if strings.Join(set.Strings(), ",") != "claude" {
+		t.Errorf("grants after revoke = %v", set.Strings())
+	}
+}
+
 func TestSSHAttachesTunnelOnlyWithGrants(t *testing.T) {
 	scripts := &sshScripts{state: "/etc/cracklet/manifest\n\n"}
 	app, fake := newGrantApp(t, scripts, nil)

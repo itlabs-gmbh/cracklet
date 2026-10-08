@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/itlabs-gmbh/cracklet/internal/cap"
@@ -79,16 +80,18 @@ func (a *App) Revoke(ctx context.Context, name string, specs []string) (grant.Se
 		return nil, err
 	}
 	defer unlock()
-	set, err := store.Load(name)
+	stored, err := store.Load(name)
 	if err != nil {
 		return nil, err
 	}
+	// Check every spec against the stored grants before withdrawing any, so
+	// overlapping specs such as 'github github:org/repo' both count.
+	set := stored
 	for _, g := range requested {
-		next, ok := revokeOne(set, g)
-		if !ok {
+		if !granted(stored, g) {
 			return nil, fmt.Errorf("%s is not granted to %s", g, name)
 		}
-		set = next
+		set = withdraw(set, g)
 	}
 	if err := store.Save(name, set); err != nil {
 		return nil, err
@@ -116,15 +119,23 @@ func (a *App) Grants(name string) (grant.Set, error) {
 	return a.grantStore().Load(name)
 }
 
-// revokeOne removes g from set. A grant without a scope withdraws the
-// capability under every scope, so 'revoke vm github' needs no shell-quoted
-// wildcard; a scoped grant must match exactly. ok is false when nothing went.
-func revokeOne(set grant.Set, g grant.Grant) (grant.Set, bool) {
+// granted reports whether revoking g would withdraw anything from set. A grant
+// without a scope stands for the capability under every scope, so
+// 'revoke vm github' needs no shell-quoted wildcard; a scoped grant must match
+// exactly.
+func granted(set grant.Set, g grant.Grant) bool {
 	if g.Scope == "" {
-		next := set.RemoveCap(g.Cap)
-		return next, len(next) < len(set)
+		return slices.Contains(set.Caps(), g.Cap)
 	}
-	return set.Remove(g), set.Contains(g)
+	return set.Contains(g)
+}
+
+// withdraw returns set without g, read the same way as in granted.
+func withdraw(set grant.Set, g grant.Grant) grant.Set {
+	if g.Scope == "" {
+		return set.RemoveCap(g.Cap)
+	}
+	return set.Remove(g)
 }
 
 // checkGrant verifies that a grant names a known capability and that a scope

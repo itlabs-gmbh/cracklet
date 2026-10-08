@@ -18,7 +18,7 @@
   <header class="container site-header">
     <a class="brand" href="./" aria-current="page">cracklet</a>
     <nav class="site-nav" aria-label="Main navigation">
-      <a href="https://github.com/itlabs-gmbh/cracklet#readme">Docs</a>
+      <a href="docs.html">Docs</a>
       <a href="https://github.com/itlabs-gmbh/cracklet">GitHub</a>
       <a href="https://github.com/itlabs-gmbh/cracklet/issues">Issues</a>
     </nav>
@@ -128,7 +128,7 @@ $ cracklet ssh dev uname -a
           </div>
           <div class="card">
             <h3 class="small">Any tool, one TOML file</h3>
-            <p>The broker knows three primitives: a header-injecting proxy, a bridge for MCP servers that run on your Mac, and an external program. Claude Code and GitHub ship built in. Codex, Gemini CLI or your own MCP server are a capability file in <code>~/.cracklet/caps</code>, shareable by URL.</p>
+            <p>The broker knows three primitives: a header-injecting proxy, a bridge for MCP servers that run on your Mac, and an external program. Claude Code and GitHub ship built in. Codex, Gemini CLI or your own MCP server are a capability file in <code>~/.cracklet/caps</code>, shareable by URL. <a class="link" href="capabilities.html">How it works</a></p>
             <div class="cmd" data-copy="cracklet cap init codex">
               <span class="prompt" aria-hidden="true">$</span>
               <span class="text">cracklet cap init codex</span>
@@ -141,7 +141,6 @@ $ cracklet ssh dev uname -a
             </div>
           </div>
         </div>
-        <p class="intro" style="max-width:48rem;margin-top:2.5rem">Claude Code runs unmodified in the guest with your own subscription: it sends exactly the headers of a normal login and the broker only replaces the token. Usage counts against your plan like any other session. The broker is personal tooling for your Mac and your VMs, not a way to route other people's requests through your account.</p>
       </div>
     </section>
 
@@ -249,7 +248,7 @@ ai    running  172.16.2.2  2      1024M  3000   claude  ssh ai.cracklet</div>
       <div class="container section" style="padding-top:4rem;padding-bottom:4rem">
         <div class="narrow">
           <h2>Open source</h2>
-          <p>cracklet is developed in the open by IT-Labs GmbH. Source, issues and the full documentation live on <a class="link" href="https://github.com/itlabs-gmbh/cracklet">github.com/itlabs-gmbh/cracklet</a>.</p>
+          <p>cracklet is developed in the open by IT-Labs GmbH. Start with the <a class="link" href="docs.html">documentation</a>; source and issues live on <a class="link" href="https://github.com/itlabs-gmbh/cracklet">github.com/itlabs-gmbh/cracklet</a>.</p>
         </div>
       </div>
     </section>
@@ -258,6 +257,8 @@ ai    running  172.16.2.2  2      1024M  3000   claude  ssh ai.cracklet</div>
   <footer class="site-footer">
     <div class="container">
       <a href="./" aria-current="page">cracklet</a>
+      <span aria-hidden="true">·</span>
+      <a href="docs.html">Docs</a>
       <span aria-hidden="true">·</span>
       <a href="https://github.com/itlabs-gmbh/cracklet">GitHub</a>
       <span aria-hidden="true">·</span>

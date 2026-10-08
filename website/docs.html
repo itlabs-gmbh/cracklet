@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Start with one microVM – cracklet docs</title>
+  <meta name="description" content="Install cracklet on Apple Silicon, start a Firecracker microVM, reach it over SSH and forward its ports. Quickstart and command reference.">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#232323" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body>
+  <header class="container site-header">
+    <a class="brand" href="./">cracklet</a>
+    <nav class="site-nav" aria-label="Main navigation">
+      <a href="docs.html" aria-current="page">Docs</a>
+      <a href="https://github.com/itlabs-gmbh/cracklet">GitHub</a>
+      <a href="https://github.com/itlabs-gmbh/cracklet/issues">Issues</a>
+    </nav>
+  </header>
+
+  <main class="docs">
+    <nav class="docs-nav" aria-label="Documentation">
+      <a href="docs.html" aria-current="page">Quickstart</a>
+      <a href="agents.html">Agent guides</a>
+      <a href="capabilities.html">Grants &amp; capabilities</a>
+      <a href="https://github.com/itlabs-gmbh/cracklet#readme">README</a>
+    </nav>
+
+    <h1>Start with one microVM</h1>
+    <p class="lead">Install cracklet, start a Firecracker microVM on your Mac, reach it over SSH and bring its ports to localhost.</p>
+
+    <div class="prose">
+
+      <section id="install">
+        <h2>Install</h2>
+        <p>cracklet needs an Apple M3 or newer (nested virtualization is an M3 hardware feature), macOS 15 or newer, Homebrew and Go 1.26+. Check a Mac with <code>cracklet doctor</code>.</p>
+        <div class="cmd" data-copy="go install github.com/itlabs-gmbh/cracklet/cmd/cracklet@latest">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">go install github.com/itlabs-gmbh/cracklet/cmd/cracklet@latest</span>
+          <button type="button" aria-label="Copy the install command to the clipboard"></button>
+        </div>
+        <div class="cmd" data-copy="cracklet prepare">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet prepare</span>
+          <button type="button" aria-label="Copy cracklet prepare to the clipboard"></button>
+        </div>
+        <p><code>prepare</code> is a one-time setup of a few minutes and safe to run again. It creates one Lima VM with nested virtualization (4 CPUs, 8 GiB, 40 GiB disk by default), installs the upstream Firecracker binary, downloads the guest kernel and an Ubuntu 24.04 image, verifies all three against pinned SHA-256 digests and writes an SSH key pair to <code>~/.cracklet</code>. The Lima VM mounts nothing from your Mac.</p>
+      </section>
+
+      <section id="first-vm">
+        <h2>Create and connect</h2>
+        <div class="cmd" data-copy="cracklet new dev">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet new dev</span>
+          <button type="button" aria-label="Copy cracklet new dev to the clipboard"></button>
+        </div>
+<pre class="code">dev is running at 172.16.1.2
+<span class="dim">  cracklet ssh dev</span>
+<span class="dim">  ssh dev.cracklet</span></pre>
+        <p><code>new</code> does not boot. It restores a <em>golden snapshot</em>: a fully booted VM frozen together with its memory, then gives the clone its own IP, hostname, clock and fresh entropy. The first <code>new</code> for a given size builds that snapshot (about 15 seconds); every later one takes about three. Without a name, VMs are called <code>vm1</code>, <code>vm2</code> and so on.</p>
+        <div class="cmd" data-copy="cracklet ssh dev">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet ssh dev</span>
+          <button type="button" aria-label="Copy cracklet ssh dev to the clipboard"></button>
+        </div>
+        <p>You are root in an Ubuntu 24.04 with its own kernel, disk and IP. To use plain <code>ssh</code>, <code>scp</code>, <code>rsync</code> or your IDE, add one line to <code>~/.ssh/config</code>:</p>
+        <div class="cmd" data-copy="Include ~/.cracklet/ssh_config">
+          <span class="prompt" aria-hidden="true">+</span>
+          <span class="text">Include ~/.cracklet/ssh_config</span>
+          <button type="button" aria-label="Copy the ssh config Include line to the clipboard"></button>
+        </div>
+        <p>Then <code>ssh dev.cracklet</code> works from anywhere. It jumps through the Lima VM, so neither port forwarding nor <code>sudo</code> is needed on macOS.</p>
+      </section>
+
+      <section id="size">
+        <h2>Size and profile</h2>
+        <p>Defaults are 2 vCPUs, 1 GiB RAM and a 2 GiB disk. A disk size other than the profile's image cold-boots instead of restoring the snapshot, and grows the root filesystem on first boot.</p>
+        <div class="cmd" data-copy="cracklet new dev --vcpus 4 --mem 2048 --disk 8G">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet new dev --vcpus 4 --mem 2048 --disk 8G</span>
+          <button type="button" aria-label="Copy the sized create command to the clipboard"></button>
+        </div>
+        <p><code>--profile</code> picks the guest image. <code>base</code> is plain Ubuntu; <code>paseo</code> adds Node 22, Claude Code, git, gh and rsync for <a href="agents.html">agent work</a>. Build a profile once with <code>cracklet prepare --profile paseo</code>.</p>
+      </section>
+
+      <section id="ports">
+        <h2>Forward ports</h2>
+        <p>Guest ports appear as <code>localhost:PORT</code> on the Mac. Forwards survive stop and start and go away with the VM. Host ports must be 1024 or higher.</p>
+        <div class="cmd" data-copy="cracklet new web -p 8080:80 -p 3000">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet new web -p 8080:80 -p 3000</span>
+          <button type="button" aria-label="Copy the port forward example to the clipboard"></button>
+        </div>
+        <div class="cmd" data-copy="cracklet forward web 5432">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet forward web 5432</span>
+          <button type="button" aria-label="Copy cracklet forward web 5432 to the clipboard"></button>
+        </div>
+        <p><code>cracklet forward web</code> without ports lists them; <code>cracklet unforward web 5432</code> removes one.</p>
+      </section>
+
+      <section id="network">
+        <h2>What a microVM can reach</h2>
+        <p>The internet, through NAT, and nothing else: not other microVMs, not your Mac, not your LAN, not services on the Lima VM. Packets with a foreign source address are dropped and IPv6 is off on every tap. The only controlled way back to the Mac is the <a href="capabilities.html">capability broker</a>.</p>
+      </section>
+
+      <section id="commands">
+        <h2>Command reference</h2>
+        <p>Every command has <code>--help</code> with all flags and examples.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td><code>doctor</code></td><td>Explain what this Mac is missing.</td></tr>
+              <tr><td><code>prepare [--cpus N --memory GiB --disk GiB] [--profile P]</code></td><td>Set up or update Lima, Firecracker, kernel and images. Size flags on an existing Lima VM resize it in place; stop microVMs first.</td></tr>
+              <tr><td><code>new [NAME] [--vcpus --mem --disk --profile --fresh]</code></td><td>Create a microVM from the golden snapshot; <code>--fresh</code> cold-boots.</td></tr>
+              <tr><td><code>new … -p [HOST:]GUEST --grant CAP[:SCOPE]</code></td><td>Forward ports and grant capabilities right away.</td></tr>
+              <tr><td><code>new … --owner NAME --slot N</code></td><td>Label a VM a tool manages, for <code>gc</code>.</td></tr>
+              <tr><td><code>ls [--json]</code></td><td>Every VM with state, IP, size, ports, grants, owner, age and SSH destination.</td></tr>
+              <tr><td><code>inspect NAME [--json]</code></td><td>Details of one VM.</td></tr>
+              <tr><td><code>ssh NAME [command…]</code></td><td>Root shell, or a command line run by the guest shell. Carries the broker.</td></tr>
+              <tr><td><code>exec NAME -- cmd [arg…]</code></td><td>Run a command with its argv passed verbatim. Carries the broker.</td></tr>
+              <tr><td><code>tunnel NAME</code></td><td>Hold only the broker forward, for editors and agent runners.</td></tr>
+              <tr><td><code>stop NAME / start NAME</code></td><td>Shut down keeping the disk, boot again.</td></tr>
+              <tr><td><code>rm NAME</code></td><td>Stop and delete, including grants and token on the Mac.</td></tr>
+              <tr><td><code>gc [--owner O] [--older-than 7d] [--keep VM] [--dry-run]</code></td><td>Remove owned VMs a tool lost track of, and leftover host state.</td></tr>
+              <tr><td><code>forward NAME [[HOST:]GUEST…] / unforward NAME PORT…</code></td><td>List, add or remove port forwards.</td></tr>
+              <tr><td><code>grant / revoke NAME CAP[:SCOPE]…</code></td><td>Allow or withdraw capabilities. See <a href="capabilities.html#grants">Grants</a>.</td></tr>
+              <tr><td><code>grants NAME</code></td><td>Show what a VM may use.</td></tr>
+              <tr><td><code>cap ls / show / init / lint / add</code></td><td>Manage capability files. See <a href="capabilities.html#reference">Reference</a>.</td></tr>
+              <tr><td><code>secret set / rm NAME</code></td><td>Store or delete a credential in the macOS Keychain.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="troubleshooting">
+        <h2>Troubleshooting</h2>
+        <ul>
+          <li>Exit code 255 from <code>ssh</code> or <code>exec</code> means the connection failed; check <code>cracklet ls</code>.</li>
+          <li>After a reboot of the Lima VM, microVMs are stopped; <code>cracklet start NAME</code> brings them back.</li>
+          <li><code>broken</code> in <code>cracklet ls</code> means damaged metadata; <code>cracklet rm NAME</code> cleans it up.</li>
+          <li>Console of a VM: <code>limactl shell cracklet sudo cat /var/lib/cracklet/vms/NAME/console.log</code></li>
+          <li>Reset everything: <code>limactl delete -f cracklet &amp;&amp; rm -rf ~/.cracklet</code></li>
+        </ul>
+      </section>
+
+      <section id="leave">
+        <h2>Before you leave</h2>
+        <div class="cmd" data-copy="cracklet stop dev">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet stop dev</span>
+          <button type="button" aria-label="Copy cracklet stop dev to the clipboard"></button>
+        </div>
+        <p>Stop keeps the disk; <code>rm</code> is a separate step. A microVM's disk lives inside the Lima VM, so <code>limactl delete cracklet</code> takes every VM with it.</p>
+      </section>
+
+    </div>
+
+    <nav class="next" aria-label="Read next">
+      <a href="agents.html"><span>Guide</span><strong>Run your coding agent in a microVM</strong></a>
+      <a href="capabilities.html"><span>Concepts</span><strong>Grants and capabilities in detail</strong></a>
+    </nav>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <a href="./">cracklet</a>
+      <span aria-hidden="true">·</span>
+      <a href="docs.html" aria-current="page">Docs</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/itlabs-gmbh/cracklet">GitHub</a>
+      <span aria-hidden="true">·</span>
+      <a href="impressum.html">Impressum</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://www.it-labs.de">IT-Labs GmbH</a>
+    </div>
+  </footer>
+
+  <script src="copy.js" defer></script>
+</body>
+</html>

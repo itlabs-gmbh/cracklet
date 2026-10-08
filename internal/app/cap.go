@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"unicode"
 
@@ -219,6 +220,16 @@ func (a *App) CapAdd(ctx context.Context, url string, yes bool, confirm io.Reade
 	if err := os.MkdirAll(a.paths.CapsDir(), 0o700); err != nil {
 		return fmt.Errorf("create caps directory: %w", err)
 	}
+	unlock, err := lockFile(a.paths.CapsLock())
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	// Check again under the lock: another `cap add` may have installed a
+	// route for the same host while this one waited for confirmation.
+	if err := a.checkFitsInstalled(c); err != nil {
+		return err
+	}
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
@@ -233,6 +244,22 @@ func sortedKeys(m map[string]string) []string {
 	}
 	sortStrings(keys)
 	return keys
+}
+
+// lockFile takes an exclusive flock on p and returns its release.
+func lockFile(p string) (func(), error) {
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open lock: %w", err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("lock %s: %w", p, err)
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}, nil
 }
 
 // checkFitsInstalled validates the installed caps with c added or replaced.

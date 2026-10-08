@@ -95,6 +95,9 @@ func (p Paths) LimaLockPath() string { return filepath.Join(p.Home, "lima.lock")
 // CapsDir holds the user's capability files (one <name>.toml each).
 func (p Paths) CapsDir() string { return filepath.Join(p.Home, "caps") }
 
+// CapsLock serialises installations into CapsDir.
+func (p Paths) CapsLock() string { return filepath.Join(p.Home, "caps.lock") }
+
 // VMsDir holds per-VM host-side state (grants, placeholder token).
 func (p Paths) VMsDir() string { return filepath.Join(p.Home, "vms") }
 

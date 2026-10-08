@@ -6,6 +6,7 @@ package guest
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -128,6 +129,9 @@ func Render(caps []cap.Cap, data cap.TemplateData) (Plan, error) {
 			plan.Blocks = append(plan.Blocks, Block{Path: blk.Path, Owner: c.Name, Comment: comment, Content: strings.TrimRight(content, "\n") + "\n"})
 		}
 		for _, m := range c.Guest.JSONMerge {
+			if isRelayUnit(m.Path) {
+				return Plan{}, fmt.Errorf("cap %s: %s is reserved for the broker relay", c.Name, m.Path)
+			}
 			id := m.Path + "#" + m.Key
 			if owner, dup := keyOwner[id]; dup {
 				return Plan{}, fmt.Errorf("caps %s and %s both set %s in %s", owner, c.Name, m.Key, m.Path)
@@ -192,9 +196,14 @@ func nested(a, b string) bool {
 	return strings.HasPrefix(ka, kb+".") || strings.HasPrefix(kb, ka+".")
 }
 
-func validatePath(path string) error {
-	if !pathRe.MatchString(path) || strings.Contains(path, "/../") || strings.HasSuffix(path, "/..") {
-		return fmt.Errorf("guest path %q must be absolute and consist of letters, digits, '.', '_', '-' and '/'", path)
+func validatePath(p string) error {
+	if !pathRe.MatchString(p) || strings.Contains(p, "/../") || strings.HasSuffix(p, "/..") {
+		return fmt.Errorf("guest path %q must be absolute and consist of letters, digits, '.', '_', '-' and '/'", p)
+	}
+	// Ownership, conflicts and the relay reservation compare paths as
+	// strings, so every file must have exactly one spelling.
+	if path.Clean(p) != p {
+		return fmt.Errorf("guest path %q must be in canonical form (%s)", p, path.Clean(p))
 	}
 	return nil
 }

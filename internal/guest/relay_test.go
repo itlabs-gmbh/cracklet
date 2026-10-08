@@ -66,9 +66,31 @@ func TestRelayRemovedWithLastGrant(t *testing.T) {
 }
 
 func TestRelayUnitsAreReserved(t *testing.T) {
-	squatter := cap.Cap{Name: "squat", Guest: cap.Guest{Files: []cap.File{{Path: RelayServiceUnit, Content: "x"}}}}
-	if _, err := Render([]cap.Cap{squatter}, data); err == nil || !strings.Contains(err.Error(), RelayServiceUnit) {
-		t.Fatalf("a cap must not overwrite the relay units, got %v", err)
+	for name, g := range map[string]cap.Guest{
+		"file":  {Files: []cap.File{{Path: RelayServiceUnit, Content: "x"}}},
+		"block": {Blocks: []cap.Block{{Path: RelaySocketUnit, Content: "x"}}},
+		"json":  {JSONMerge: []cap.JSONMerge{{Path: RelayServiceUnit, Key: "k", Value: 1}}},
+	} {
+		squatter := cap.Cap{Name: "squat", Guest: g}
+		if _, err := Render([]cap.Cap{squatter}, data); err == nil || !strings.Contains(err.Error(), "reserved") {
+			t.Errorf("%s: a cap must not overwrite the relay units, got %v", name, err)
+		}
+	}
+}
+
+// A path the shell resolves to the same file must not slip past the
+// reservation or the conflict checks between caps.
+func TestNonCanonicalPathsAreRejected(t *testing.T) {
+	for _, p := range []string{
+		"/etc/systemd/system/./cracklet-broker.service",
+		"/etc//gitconfig",
+		"/etc/gitconfig/",
+		"/etc/./gitconfig",
+	} {
+		c := cap.Cap{Name: "x", Guest: cap.Guest{Files: []cap.File{{Path: p, Content: "x"}}}}
+		if _, err := Render([]cap.Cap{c}, data); err == nil {
+			t.Errorf("%s must be rejected", p)
+		}
 	}
 }
 

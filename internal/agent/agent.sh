@@ -37,7 +37,7 @@ readonly BASE_DISK_SIZE=2G
 readonly PROFILES=(base paseo)
 readonly PASEO_DISK_SIZE=8G
 readonly ROOTFS_REV=8                  # bump whenever customize_rootfs changes
-readonly PROFILE_REV=1                 # bump whenever profile_script or install_profile changes
+readonly PROFILE_REV=2                 # bump whenever profile_script or install_profile changes
 readonly GOLDEN_REV=2                  # bump whenever build_golden changes
 readonly SQUASHFS_CACHE=$CRACKLET_ROOT/images/ubuntu.squashfs   # kept for later profile builds
 readonly ENVD_BIN=$CRACKLET_ROOT/cracklet-envd   # guest identity daemon, pushed by cracklet prepare
@@ -524,6 +524,8 @@ Wants=network-online.target
 
 [Service]
 Environment=HOME=/root
+# The microVM is the sandbox: allow Claude Code's bypass-permissions modes as root.
+Environment=IS_SANDBOX=1
 Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WorkingDirectory=/root
 ExecStart=/usr/bin/paseo daemon run --home /root/.paseo

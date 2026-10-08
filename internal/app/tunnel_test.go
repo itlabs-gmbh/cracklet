@@ -117,7 +117,7 @@ func TestTunnelReconnectsUntilVMStops(t *testing.T) {
 		states: []string{"running", "running", "stopped"},
 		sshErr: []error{dropped, dropped},
 	}
-	app, fake := newTunnelApp(t, script, "github:org/repo")
+	app, fake := newTunnelApp(t, script, "github")
 	if err := app.Tunnel(context.Background(), "agent1"); err != nil {
 		t.Fatalf("Tunnel: %v", err)
 	}

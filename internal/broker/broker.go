@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"path"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -110,9 +109,9 @@ func (b *Broker) detail(format string, args ...any) {
 }
 
 type decision struct {
-	cap, scope string
-	status     int
-	reason     string
+	cap    string
+	status int
+	reason string
 }
 
 func (b *Broker) serve(w http.ResponseWriter, r *http.Request) {
@@ -137,39 +136,37 @@ func (b *Broker) dispatch(w http.ResponseWriter, r *http.Request) decision {
 	if err != nil {
 		b.detail("grants of %s unreadable: %v", b.VM, err)
 		writeError(w, http.StatusInternalServerError, "the broker could not read this VM's grants; see the audit log on the host", "")
-		return decision{cap: name, scope: t.scope, status: http.StatusInternalServerError, reason: "grants"}
+		return decision{cap: name, status: http.StatusInternalServerError, reason: "grants"}
 	}
-	if !grants.Allows(name, t.scope) {
-		hint := grant.Hint(b.VM, name, t.scope)
-		writeError(w, http.StatusForbidden, fmt.Sprintf("%s is not granted to %s", grant.Grant{Cap: name, Scope: t.scope}, b.VM), hint)
-		return decision{cap: name, scope: t.scope, status: http.StatusForbidden, reason: "denied"}
+	if !grants.Contains(grant.Grant{Cap: name}) {
+		writeError(w, http.StatusForbidden, fmt.Sprintf("%s is not granted to %s", name, b.VM), grant.Hint(b.VM, name))
+		return decision{cap: name, status: http.StatusForbidden, reason: "denied"}
 	}
 	h, err := b.handlerFor(t.cap, t.route)
 	if err != nil {
 		b.detail("cap %s: %v", name, err)
 		writeError(w, http.StatusInternalServerError, "the broker could not set up this capability; see the audit log on the host", "")
-		return decision{cap: name, scope: t.scope, status: http.StatusInternalServerError, reason: "setup"}
+		return decision{cap: name, status: http.StatusInternalServerError, reason: "setup"}
 	}
 	r2 := r.Clone(r.Context())
 	r2.URL.Path = t.rest
 	r2.URL.RawPath = ""
 	h.ServeHTTP(w, r2)
-	return decision{cap: name, scope: t.scope, reason: "allow"}
+	return decision{cap: name, reason: "allow"}
 }
 
 // target is where a request goes: a capability, the route it came in by (nil
-// for /<cap>/ requests), the path to forward and the grant scope it needs.
+// for /<cap>/ requests) and the path to forward.
 type target struct {
 	cap   cap.Cap
 	route *cap.Route
 	rest  string
-	scope string
 }
 
 // locate resolves the request's target, answering it itself when there is none.
 func (b *Broker) locate(w http.ResponseWriter, r *http.Request) (target, decision, bool) {
 	if c, rt, ok := b.Caps.RouteFor(requestHost(r)); ok {
-		return target{cap: c, route: &rt, rest: r.URL.Path, scope: routeScope(c, rt, r.URL.Path)}, decision{}, true
+		return target{cap: c, route: &rt, rest: r.URL.Path}, decision{}, true
 	}
 	name, rest := splitCap(r.URL.Path)
 	if name == "" {
@@ -181,7 +178,7 @@ func (b *Broker) locate(w http.ResponseWriter, r *http.Request) (target, decisio
 		writeError(w, http.StatusNotFound, fmt.Sprintf("unknown capability %q", name), "cracklet cap ls")
 		return target{}, decision{cap: name, status: http.StatusNotFound, reason: "unknown cap"}, false
 	}
-	return target{cap: c, rest: rest, scope: scopeOf(c, rest)}, decision{}, true
+	return target{cap: c, rest: rest}, decision{}, true
 }
 
 // requestHost is the Host header without port, lowercased.
@@ -230,12 +227,13 @@ func (b *Broker) handlerFor(c cap.Cap, route *cap.Route) (http.Handler, error) {
 	return h, nil
 }
 
-// unsafePath rejects every path on which the scope check and an upstream
-// could disagree. The grant scope is derived from the decoded path, so the
-// path must have exactly one reading: no percent-encoding at all (upstreams
-// decode %2F, %2E or double encoding differently), no backslashes (some
-// servers treat them as separators), no dot or empty segments, and no
-// difference from its cleaned form.
+// unsafePath rejects every path on which the broker and an upstream could
+// disagree. The capability is taken from the decoded path and the rest is
+// appended to the upstream's base path, so the path must have exactly one
+// reading: no percent-encoding at all (upstreams decode %2F, %2E or double
+// encoding differently), no backslashes (some servers treat them as
+// separators) or NUL, no dot segments that could climb out of the base path,
+// no empty segments, and no difference from its cleaned form.
 func unsafePath(u *url.URL) string {
 	if strings.Contains(u.EscapedPath(), "%") || strings.Contains(u.RawPath, "%") {
 		return "percent-encoded characters are not allowed in capability paths"
@@ -268,73 +266,6 @@ func splitCap(path string) (name, rest string) {
 	return name, "/" + rest
 }
 
-// scopeOf derives the grant scope from the leading path segments, dropping a
-// trailing .git so clone URLs with and without it share a grant.
-func scopeOf(c cap.Cap, rest string) string {
-	if c.Proxy == nil || c.Proxy.ScopeSegments == 0 {
-		return ""
-	}
-	parts := strings.Split(strings.TrimPrefix(rest, "/"), "/")
-	if len(parts) < c.Proxy.ScopeSegments {
-		return ""
-	}
-	segs := make([]string, c.Proxy.ScopeSegments)
-	copy(segs, parts[:c.Proxy.ScopeSegments])
-	for i, s := range segs {
-		if s == "" {
-			return ""
-		}
-		segs[i] = strings.TrimSuffix(s, ".git")
-	}
-	return strings.Join(segs, "/")
-}
-
-// routeScope derives the scope of a request that came in by Host. A path
-// outside the route's scope_prefix, or too short to name a scope, is not tied
-// to one scope (GraphQL, search, the user) and needs the wildcard grant: a
-// scoped grant must not reach other scopes through such endpoints.
-func routeScope(c cap.Cap, rt cap.Route, path string) string {
-	n := c.Proxy.ScopeSegments
-	if n == 0 {
-		return ""
-	}
-	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	if rt.ScopePrefix != "" {
-		if parts[0] != rt.ScopePrefix {
-			return grant.Any
-		}
-		parts = parts[1:]
-	}
-	if len(parts) < n {
-		return grant.Any
-	}
-	for _, s := range parts[:n] {
-		if s == "" {
-			return grant.Any
-		}
-	}
-	if len(parts) > n && isWildcardSubpath(rt, parts[n]) {
-		return grant.Any
-	}
-	return strings.Join(parts[:n], "/")
-}
-
-// isWildcardSubpath matches seg against the route's wildcard_subpaths as
-// loosely as an upstream might route it: case-insensitively and only up to the
-// first character outside [A-Za-z0-9_-] (forks.json, forks;x, transfer~), so
-// the broker never reads a path more narrowly than the upstream does.
-func isWildcardSubpath(rt cap.Route, seg string) bool {
-	base := seg
-	if i := strings.IndexFunc(seg, func(r rune) bool {
-		return !(r == '-' || r == '_' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z')
-	}); i >= 0 {
-		base = seg[:i]
-	}
-	return slices.ContainsFunc(rt.WildcardSubpaths, func(w string) bool {
-		return strings.EqualFold(w, base)
-	})
-}
-
 func (b *Broker) audit(r *http.Request, d decision, status int) {
 	log := b.logger()
 	if log == nil {
@@ -344,13 +275,9 @@ func (b *Broker) audit(r *http.Request, d decision, status int) {
 	if b.Now != nil {
 		now = b.Now
 	}
-	scope := d.scope
-	if scope == "" {
-		scope = "-"
-	}
 	// %q keeps a decoded newline in the path from forging a log line.
-	_, err := fmt.Fprintf(log, "%s vm=%s cap=%s scope=%s %s %s %q %d\n",
-		now().UTC().Format(time.RFC3339), b.VM, orDash(d.cap), scope, d.reason, r.Method, r.URL.Path, status)
+	_, err := fmt.Fprintf(log, "%s vm=%s cap=%s %s %s %q %d\n",
+		now().UTC().Format(time.RFC3339), b.VM, orDash(d.cap), d.reason, r.Method, r.URL.Path, status)
 	if err != nil {
 		b.warnOnce.Do(func() {
 			if b.Warn != nil {

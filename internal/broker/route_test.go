@@ -13,13 +13,11 @@ import (
 
 // routedCap is a github-like cap: git under /forge/, the API by Host.
 func routedCap(gitUpstream, apiUpstream string) cap.Cap {
-	c := proxyCap("forge", gitUpstream, 2)
+	c := proxyCap("forge", gitUpstream)
 	c.Proxy.Routes = []cap.Route{{
-		Host:             "api.forge.example",
-		Upstream:         apiUpstream,
-		ScopePrefix:      "repos",
-		WildcardSubpaths: []string{"forks", "transfer"},
-		Headers:          map[string]string{"Authorization": `token {{ secret "env:TOKEN" }}`},
+		Host:     "api.forge.example",
+		Upstream: apiUpstream,
+		Headers:  map[string]string{"Authorization": `token {{ secret "env:TOKEN" }}`},
 	}}
 	return c
 }
@@ -55,7 +53,7 @@ func TestRouteByHostInjectsRouteHeaders(t *testing.T) {
 	}))
 	defer git.Close()
 
-	b, audit := newBroker(t, cap.Set{"forge": routedCap(git.URL, api.URL)}, []string{"forge:org/repo"})
+	b, audit := newBroker(t, cap.Set{"forge": routedCap(git.URL, api.URL)}, []string{"forge"})
 	srv := httptest.NewServer(b.Handler())
 	defer srv.Close()
 
@@ -72,11 +70,13 @@ func TestRouteByHostInjectsRouteHeaders(t *testing.T) {
 	if seenHost == "api.forge.example" {
 		t.Errorf("upstream Host must be the upstream's, got %q", seenHost)
 	}
-	want := "1970-01-01T00:00:00Z vm=agent1 cap=forge scope=org/repo allow GET \"/repos/org/repo/pulls\" 200\n"
+	want := "1970-01-01T00:00:00Z vm=agent1 cap=forge allow GET \"/repos/org/repo/pulls\" 200\n"
 	waitFor(t, "audit line", func() bool { return audit.String() == want })
 }
 
-func TestRouteScopes(t *testing.T) {
+// A routed host belongs to its capability: the one grant covers every path
+// on it, and without the grant every path is denied with the grant command.
+func TestRouteGrants(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer api.Close()
 	caps := cap.Set{"forge": routedCap(api.URL, api.URL)}
@@ -88,34 +88,18 @@ func TestRouteScopes(t *testing.T) {
 		path   string
 		status int
 	}{
-		{[]string{"forge:org/repo"}, "GET", "api.forge.example", "/repos/org/repo", 200},
-		{[]string{"forge:org/repo"}, "GET", "api.forge.example", "/repos/org/other/pulls", 403},
-		// Not tied to one repository: GraphQL, search, the user. A scoped
-		// grant must not reach other repos through them.
-		{[]string{"forge:org/repo"}, "POST", "api.forge.example", "/graphql", 403},
-		{[]string{"forge:org/repo"}, "GET", "api.forge.example", "/user", 403},
-		{[]string{"forge:org/repo"}, "GET", "api.forge.example", "/repos/org", 403},
-		{[]string{"forge:*"}, "POST", "api.forge.example", "/graphql", 200},
-		{[]string{"forge:*"}, "GET", "api.forge.example", "/repos/any/thing", 200},
+		{[]string{"forge"}, "GET", "api.forge.example", "/repos/org/repo", 200},
+		{[]string{"forge"}, "POST", "api.forge.example", "/graphql", 200},
+		{[]string{"forge"}, "GET", "api.forge.example", "/user", 200},
+		{[]string{"forge"}, "POST", "api.forge.example", "/repos/org/repo/forks", 200},
 		// A port in the Host header still selects the route.
-		{[]string{"forge:*"}, "GET", "api.forge.example:443", "/user", 200},
+		{[]string{"forge"}, "GET", "api.forge.example:443", "/user", 200},
+		{[]string{"forge"}, "GET", "API.FORGE.EXAMPLE", "/repos/org/repo", 200},
 		// Unknown hosts fall back to /<cap>/ routing.
-		{[]string{"forge:*"}, "GET", "elsewhere.example", "/user", 404},
-		{[]string{"forge:org/repo"}, "GET", "elsewhere.example", "/forge/org/repo/info/refs", 200},
-		{[]string{"forge:org/repo"}, "GET", "API.FORGE.EXAMPLE", "/repos/org/repo", 200},
-		// Endpoints under a repo that act beyond it need the wildcard.
-		{[]string{"forge:org/repo"}, "POST", "api.forge.example", "/repos/org/repo/forks", 403},
-		{[]string{"forge:org/repo"}, "POST", "api.forge.example", "/repos/org/repo/transfer", 403},
-		{[]string{"forge:*"}, "POST", "api.forge.example", "/repos/org/repo/forks", 200},
-		// The upstream may read a segment case-insensitively or with a format
-		// suffix; the broker must not read it more narrowly than the upstream.
-		{[]string{"forge:org/repo"}, "POST", "api.forge.example", "/repos/org/repo/FORKS", 403},
-		{[]string{"forge:org/repo"}, "POST", "api.forge.example", "/repos/org/repo/forks.json", 403},
-		{[]string{"forge:org/repo"}, "POST", "api.forge.example", "/repos/org/repo/Transfer/", 403},
-		{[]string{"forge:org/repo"}, "POST", "api.forge.example", "/repos/org/repo/forks;x=1", 403},
-		{[]string{"forge:org/repo"}, "POST", "api.forge.example", "/repos/org/repo/transfer~", 403},
-		{[]string{"forge:org/repo"}, "GET", "api.forge.example", "/repos/org/repo/forksx", 200},
+		{[]string{"forge"}, "GET", "elsewhere.example", "/user", 404},
+		{[]string{"forge"}, "GET", "elsewhere.example", "/forge/org/repo/info/refs", 200},
 		{nil, "GET", "api.forge.example", "/user", 403},
+		{nil, "POST", "api.forge.example", "/graphql", 403},
 	} {
 		b, _ := newBroker(t, caps, tc.grants)
 		srv := httptest.NewServer(b.Handler())
@@ -124,18 +108,9 @@ func TestRouteScopes(t *testing.T) {
 		if resp.StatusCode != tc.status {
 			t.Errorf("%v %s %s%s: status %d, want %d (%s)", tc.grants, tc.method, tc.host, tc.path, resp.StatusCode, tc.status, body)
 		}
-	}
-}
-
-func TestRouteDenialHintsWildcard(t *testing.T) {
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	defer api.Close()
-	b, _ := newBroker(t, cap.Set{"forge": routedCap(api.URL, api.URL)}, []string{"forge:org/repo"})
-	srv := httptest.NewServer(b.Handler())
-	defer srv.Close()
-	_, body := hostRequest(t, srv, "POST", "api.forge.example", "/graphql")
-	if !strings.Contains(body, "cracklet grant agent1 forge:*") {
-		t.Errorf("denial should name the wildcard grant, got %s", body)
+		if tc.status == http.StatusForbidden && !strings.Contains(body, "cracklet grant agent1 forge") {
+			t.Errorf("%s%s: denial should name the grant, got %s", tc.host, tc.path, body)
+		}
 	}
 }
 
@@ -144,7 +119,7 @@ func TestRouteStillRejectsUnsafePaths(t *testing.T) {
 		t.Errorf("unsafe path reached upstream: %s", r.URL.Path)
 	}))
 	defer api.Close()
-	b, _ := newBroker(t, cap.Set{"forge": routedCap(api.URL, api.URL)}, []string{"forge:org/repo"})
+	b, _ := newBroker(t, cap.Set{"forge": routedCap(api.URL, api.URL)}, []string{"forge"})
 	srv := httptest.NewServer(b.Handler())
 	defer srv.Close()
 	resp, _ := hostRequest(t, srv, "GET", "api.forge.example", "/repos/org/repo/%2e%2e/other")

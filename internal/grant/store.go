@@ -72,7 +72,7 @@ func (s Store) Save(vm string, set Set) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create vm state: %w", err)
 	}
-	text := strings.Join(set.Strings(), "\n")
+	text := strings.Join(set.Caps(), "\n")
 	if text != "" {
 		text += "\n"
 	}

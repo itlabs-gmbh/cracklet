@@ -48,7 +48,6 @@ func (b *Broker) newExec(c cap.Cap) http.Handler {
 		cmd.Env = append(childEnv(nil),
 			"CRACKLET_VM="+b.VM,
 			"CRACKLET_CAP="+c.Name,
-			"CRACKLET_SCOPE="+scopeOf(c, r.URL.Path),
 			"CRACKLET_METHOD="+r.Method,
 			"CRACKLET_PATH="+r.URL.Path,
 			"CRACKLET_QUERY="+r.URL.RawQuery,

@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/itlabs-gmbh/cracklet/internal/cap"
@@ -61,7 +60,7 @@ func (a *App) Grant(ctx context.Context, name string, specs []string) (grant.Set
 	if err := store.Save(name, set); err != nil {
 		return nil, err
 	}
-	a.printf("%s may now use: %s\n", name, strings.Join(set.Strings(), ", "))
+	a.printf("%s may now use: %s\n", name, strings.Join(set.Caps(), ", "))
 	return set, nil
 }
 
@@ -84,14 +83,14 @@ func (a *App) Revoke(ctx context.Context, name string, specs []string) (grant.Se
 	if err != nil {
 		return nil, err
 	}
-	// Check every spec against the stored grants before withdrawing any, so
-	// overlapping specs such as 'github github:org/repo' both count.
+	// Check every grant before withdrawing any, so a typo in one leaves the
+	// others in place.
 	set := stored
 	for _, g := range requested {
-		if !granted(stored, g) {
+		if !stored.Contains(g) {
 			return nil, fmt.Errorf("%s is not granted to %s", g, name)
 		}
-		set = withdraw(set, g)
+		set = set.Remove(g)
 	}
 	if err := store.Save(name, set); err != nil {
 		return nil, err
@@ -106,7 +105,7 @@ func (a *App) Revoke(ctx context.Context, name string, specs []string) (grant.Se
 	if len(set) == 0 {
 		a.printf("%s has no grants left\n", name)
 	} else {
-		a.printf("%s may still use: %s\n", name, strings.Join(set.Strings(), ", "))
+		a.printf("%s may still use: %s\n", name, strings.Join(set.Caps(), ", "))
 	}
 	return set, nil
 }
@@ -119,44 +118,13 @@ func (a *App) Grants(name string) (grant.Set, error) {
 	return a.grantStore().Load(name)
 }
 
-// granted reports whether revoking g would withdraw anything from set. A grant
-// without a scope stands for the capability under every scope, so
-// 'revoke vm github' needs no shell-quoted wildcard; a scoped grant must match
-// exactly.
-func granted(set grant.Set, g grant.Grant) bool {
-	if g.Scope == "" {
-		return slices.Contains(set.Caps(), g.Cap)
-	}
-	return set.Contains(g)
-}
-
-// withdraw returns set without g, read the same way as in granted.
-func withdraw(set grant.Set, g grant.Grant) grant.Set {
-	if g.Scope == "" {
-		return set.RemoveCap(g.Cap)
-	}
-	return set.Remove(g)
-}
-
-// checkGrant verifies that a grant names a known capability and that a scope
-// is only given where the capability is scoped.
+// checkGrant verifies that a grant names a known capability.
 func checkGrant(caps cap.Set, g grant.Grant) error {
 	if g.Cap == grant.SSHAgent {
-		if g.Scope != "" {
-			return fmt.Errorf("%s takes no scope", grant.SSHAgent)
-		}
 		return nil
 	}
-	c, ok := caps[g.Cap]
-	if !ok {
+	if _, ok := caps[g.Cap]; !ok {
 		return fmt.Errorf("unknown capability %q (see 'cracklet cap ls')", g.Cap)
-	}
-	scoped := c.Proxy != nil && c.Proxy.ScopeSegments > 0
-	switch {
-	case scoped && g.Scope == "":
-		return fmt.Errorf("%s needs a scope, e.g. %s:org/repo or '%s:*'", g.Cap, g.Cap, g.Cap)
-	case !scoped && g.Scope != "":
-		return fmt.Errorf("%s takes no scope", g.Cap)
 	}
 	return nil
 }

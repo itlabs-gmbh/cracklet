@@ -32,22 +32,22 @@ func runIn(t *testing.T, home string, stdin string, args ...string) (string, *ru
 
 func TestGrantRevokeGrantsFlow(t *testing.T) {
 	home := t.TempDir()
-	out, fake, err := runIn(t, home, "", "grant", "vm1", "claude", "github:org/repo")
+	out, fake, err := runIn(t, home, "", "grant", "vm1", "claude", "github")
 	if err != nil {
 		t.Fatalf("grant: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "vm1 may now use: claude, github:org/repo") {
+	if !strings.Contains(out, "vm1 may now use: claude, github") {
 		t.Errorf("output:\n%s", out)
 	}
 	if !fake.CalledWithSuffix("vm1.cracklet -- bash -s") {
 		t.Errorf("guest should have been provisioned:\n%s", fake.Dump())
 	}
 	out, _, err = runIn(t, home, "", "grants", "vm1")
-	if err != nil || out != "claude\ngithub:org/repo\n" {
+	if err != nil || out != "claude\ngithub\n" {
 		t.Errorf("grants: %q, %v", out, err)
 	}
 	out, _, err = runIn(t, home, "", "revoke", "vm1", "claude")
-	if err != nil || !strings.Contains(out, "may still use: github:org/repo") {
+	if err != nil || !strings.Contains(out, "may still use: github") {
 		t.Errorf("revoke: %q, %v", out, err)
 	}
 	out, _, err = runIn(t, home, "", "grants", "vm2")

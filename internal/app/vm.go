@@ -120,7 +120,7 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 		if err != nil {
 			return info, err
 		}
-		info.Grants = set.Strings()
+		info.Grants = set.Caps()
 	}
 	return info, nil
 }
@@ -197,7 +197,7 @@ func (a *App) ListVMs(ctx context.Context) ([]VMInfo, error) {
 		if err != nil {
 			return nil, err
 		}
-		vms[i].Grants = set.Strings()
+		vms[i].Grants = set.Caps()
 	}
 	return vms, nil
 }

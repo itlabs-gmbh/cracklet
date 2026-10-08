@@ -13,7 +13,7 @@
 # Do not hand the guest `gh auth token` or any other credential from an exec
 # program: whatever the program prints lands in the VM.
 #
-# Variables available to the program: CRACKLET_VM, CRACKLET_CAP, CRACKLET_SCOPE,
+# Variables available to the program: CRACKLET_VM, CRACKLET_CAP,
 # CRACKLET_METHOD, CRACKLET_PATH, CRACKLET_QUERY, CRACKLET_CONTENT_TYPE.
 
 name = "gh-api"

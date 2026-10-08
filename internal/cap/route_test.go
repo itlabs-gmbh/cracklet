@@ -9,13 +9,11 @@ const routedProxy = `
 name = "forge"
 [proxy]
 upstream = "https://forge.example"
-scope_segments = 2
 [proxy.headers]
 Authorization = "Basic {{ secret \"env:T\" | basicauth \"x\" }}"
 [[proxy.routes]]
 host = "api.forge.example"
 upstream = "https://api.forge.example"
-scope_prefix = "repos"
 [proxy.routes.headers]
 Authorization = "Bearer {{ secret \"env:API\" }}"
 `
@@ -29,7 +27,7 @@ func TestParseProxyRoutes(t *testing.T) {
 		t.Fatalf("routes = %+v", c.Proxy.Routes)
 	}
 	r := c.Proxy.Routes[0]
-	if r.Host != "api.forge.example" || r.Upstream != "https://api.forge.example" || r.ScopePrefix != "repos" {
+	if r.Host != "api.forge.example" || r.Upstream != "https://api.forge.example" {
 		t.Fatalf("route = %+v", r)
 	}
 	if !strings.Contains(r.Headers["Authorization"], `secret "env:API"`) {
@@ -44,16 +42,18 @@ func TestParseRejectsBadRoutes(t *testing.T) {
 		"uppercase host":    {`host = "api.forge.example"`, `host = "API.forge.example"`, "proxy.routes[0].host"},
 		"cleartext":         {`upstream = "https://api.forge.example"`, `upstream = "http://api.forge.example"`, "cleartext"},
 		"dynamic secret":    {`secret \"env:API\"`, `secret (print \"env:\" .VM)`, "literal reference"},
-		"prefix slash":      {`scope_prefix = "repos"`, `scope_prefix = "a/b"`, "proxy.routes[0].scope_prefix"},
-		"prefix unscoped":   {"scope_segments = 2", "scope_segments = 0", "scope_prefix needs scope_segments"},
-		"unknown route key": {`scope_prefix = "repos"`, "scope_prefix = \"repos\"\nbogus = 1", "unknown keys"},
+		"unknown route key": {`host = "api.forge.example"`, "host = \"api.forge.example\"\nbogus = 1", "unknown keys"},
+		// Scopes are gone; a file that still declares one must not load as
+		// if the broker enforced it.
+		"route scope":       {`host = "api.forge.example"`, "host = \"api.forge.example\"\nscope_prefix = \"repos\"", "unknown keys"},
+		"wildcard subpaths": {`host = "api.forge.example"`, "host = \"api.forge.example\"\nwildcard_subpaths = [\"forks\"]", "unknown keys"},
+		"proxy scope":       {`upstream = "https://forge.example"`, "upstream = \"https://forge.example\"\nscope_segments = 2", "unknown keys"},
 		// The guest reaches the broker as 127.0.0.1: a route for a loopback,
 		// IP or single-label host would capture every other cap's traffic.
-		"loopback ip":       {`host = "api.forge.example"`, `host = "127.0.0.1"`, "proxy.routes[0].host"},
-		"localhost":         {`host = "api.forge.example"`, `host = "localhost"`, "proxy.routes[0].host"},
-		"localhost suffix":  {`host = "api.forge.example"`, `host = "x.localhost"`, "proxy.routes[0].host"},
-		"single label":      {`host = "api.forge.example"`, `host = "broker"`, "proxy.routes[0].host"},
-		"bad wildcard path": {`scope_prefix = "repos"`, "scope_prefix = \"repos\"\nwildcard_subpaths = [\"a/b\"]", "wildcard_subpaths"},
+		"loopback ip":      {`host = "api.forge.example"`, `host = "127.0.0.1"`, "proxy.routes[0].host"},
+		"localhost":        {`host = "api.forge.example"`, `host = "localhost"`, "proxy.routes[0].host"},
+		"localhost suffix": {`host = "api.forge.example"`, `host = "x.localhost"`, "proxy.routes[0].host"},
+		"single label":     {`host = "api.forge.example"`, `host = "broker"`, "proxy.routes[0].host"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			text := strings.Replace(routedProxy, tc.from, tc.to, 1)

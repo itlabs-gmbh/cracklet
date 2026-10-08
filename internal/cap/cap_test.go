@@ -5,7 +5,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -54,7 +53,6 @@ func TestParseRejectsProblems(t *testing.T) {
 		"bad env name":   {validProxy + "lower = \"x\"\n", "invalid variable name"},
 		"typo in field":  {validProxy + "\n[[guest.files]]\npath = \"/x\"\ncontent = \"{{ .Broker }}\"\n", "Broker"},
 		"missing key":    {validProxy + "\n[[guest.json_merge]]\npath = \"/x.json\"\nvalue = 1\n", "key is required"},
-		"scope too deep": {strings.Replace(validProxy, "[proxy]", "[proxy]\nscope_segments = 9", 1), "scope_segments"},
 		"mcp no command": {"name = \"m\"\n[mcp]\nargs = [\"x\"]\n", "mcp.command is required"},
 	}
 	for name, tc := range cases {
@@ -120,9 +118,6 @@ func TestEmbeddedDefaultsAreValid(t *testing.T) {
 			t.Errorf("%s: source = %q", name, c.Source)
 		}
 	}
-	if set["github"].Proxy.ScopeSegments != 2 {
-		t.Errorf("github should be scoped per org/repo")
-	}
 	// GitHub rejects Bearer for git over HTTPS; only Basic works there.
 	auth, err := Render(set["github"].Proxy.Headers["Authorization"], lintData,
 		func(string) (string, error) { return "tok", nil })
@@ -131,9 +126,7 @@ func TestEmbeddedDefaultsAreValid(t *testing.T) {
 	}
 	// gh reaches the API through the same cap and the same token.
 	_, api, ok := set.RouteFor("api.github.com")
-	if !ok || api.Upstream != "https://api.github.com" || api.ScopePrefix != "repos" ||
-		!slices.Contains(api.WildcardSubpaths, "transfer") || !slices.Contains(api.WildcardSubpaths, "forks") ||
-		!slices.Contains(api.WildcardSubpaths, "generate") {
+	if !ok || api.Upstream != "https://api.github.com" {
 		t.Fatalf("github should route api.github.com, got %+v, %v", api, ok)
 	}
 	if refs := set["github"].Proxy.SecretRefs(); strings.Join(refs, ",") != "keychain:cracklet/github-token,keychain:cracklet/github-token" {

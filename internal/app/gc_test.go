@@ -376,7 +376,7 @@ func TestNewVMStartsWithoutLeftoverGrants(t *testing.T) {
 	}))
 	store := grant.Store{Dir: a.paths.VMsDir()}
 	// state of an earlier paseo-1 that gc kept because the new one already existed
-	if err := store.Save("paseo-1", grant.Set{{Cap: "github", Scope: "org/private"}}); err != nil {
+	if err := store.Save("paseo-1", grant.Set{{Cap: "github"}}); err != nil {
 		t.Fatal(err)
 	}
 	oldToken, err := store.Token("paseo-1")

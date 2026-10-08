@@ -197,13 +197,24 @@ func nested(a, b string) bool {
 }
 
 func validatePath(p string) error {
-	if !pathRe.MatchString(p) || strings.Contains(p, "/../") || strings.HasSuffix(p, "/..") {
-		return fmt.Errorf("guest path %q must be absolute and consist of letters, digits, '.', '_', '-' and '/'", p)
+	if err := validateManifestPath(p); err != nil {
+		return err
 	}
 	// Ownership, conflicts and the relay reservation compare paths as
 	// strings, so every file must have exactly one spelling.
 	if path.Clean(p) != p {
 		return fmt.Errorf("guest path %q must be in canonical form (%s)", p, path.Clean(p))
+	}
+	return nil
+}
+
+// validateManifestPath is the check for paths read back from a guest's
+// manifest: safe for the generated root scripts, but without the canonical
+// form rule, which older versions did not enforce. Their entries must still
+// be cleaned up on revoke instead of being dropped from the manifest.
+func validateManifestPath(p string) error {
+	if !pathRe.MatchString(p) || strings.Contains(p, "/../") || strings.HasSuffix(p, "/..") {
+		return fmt.Errorf("guest path %q must be absolute and consist of letters, digits, '.', '_', '-' and '/'", p)
 	}
 	return nil
 }

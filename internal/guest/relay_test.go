@@ -109,3 +109,24 @@ func TestSystemctlOnlyAsRootOnSystemd(t *testing.T) {
 		}
 	}
 }
+
+// Manifests written before paths had to be canonical may still list such
+// paths; a revoke must clean them up rather than silently drop them.
+func TestRevokeCleansLegacyNonCanonicalPaths(t *testing.T) {
+	st := State{Manifest: []string{"file:/etc/./old.conf", "block:/etc/./gitconfig#forge"}}
+	script, err := Plan{}.ApplyScript(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, "rm -f '/etc/./old.conf'") {
+		t.Errorf("legacy file not removed:\n%s", script)
+	}
+	if !strings.Contains(script, "sed '/^.* >>> cracklet:forge .*$/,/^.* <<< cracklet:forge$/d' '/etc/./gitconfig'") {
+		t.Errorf("legacy block not removed:\n%s", script)
+	}
+	// The relaxed check for old entries still refuses traversal.
+	st = State{Manifest: []string{"file:/etc/../root/x", "block:/etc/x/..#forge"}}
+	if script, _ = (Plan{}).ApplyScript(st); strings.Contains(script, "/etc/../root/x") || strings.Contains(script, "/etc/x/..") {
+		t.Errorf("traversal in a manifest must still be ignored:\n%s", script)
+	}
+}

@@ -313,10 +313,21 @@ func routeScope(c cap.Cap, rt cap.Route, path string) string {
 			return grant.Any
 		}
 	}
-	if len(parts) > n && slices.Contains(rt.WildcardSubpaths, parts[n]) {
+	if len(parts) > n && isWildcardSubpath(rt, parts[n]) {
 		return grant.Any
 	}
 	return strings.Join(parts[:n], "/")
+}
+
+// isWildcardSubpath matches seg against the route's wildcard_subpaths as
+// loosely as an upstream might route it: case-insensitively and without a
+// format suffix (forks.json), so the broker never reads a path more narrowly
+// than the upstream does.
+func isWildcardSubpath(rt cap.Route, seg string) bool {
+	base, _, _ := strings.Cut(seg, ".")
+	return slices.ContainsFunc(rt.WildcardSubpaths, func(w string) bool {
+		return strings.EqualFold(w, base)
+	})
 }
 
 func (b *Broker) audit(r *http.Request, d decision, status int) {

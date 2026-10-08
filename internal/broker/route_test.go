@@ -107,6 +107,11 @@ func TestRouteScopes(t *testing.T) {
 		{[]string{"forge:org/repo"}, "POST", "api.forge.example", "/repos/org/repo/forks", 403},
 		{[]string{"forge:org/repo"}, "POST", "api.forge.example", "/repos/org/repo/transfer", 403},
 		{[]string{"forge:*"}, "POST", "api.forge.example", "/repos/org/repo/forks", 200},
+		// The upstream may read a segment case-insensitively or with a format
+		// suffix; the broker must not read it more narrowly than the upstream.
+		{[]string{"forge:org/repo"}, "POST", "api.forge.example", "/repos/org/repo/FORKS", 403},
+		{[]string{"forge:org/repo"}, "POST", "api.forge.example", "/repos/org/repo/forks.json", 403},
+		{[]string{"forge:org/repo"}, "POST", "api.forge.example", "/repos/org/repo/Transfer/", 403},
 		{nil, "GET", "api.forge.example", "/user", 403},
 	} {
 		b, _ := newBroker(t, caps, tc.grants)

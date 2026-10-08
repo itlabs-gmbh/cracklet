@@ -320,11 +320,16 @@ func routeScope(c cap.Cap, rt cap.Route, path string) string {
 }
 
 // isWildcardSubpath matches seg against the route's wildcard_subpaths as
-// loosely as an upstream might route it: case-insensitively and without a
-// format suffix (forks.json), so the broker never reads a path more narrowly
-// than the upstream does.
+// loosely as an upstream might route it: case-insensitively and only up to the
+// first character outside [A-Za-z0-9_-] (forks.json, forks;x, transfer~), so
+// the broker never reads a path more narrowly than the upstream does.
 func isWildcardSubpath(rt cap.Route, seg string) bool {
-	base, _, _ := strings.Cut(seg, ".")
+	base := seg
+	if i := strings.IndexFunc(seg, func(r rune) bool {
+		return !(r == '-' || r == '_' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z')
+	}); i >= 0 {
+		base = seg[:i]
+	}
 	return slices.ContainsFunc(rt.WildcardSubpaths, func(w string) bool {
 		return strings.EqualFold(w, base)
 	})

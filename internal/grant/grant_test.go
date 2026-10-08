@@ -53,6 +53,20 @@ func TestSetOperationsAreImmutable(t *testing.T) {
 	}
 }
 
+func TestRemoveCapDropsEveryScope(t *testing.T) {
+	base, _ := ParseSet([]string{"claude", "github:*", "github:org/repo"})
+	removed := base.RemoveCap("github")
+	if strings.Join(removed.Strings(), ",") != "claude" {
+		t.Errorf("RemoveCap = %v", removed.Strings())
+	}
+	if len(base) != 3 {
+		t.Errorf("RemoveCap must not mutate: base=%v", base.Strings())
+	}
+	if same := base.RemoveCap("gitlab"); len(same) != 3 {
+		t.Errorf("RemoveCap of an absent cap = %v", same.Strings())
+	}
+}
+
 func TestAllows(t *testing.T) {
 	set, _ := ParseSet([]string{"claude", "github:org/repo", "gitlab:*"})
 	cases := []struct {

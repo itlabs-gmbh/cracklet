@@ -15,10 +15,12 @@ func newGrantCmd(get func() *app.App) *cobra.Command {
 		Short: "Let a microVM use capabilities through the broker",
 		Long: `grant allows a microVM to use capabilities. The guest is configured right
 away; the broker itself runs on the Mac for as long as 'cracklet ssh NAME' is open
-and hands out connections, never secrets. Default is deny.`,
+and hands out connections, never secrets. Default is deny.
+
+Quote the wildcard scope ('github:*'): zsh and fish reject an unmatched glob.`,
 		Example: "  cracklet grant agent1 claude\n" +
 			"  cracklet grant agent1 github:itlabs-gmbh/cracklet\n" +
-			"  cracklet grant agent1 github:* ssh-agent",
+			"  cracklet grant agent1 'github:*' ssh-agent",
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, err := get().Grant(cmd.Context(), args[0], args[1:])
@@ -31,7 +33,12 @@ func newRevokeCmd(get func() *app.App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "revoke NAME CAP[:SCOPE]...",
 		Short: "Withdraw capabilities from a microVM",
-		Args:  cobra.MinimumNArgs(2),
+		Long: `revoke withdraws grants and removes their guest configuration. CAP:SCOPE
+withdraws exactly that grant; CAP alone withdraws the capability under every
+scope.`,
+		Example: "  cracklet revoke agent1 github:itlabs-gmbh/cracklet\n" +
+			"  cracklet revoke agent1 github",
+		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, err := get().Revoke(cmd.Context(), args[0], args[1:])
 			return err

@@ -84,10 +84,11 @@ func (a *App) Revoke(ctx context.Context, name string, specs []string) (grant.Se
 		return nil, err
 	}
 	for _, g := range requested {
-		if !set.Contains(g) {
+		next, ok := revokeOne(set, g)
+		if !ok {
 			return nil, fmt.Errorf("%s is not granted to %s", g, name)
 		}
-		set = set.Remove(g)
+		set = next
 	}
 	if err := store.Save(name, set); err != nil {
 		return nil, err
@@ -115,6 +116,17 @@ func (a *App) Grants(name string) (grant.Set, error) {
 	return a.grantStore().Load(name)
 }
 
+// revokeOne removes g from set. A grant without a scope withdraws the
+// capability under every scope, so 'revoke vm github' needs no shell-quoted
+// wildcard; a scoped grant must match exactly. ok is false when nothing went.
+func revokeOne(set grant.Set, g grant.Grant) (grant.Set, bool) {
+	if g.Scope == "" {
+		next := set.RemoveCap(g.Cap)
+		return next, len(next) < len(set)
+	}
+	return set.Remove(g), set.Contains(g)
+}
+
 // checkGrant verifies that a grant names a known capability and that a scope
 // is only given where the capability is scoped.
 func checkGrant(caps cap.Set, g grant.Grant) error {
@@ -131,7 +143,7 @@ func checkGrant(caps cap.Set, g grant.Grant) error {
 	scoped := c.Proxy != nil && c.Proxy.ScopeSegments > 0
 	switch {
 	case scoped && g.Scope == "":
-		return fmt.Errorf("%s needs a scope, e.g. %s:org/repo or %s:*", g.Cap, g.Cap, g.Cap)
+		return fmt.Errorf("%s needs a scope, e.g. %s:org/repo or '%s:*'", g.Cap, g.Cap, g.Cap)
 	case !scoped && g.Scope != "":
 		return fmt.Errorf("%s takes no scope", g.Cap)
 	}

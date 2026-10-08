@@ -185,6 +185,7 @@ cracklet grant agent1 claude github:itlabs-gmbh/cracklet ssh-agent
 cracklet ssh agent1                       # the broker lives as long as this session
 cracklet grants agent1
 cracklet revoke agent1 github:itlabs-gmbh/cracklet
+cracklet revoke agent1 github             # every github grant, whatever its scope
 ```
 
 While `cracklet ssh` is open, the broker listens on a Unix socket on the Mac and
@@ -246,7 +247,8 @@ through `.BrokerSocket` (`http_unix_socket`) with a placeholder `GH_TOKEN`.
 are not tied to one repository, GraphQL (most `gh pr` and `gh repo` commands),
 search and `/user`, could reach any repo the token can, so they need
 `github:*`, as do `forks`, `transfer` and `generate`, which act beyond the
-repository in the path. Route hosts must be public DNS names, never an IP or
+repository in the path. Quote it in the shell (`'github:*'`): zsh and fish
+refuse a glob that matches no file. Route hosts must be public DNS names, never an IP or
 `localhost`, so no capability can catch the requests of another.
 
 The embedded `claude` capability points `ANTHROPIC_BASE_URL` at the broker and

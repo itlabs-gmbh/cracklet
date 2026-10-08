@@ -81,6 +81,18 @@ func (s Set) Remove(g Grant) Set {
 	return out
 }
 
+// RemoveCap returns a new set without any grant of capability name, whatever
+// its scope.
+func (s Set) RemoveCap(name string) Set {
+	out := make(Set, 0, len(s))
+	for _, x := range s {
+		if x.Cap != name {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
 // Contains reports whether exactly g is in the set.
 func (s Set) Contains(g Grant) bool {
 	for _, x := range s {

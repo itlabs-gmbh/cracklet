@@ -100,16 +100,16 @@
 
       <section id="github">
         <h2>GitHub: clone, push, PRs</h2>
-        <p>Create a fine-grained token on github.com, limited to the repositories the agent may touch, with <em>Contents: read and write</em> and, for <code>gh pr</code>, <em>Pull requests: read and write</em>. Store it once:</p>
+        <p>Create a fine-grained token on github.com and select only the repositories the agent may touch, with <em>Contents: read and write</em> and, for <code>gh pr</code>, <em>Pull requests: read and write</em>. The token is the boundary: the agent reaches exactly those repositories, through git and gh alike. Store it once:</p>
         <div class="cmd" data-copy="cracklet secret set github-token">
           <span class="prompt" aria-hidden="true">$</span>
           <span class="text">cracklet secret set github-token</span>
           <button type="button" aria-label="Copy cracklet secret set github-token to the clipboard"></button>
         </div>
-        <p>Grant per repository. git in the guest then works with ordinary GitHub URLs, both <code>https://github.com/</code> and <code>git@github.com:</code>:</p>
-        <div class="cmd" data-copy="cracklet grant task-42 github:acme/app">
+        <p>Grant it to the VM. git in the guest then works with ordinary GitHub URLs, both <code>https://github.com/</code> and <code>git@github.com:</code>, and gh needs no login:</p>
+        <div class="cmd" data-copy="cracklet grant task-42 github">
           <span class="prompt" aria-hidden="true">$</span>
-          <span class="text">cracklet grant task-42 github:acme/app</span>
+          <span class="text">cracklet grant task-42 github</span>
           <button type="button" aria-label="Copy the GitHub grant command to the clipboard"></button>
         </div>
         <div class="cmd" data-copy="git clone https://github.com/acme/app &amp;&amp; cd app">
@@ -117,13 +117,7 @@
           <span class="text">git clone https://github.com/acme/app &amp;&amp; cd app</span>
           <button type="button" aria-label="Copy the clone command to the clipboard"></button>
         </div>
-        <p>A repo grant covers git and REST calls under <code>/repos/acme/app</code>. Most <code>gh pr</code> and <code>gh repo</code> commands use GraphQL, which is not tied to one repository, so they need the wildcard:</p>
-        <div class="cmd" data-copy="cracklet grant task-42 github:*">
-          <span class="prompt" aria-hidden="true">$</span>
-          <span class="text">cracklet grant task-42 github:*</span>
-          <button type="button" aria-label="Copy the GitHub wildcard grant to the clipboard"></button>
-        </div>
-        <p>With a fine-grained token, the wildcard still reaches only the repositories the token was created for. Commits are authored inside the guest, so set <code>git config --global user.name</code> and <code>user.email</code> there. The full scope table is in <a href="capabilities.html#scopes">Scopes</a>.</p>
+        <p>Commits are authored inside the guest, so set <code>git config --global user.name</code> and <code>user.email</code> there. Which permission each command needs is in <a href="capabilities.html#reach">What a grant reaches</a>.</p>
       </section>
 
       <section id="mcp">
@@ -183,9 +177,9 @@
       <section id="pools">
         <h2>Many agents, side by side</h2>
         <p>VMs cannot reach each other, your Mac or your LAN; only the internet. Running several agents on different branches is just several VMs:</p>
-        <div class="cmd" data-copy="for n in a b c; do cracklet new agent-$n --profile paseo --grant claude --grant github:acme/app; done">
+        <div class="cmd" data-copy="for n in a b c; do cracklet new agent-$n --profile paseo --grant claude --grant github; done">
           <span class="prompt" aria-hidden="true">$</span>
-          <span class="text">for n in a b c; do cracklet new agent-$n --profile paseo --grant claude --grant github:acme/app; done</span>
+          <span class="text">for n in a b c; do cracklet new agent-$n --profile paseo --grant claude --grant github; done</span>
           <button type="button" aria-label="Copy the loop that creates three agent VMs to the clipboard"></button>
         </div>
         <p>All microVMs share the Lima VM's CPUs and memory. The defaults (4 CPUs, 8 GiB) fit about two or three task VMs at a time; grow it while no microVM runs with <code>cracklet prepare --cpus 8 --memory 16</code>.</p>

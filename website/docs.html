@@ -117,7 +117,7 @@
               <tr><td><code>doctor</code></td><td>Explain what this Mac is missing.</td></tr>
               <tr><td><code>prepare [--cpus N --memory GiB --disk GiB] [--profile P]</code></td><td>Set up or update Lima, Firecracker, kernel and images. Size flags on an existing Lima VM resize it in place; stop microVMs first.</td></tr>
               <tr><td><code>new [NAME] [--vcpus --mem --disk --profile --fresh]</code></td><td>Create a microVM from the golden snapshot; <code>--fresh</code> cold-boots.</td></tr>
-              <tr><td><code>new … -p [HOST:]GUEST --grant CAP[:SCOPE]</code></td><td>Forward ports and grant capabilities right away.</td></tr>
+              <tr><td><code>new … -p [HOST:]GUEST --grant CAP</code></td><td>Forward ports and grant capabilities right away.</td></tr>
               <tr><td><code>new … --owner NAME --slot N</code></td><td>Label a VM a tool manages, for <code>gc</code>.</td></tr>
               <tr><td><code>ls [--json]</code></td><td>Every VM with state, IP, size, ports, grants, owner, age and SSH destination.</td></tr>
               <tr><td><code>inspect NAME [--json]</code></td><td>Details of one VM.</td></tr>
@@ -128,7 +128,7 @@
               <tr><td><code>rm NAME</code></td><td>Stop and delete, including grants and token on the Mac.</td></tr>
               <tr><td><code>gc [--owner O] [--older-than 7d] [--keep VM] [--dry-run]</code></td><td>Remove owned VMs a tool lost track of, and leftover host state.</td></tr>
               <tr><td><code>forward NAME [[HOST:]GUEST…] / unforward NAME PORT…</code></td><td>List, add or remove port forwards.</td></tr>
-              <tr><td><code>grant / revoke NAME CAP[:SCOPE]…</code></td><td>Allow or withdraw capabilities. See <a href="capabilities.html#grants">Grants</a>.</td></tr>
+              <tr><td><code>grant / revoke NAME CAP…</code></td><td>Allow or withdraw capabilities. See <a href="capabilities.html#grants">Grants</a>.</td></tr>
               <tr><td><code>grants NAME</code></td><td>Show what a VM may use.</td></tr>
               <tr><td><code>cap ls / show / init / lint / add</code></td><td>Manage capability files. See <a href="capabilities.html#reference">Reference</a>.</td></tr>
               <tr><td><code>secret set / rm NAME</code></td><td>Store or delete a credential in the macOS Keychain.</td></tr>

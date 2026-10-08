@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Grants and capabilities – cracklet docs</title>
-  <meta name="description" content="How cracklet hands GitHub, Claude Code and MCP servers into a microVM without copying a single secret: the broker, grants, scopes, secrets and capability files in detail.">
+  <meta name="description" content="How cracklet hands GitHub, Claude Code and MCP servers into a microVM without copying a single secret: the broker, grants, secrets and capability files in detail.">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#232323" media="(prefers-color-scheme: dark)">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -38,7 +38,7 @@
         <li><a href="#model">The model in one minute</a></li>
         <li><a href="#request">What happens on a request</a></li>
         <li><a href="#grants">Grant, inspect, revoke</a></li>
-        <li><a href="#scopes">Scopes</a></li>
+        <li><a href="#reach">What a grant reaches</a></li>
         <li><a href="#secrets">Secrets</a></li>
         <li><a href="#lifetime">When the broker is up</a></li>
         <li><a href="#builtin">Built-in capabilities</a></li>
@@ -63,7 +63,7 @@
           </div>
           <div class="concept">
             <h3>grant</h3>
-            <p>A line in a per-VM file that says <strong>whether</strong> a microVM may use a capability, optionally limited to a scope such as <code>github:acme/app</code>. Default is deny.</p>
+            <p>A line in a per-VM file that says <strong>whether</strong> a microVM may use a capability, by name, such as <code>github</code>. Default is deny. How far it reaches is up to the credential.</p>
           </div>
           <div class="concept">
             <h3>broker</h3>
@@ -97,11 +97,11 @@ claude ──► 127.0.0.1:7777/claude/v1/messages
                                               ▼
                                          https://api.anthropic.com/v1/messages</pre>
         <ol class="steps">
-          <li><strong>Path check.</strong> The path must have exactly one reading: no percent-encoding, no backslashes, no <code>.</code> or <code>..</code> segments, no empty segments, nothing that changes under cleaning. Otherwise the broker answers <code>400</code>. This is what keeps the scope the broker checks identical to the resource the upstream serves.</li>
+          <li><strong>Path check.</strong> The path must have exactly one reading: no percent-encoding, no backslashes, no <code>.</code> or <code>..</code> segments, no empty segments, nothing that changes under cleaning. Otherwise the broker answers <code>400</code>, so the broker and the upstream always read the same path.</li>
           <li><strong>Locate the capability.</strong> Either from the first path segment (<code>/claude/…</code>, <code>/github/…</code>) or, for clients that keep the real host name, from the <code>Host</code> header through a <a href="#routes">route</a>. Unknown names get <code>404</code> with the hint <code>cracklet cap ls</code>.</li>
           <li><strong>Check the grant.</strong> The VM's grants file is read on every request, so a <code>cracklet grant</code> or <code>revoke</code> in another terminal applies to the very next request of a running broker. A miss is a <code>403</code> with the exact command that would allow it.</li>
           <li><strong>Hand over the connection.</strong> For a proxy, credential headers the guest sent are always removed, then the header templates are rendered with the real secret and the request goes upstream over TLS. Responses stream back as they arrive.</li>
-          <li><strong>Audit.</strong> One line per request in <code>~/.cracklet/audit.log</code>: time, VM, capability, scope, decision, method, path, status.</li>
+          <li><strong>Audit.</strong> One line per request in <code>~/.cracklet/audit.log</code>: time, VM, capability, decision, method, path, status.</li>
         </ol>
       </section>
 
@@ -113,9 +113,9 @@ claude ──► 127.0.0.1:7777/claude/v1/messages
           <span class="text">cracklet secret set claude-token</span>
           <button type="button" aria-label="Copy cracklet secret set claude-token to the clipboard"></button>
         </div>
-        <div class="cmd" data-copy="cracklet grant agent1 claude github:acme/app ssh-agent">
+        <div class="cmd" data-copy="cracklet grant agent1 claude github ssh-agent">
           <span class="prompt" aria-hidden="true">$</span>
-          <span class="text">cracklet grant agent1 claude github:acme/app ssh-agent</span>
+          <span class="text">cracklet grant agent1 claude github ssh-agent</span>
           <button type="button" aria-label="Copy the grant command to the clipboard"></button>
         </div>
         <div class="cmd" data-copy="cracklet grants agent1">
@@ -123,16 +123,16 @@ claude ──► 127.0.0.1:7777/claude/v1/messages
           <span class="text">cracklet grants agent1</span>
           <button type="button" aria-label="Copy cracklet grants agent1 to the clipboard"></button>
         </div>
-        <div class="cmd" data-copy="cracklet revoke agent1 github:acme/app">
+        <div class="cmd" data-copy="cracklet revoke agent1 github">
           <span class="prompt" aria-hidden="true">$</span>
-          <span class="text">cracklet revoke agent1 github:acme/app</span>
+          <span class="text">cracklet revoke agent1 github</span>
           <button type="button" aria-label="Copy the revoke command to the clipboard"></button>
         </div>
-        <p>Or grant while creating the VM: <code>cracklet new agent1 --grant claude --grant github:acme/app</code>. <code>cracklet ls</code> shows the grants of every VM in the <code>GRANTS</code> column.</p>
+        <p>Or grant while creating the VM: <code>cracklet new agent1 --grant claude --grant github</code>. <code>cracklet ls</code> shows the grants of every VM in the <code>GRANTS</code> column.</p>
 
         <h3>What <code>grant</code> does</h3>
         <ol>
-          <li>Checks that every capability exists and that a scope is given exactly where the capability is scoped.</li>
+          <li>Checks that every capability exists. A grant written as <code>cap:something</code> is refused: capabilities have no scopes.</li>
           <li>Takes a per-VM lock, so two grants or a grant and a revoke running at the same time cannot lose each other's change.</li>
           <li>Renders the guest configuration of all granted capabilities and applies it over SSH: environment variables, files, managed blocks, JSON merges and the broker socket relay.</li>
           <li>Only then saves the grant. A provisioning failure never leaves a silent allow behind. The VM therefore has to be running when you grant.</li>
@@ -143,50 +143,31 @@ claude ──► 127.0.0.1:7777/claude/v1/messages
         <p>One directory per VM under <code>~/.cracklet/vms/&lt;vm&gt;/</code> on the Mac, with a <code>grants</code> file (one grant per line) and the VM's placeholder <code>token</code>. <code>cracklet rm</code> deletes both. A new VM that reuses the name starts with no grants at all; <code>cracklet gc</code> removes state left behind for VMs that no longer exist.</p>
       </section>
 
-      <section id="scopes">
-        <h2>Scopes</h2>
-        <p>A grant is either <code>cap</code> or <code>cap:scope</code>. Whether a scope is required depends on the capability: <code>cracklet cap ls</code> shows it in the <code>SCOPED</code> column.</p>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Capability is</th><th>Valid grants</th><th>Rejected</th></tr></thead>
-            <tbody>
-              <tr><td>unscoped (<code>claude</code>, MCP and exec caps)</td><td><code>claude</code></td><td><code>claude:anything</code> – “takes no scope”</td></tr>
-              <tr><td>scoped (<code>github</code>)</td><td><code>github:acme/app</code>, <code>github:*</code></td><td><code>github</code> – “needs a scope”</td></tr>
-            </tbody>
-          </table>
+      <section id="reach">
+        <h2>What a grant reaches</h2>
+        <p>A grant is just the name of a capability: <code>claude</code>, <code>github</code>, <code>chrome-devtools</code>. There are no scopes. The broker does not try to read request paths to decide which repository or project a call touches; the <strong>credential</strong> behind the capability decides that, and the upstream enforces it.</p>
+        <p>That is the more reliable boundary. An API knows exactly which resources a token may reach, including through GraphQL, search and endpoints that act beyond one repository, while a proxy that parses paths always lags behind the API it guards.</p>
+        <div class="callout">
+          <p>Grant a capability, then make the secret behind it as narrow as the task: a fine-grained GitHub token for the repositories the agent may touch, a per-project API key, a key with a spending limit.</p>
         </div>
-        <p>A scoped request is allowed by a grant with <strong>exactly</strong> that scope or by the wildcard <code>*</code>. There is no prefix inheritance: <code>github:acme</code> does not cover <code>acme/app</code>. Grant each repository, or the wildcard.</p>
-
-        <h3>How the broker reads a scope</h3>
-        <p>For path requests (<code>/&lt;cap&gt;/…</code>), the scope is the first <code>scope_segments</code> segments after the capability name, with a trailing <code>.git</code> removed so clone URLs with and without it share one grant:</p>
-<pre class="code">/github/acme/app.git/info/refs   <span class="dim">→ cap</span> github  <span class="dim">scope</span> <span class="hl">acme/app</span>
-/github/acme/app/git-upload-pack <span class="dim">→ cap</span> github  <span class="dim">scope</span> <span class="hl">acme/app</span>
-/claude/v1/messages              <span class="dim">→ cap</span> claude  <span class="dim">scope</span> <span class="hl">-</span></pre>
-        <p id="routes">For requests that arrive by <code>Host</code> through a route, the scope follows the route's <code>scope_prefix</code>. Anything that is not clearly tied to one scope needs the wildcard, because it could reach every repository the token can:</p>
-<pre class="code">Host: api.github.com
-/repos/acme/app/pulls            <span class="dim">→ scope</span> <span class="hl">acme/app</span>
-/repos/acme/app/forks            <span class="dim">→ scope</span> <span class="hl">*</span>   <span class="dim">wildcard_subpaths: acts beyond the repo</span>
-/graphql                         <span class="dim">→ scope</span> <span class="hl">*</span>   <span class="dim">outside scope_prefix "repos"</span>
-/user                            <span class="dim">→ scope</span> <span class="hl">*</span>
-/repos/acme                      <span class="dim">→ scope</span> <span class="hl">*</span>   <span class="dim">too short to name a repo</span></pre>
-        <p>Wildcard subpaths are matched as loosely as an upstream might route them: case-insensitive and cut at the first character outside letters, digits, <code>-</code> and <code>_</code>, so <code>forks.json</code> or <code>Transfer~</code> still count.</p>
 
         <h3>GitHub in practice</h3>
+        <p>Create a <strong>fine-grained</strong> token on github.com and select only the repositories the agent should work on. Give it the permissions the agent needs and no more:</p>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>In the guest</th><th>Needs</th></tr></thead>
+            <thead><tr><th>In the guest</th><th>Token permission</th></tr></thead>
             <tbody>
-              <tr><td><code>git clone https://github.com/acme/app</code>, <code>git fetch</code>, <code>git push</code></td><td><code>github:acme/app</code></td></tr>
-              <tr><td><code>gh api repos/acme/app/issues</code> and other REST calls under <code>/repos/acme/app</code></td><td><code>github:acme/app</code></td></tr>
-              <tr><td><code>gh pr create</code>, <code>gh pr list</code>, <code>gh repo view</code> (GraphQL)</td><td><code>github:*</code></td></tr>
-              <tr><td>search, <code>/user</code>, anything not under one repo</td><td><code>github:*</code></td></tr>
-              <tr><td><code>…/forks</code>, <code>…/transfer</code>, <code>…/generate</code></td><td><code>github:*</code></td></tr>
+              <tr><td><code>git clone</code>, <code>git fetch</code></td><td>Contents: read</td></tr>
+              <tr><td><code>git push</code></td><td>Contents: read and write</td></tr>
+              <tr><td><code>gh pr create</code>, <code>gh pr list</code>, <code>gh pr view</code></td><td>Pull requests: read and write</td></tr>
+              <tr><td><code>gh issue …</code></td><td>Issues: read and write</td></tr>
             </tbody>
           </table>
         </div>
-        <div class="callout">
-          <p>The wildcard is only as wide as the token behind it. Store a <strong>fine-grained</strong> GitHub token limited to the repositories you intend to grant (Contents read/write for git, Pull requests for <code>gh pr</code>). Then <code>github:*</code> cannot reach further than those repos either.</p>
-        </div>
+        <p>With <code>cracklet grant agent1 github</code>, git and gh in the guest then reach exactly those repositories with exactly those permissions, whichever endpoint they call. The <code>github</code> capability uses one token for every VM it is granted to, so every such VM reaches the same repositories; when a task needs other repositories, change the token's repository selection on github.com.</p>
+
+        <h3>Grants from earlier versions</h3>
+        <p>Grants files written while cracklet still had scopes (<code>github:acme/app</code>, <code>github:*</code>) keep working: the scope is dropped when the file is read, and the next change writes the plain name. A new grant with a scope is refused with a hint to limit the credential instead.</p>
       </section>
 
       <section id="secrets">
@@ -261,7 +242,7 @@ claude ──► 127.0.0.1:7777/claude/v1/messages
             <thead><tr><th>Grant</th><th>Primitive</th><th>What the guest gets</th></tr></thead>
             <tbody>
               <tr><td><code>claude</code></td><td>proxy → <code>api.anthropic.com</code></td><td><code>ANTHROPIC_BASE_URL</code> pointing at the broker, <code>CLAUDE_CODE_OAUTH_TOKEN</code> set to a placeholder, onboarding marked done in <code>/root/.claude.json</code>. Secret: <code>claude-token</code> from <code>claude setup-token</code>.</td></tr>
-              <tr><td><code>github:&lt;org/repo&gt;</code></td><td>proxy → <code>github.com</code>, route for <code>api.github.com</code></td><td>a managed block in <code>/etc/gitconfig</code> that rewrites <code>https://github.com/</code> and <code>git@github.com:</code> to the broker; <code>http_unix_socket</code> and a placeholder token in gh's <code>hosts.yml</code>, which gh reads on every call. Secret: <code>github-token</code>.</td></tr>
+              <tr><td><code>github</code></td><td>proxy → <code>github.com</code>, route for <code>api.github.com</code></td><td>a managed block in <code>/etc/gitconfig</code> that rewrites <code>https://github.com/</code> and <code>git@github.com:</code> to the broker; <code>http_unix_socket</code> and a placeholder token in gh's <code>hosts.yml</code>, which gh reads on every call. Secret: <code>github-token</code>.</td></tr>
               <tr><td><code>ssh-agent</code></td><td>built in</td><td><code>ssh -A</code> agent forwarding</td></tr>
             </tbody>
           </table>
@@ -281,6 +262,7 @@ claude ──► 127.0.0.1:7777/claude/v1/messages
           <li>The upstream must be <code>https://</code>. Plain <code>http://</code> is only accepted for <code>localhost</code>, <code>127.0.0.1</code> and <code>::1</code>, because the broker attaches credentials.</li>
           <li>The guest's own credential headers are always removed: <code>Authorization</code>, <code>Proxy-Authorization</code>, <code>Cookie</code>, <code>X-Api-Key</code>, <code>Api-Key</code>, <code>X-Auth-Token</code>, <code>Private-Token</code>, <code>X-Github-Token</code>, <code>X-Goog-Api-Key</code>, <code>X-Amz-Security-Token</code>, <code>X-Access-Token</code>. A guest can neither smuggle its own credential upstream nor override the injected one.</li>
           <li><code>strip_headers</code> removes more. <code>allow_headers</code> turns the filter into an allow list; <code>Content-Type</code>, <code>Content-Length</code>, <code>Content-Encoding</code>, <code>Accept</code> and <code>Accept-Encoding</code> always survive.</li>
+          <li id="routes"><code>[[proxy.routes]]</code> serve clients that cannot take a base URL but can be pointed at a Unix socket, such as gh through <code>.BrokerSocket</code>: they keep their real host name and path, and the broker picks the route by the <code>Host</code> header, with its own upstream and headers. Route hosts must be public DNS names, never an IP or <code>localhost</code>, and each host may be routed by one capability only, so no capability can catch the requests of another.</li>
           <li>Responses are flushed as they arrive, so server-sent events and streaming completions work.</li>
           <li>If the upstream is unreachable or a secret cannot be resolved, the guest gets a generic <code>502</code>; the details are in the audit log on the Mac.</li>
         </ul>
@@ -305,7 +287,6 @@ claude ──► 127.0.0.1:7777/claude/v1/messages
             <tbody>
               <tr><td><code>CRACKLET_VM</code></td><td>the VM name</td></tr>
               <tr><td><code>CRACKLET_CAP</code></td><td>the capability name</td></tr>
-              <tr><td><code>CRACKLET_SCOPE</code></td><td>the grant scope; empty today, as exec capabilities are unscoped</td></tr>
               <tr><td><code>CRACKLET_METHOD</code>, <code>CRACKLET_PATH</code>, <code>CRACKLET_QUERY</code></td><td>the request line, path without the <code>/&lt;cap&gt;</code> prefix</td></tr>
               <tr><td><code>CRACKLET_CONTENT_TYPE</code></td><td>the request's <code>Content-Type</code></td></tr>
             </tbody>
@@ -399,11 +380,8 @@ OPENAI_API_KEY = "{{ .PseudoToken }}"</pre>
               <tr><td><code>[proxy.headers]</code></td><td>header name → template; may use <code>secret</code></td></tr>
               <tr><td><code>proxy.strip_headers</code></td><td>extra guest headers to remove</td></tr>
               <tr><td><code>proxy.allow_headers</code></td><td>if set, the only guest headers passed through (plus the always-kept five)</td></tr>
-              <tr><td><code>proxy.scope_segments</code></td><td>0–4; how many leading path segments form the grant scope. 0 = unscoped.</td></tr>
               <tr><td><code>[[proxy.routes]] host</code></td><td>a public DNS name with a dot; no IPs, no <code>localhost</code>. Each host may be routed by one capability only.</td></tr>
               <tr><td><code>routes.upstream</code>, <code>[proxy.routes.headers]</code></td><td>like the proxy's own; <code>strip_headers</code>/<code>allow_headers</code> apply as well</td></tr>
-              <tr><td><code>routes.scope_prefix</code></td><td>the segment the scope follows, e.g. <code>repos</code>. Needs <code>scope_segments</code>. Paths outside it need <code>*</code>.</td></tr>
-              <tr><td><code>routes.wildcard_subpaths</code></td><td>segments right after the scope that act beyond it and need <code>*</code></td></tr>
               <tr><td><code>[mcp] command</code>, <code>args</code>, <code>env</code></td><td>the stdio MCP server to run on the Mac</td></tr>
               <tr><td><code>[exec] command</code>, <code>args</code></td><td>the program to run per request on the Mac</td></tr>
               <tr><td><code>[guest.env]</code></td><td>variable → template; names <code>[A-Z_][A-Z0-9_]*</code></td></tr>
@@ -417,7 +395,7 @@ OPENAI_API_KEY = "{{ .PseudoToken }}"</pre>
           <table>
             <thead><tr><th>Command</th><th>What it does</th></tr></thead>
             <tbody>
-              <tr><td><code>cracklet cap ls</code></td><td>every capability with kind, scoped, source and description, plus <code>ssh-agent</code></td></tr>
+              <tr><td><code>cracklet cap ls</code></td><td>every capability with kind, source and description, plus <code>ssh-agent</code></td></tr>
               <tr><td><code>cracklet cap show NAME</code></td><td>the TOML source, embedded or yours</td></tr>
               <tr><td><code>cracklet cap show NAME --render [--vm VM]</code></td><td>the env, files, blocks and JSON merges a guest would receive</td></tr>
               <tr><td><code>cracklet cap init NAME</code></td><td>write a commented skeleton to <code>~/.cracklet/caps</code></td></tr>
@@ -457,13 +435,13 @@ install as ~/.cracklet/caps/gemini.toml? [y/N]</pre>
           <button type="button" aria-label="Copy the audit log tail command to the clipboard"></button>
         </div>
 <pre class="code">2026-10-08T09:10:02Z vm=agent1 tunnel=open
-2026-10-08T09:12:44Z vm=agent1 cap=github scope=acme/app <span class="hl">allow</span> GET "/github/acme/app/info/refs" 200
-2026-10-08T09:12:51Z vm=agent1 cap=claude scope=- <span class="hl">allow</span> POST "/claude/v1/messages" 200
-2026-10-08T09:13:05Z vm=agent1 cap=github scope=* <span class="hl">denied</span> POST "/graphql" 403</pre>
+2026-10-08T09:12:44Z vm=agent1 cap=github <span class="hl">allow</span> GET "/github/acme/app/info/refs" 200
+2026-10-08T09:12:51Z vm=agent1 cap=claude <span class="hl">allow</span> POST "/claude/v1/messages" 200
+2026-10-08T09:13:05Z vm=agent2 cap=github <span class="hl">denied</span> GET "/github/acme/app/info/refs" 403</pre>
         <p>The decision is one of <code>allow</code>, <code>denied</code>, <code>unknown cap</code>, <code>no cap</code>, <code>unsafe path</code>, <code>grants</code> or <code>setup</code>. Host-side diagnostics, such as a missing Keychain item or an MCP server's stderr, appear as indented lines underneath. The guest only ever sees a generic message, so paths, commands and item names stay on the Mac.</p>
         <p>A denied request tells the guest exactly what would allow it, which also tells an agent what to ask you for:</p>
-<pre class="code">$ curl -s 127.0.0.1:7777/github/acme/other/info/refs
-{"error":"github:acme/other is not granted to agent1","hint":"cracklet grant agent1 github:acme/other"}</pre>
+<pre class="code">$ curl -s 127.0.0.1:7777/github/acme/app/info/refs
+{"error":"github is not granted to agent2","hint":"cracklet grant agent2 github"}</pre>
       </section>
 
       <section id="security">
@@ -478,7 +456,7 @@ install as ~/.cracklet/caps/gemini.toml? [y/N]</pre>
         </ul>
         <h3>What it does not do</h3>
         <ul>
-          <li><strong>Limit the upstream.</strong> Within a granted scope the guest can do whatever the token allows. Use narrow tokens: fine-grained GitHub tokens, per-project API keys.</li>
+          <li><strong>Limit the upstream.</strong> With a capability granted, the guest can do whatever its token allows. The token is the boundary: use fine-grained GitHub tokens and per-project API keys.</li>
           <li><strong>Tell processes apart inside the guest.</strong> While the tunnel is open, any process in the VM can use what the VM was granted. One VM per task keeps that blast radius small.</li>
           <li><strong>Sandbox <code>mcp</code> and <code>exec</code>.</strong> Those programs run on your Mac with your user's rights. Read them before you install them and pin their versions.</li>
           <li><strong>Hide what the agent saves itself.</strong> If an agent logs in inside the VM on its own, that credential is on the VM's disk like any other file.</li>

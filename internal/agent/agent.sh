@@ -12,7 +12,9 @@ CRACKLET_ROOT=${CRACKLET_ROOT:-/var/lib/cracklet}
 FC_BIN=${FC_BIN:-/usr/local/bin/firecracker}
 HOSTS_FILE=${HOSTS_FILE:-/etc/hosts}
 SYSCTL_DROPIN=${SYSCTL_DROPIN:-/etc/sysctl.d/99-cracklet.conf}
-readonly CRACKLET_ROOT FC_BIN HOSTS_FILE SYSCTL_DROPIN
+SYSTEMD_DIR=${SYSTEMD_DIR:-/etc/systemd/system}
+RESTORED_FLAG=${RESTORED_FLAG:-/run/cracklet/restored}   # tmpfs: gone after every boot
+readonly CRACKLET_ROOT FC_BIN HOSTS_FILE SYSCTL_DROPIN SYSTEMD_DIR RESTORED_FLAG
 readonly IMAGES_DIR=$CRACKLET_ROOT/images
 readonly VMS_DIR=$CRACKLET_ROOT/vms
 readonly KEY_FILE=$CRACKLET_ROOT/id_ed25519
@@ -22,6 +24,7 @@ readonly SUBNET_PREFIX=172.16          # every VM owns 172.16.<index>.0/30
 readonly NET=$SUBNET_PREFIX.0.0/16
 readonly TAP_PREFIX=cracklet
 readonly UNIT_PREFIX=cracklet-vm-
+readonly RESTORE_UNIT=cracklet-restore.service
 readonly FWD_UNIT_PREFIX=cracklet-fwd-
 readonly PROXYD=/usr/lib/systemd/systemd-socket-proxyd
 readonly MIN_HOST_PORT=1024            # Lima exposes ports on the Mac as a normal user
@@ -314,6 +317,7 @@ cmd_prepare() { # FC_VERSION FC_SHA256 KERNEL_URL KERNEL_SHA256 ROOTFS_URL ROOTF
     build_rootfs "$profile" "$rootfs_url" "$rootfs_sha"
   done
   setup_host_network
+  install_restore_unit
   # golden snapshots from before profiles existed are named golden-VCPUS-MEM
   rm -rf "$IMAGES_DIR"/golden-[0-9]*
   # the default VM size gets its golden snapshot now, so the first `cracklet new` is fast
@@ -941,6 +945,7 @@ restore_vm() { # name
     stop_vm "$name" force >/dev/null 2>&1 || true
     die "$name was restored but SSH did not answer"
   fi
+  mark_autostart "$name"
   apply_forwards "$name"
 }
 
@@ -960,6 +965,7 @@ start_vm() { # name
   tap=$(idx_tap "$idx"); ip=$(idx_ip "$idx")
   if unit_active "$name"; then
     add_host_entry "$name" "$ip"
+    mark_autostart "$name"
     log "$name is already running"
     return 0
   fi
@@ -973,6 +979,7 @@ start_vm() { # name
     stop_vm "$name" force >/dev/null 2>&1 || true
     die "$name did not answer on SSH within ${SSH_WAIT_SECONDS}s (console tail above)"
   fi
+  mark_autostart "$name"
   apply_forwards "$name"
 }
 
@@ -997,7 +1004,66 @@ stop_vm() { # name [force]
 }
 
 cmd_start() { require_vm "$1"; start_vm "$1"; vm_json "$1"; }
-cmd_stop()  { require_vm "$1"; stop_vm "$1"; vm_json "$1"; }
+cmd_stop()  { require_vm "$1"; stop_vm "$1"; rm -f "$(vm_dir "$1")/autostart"; vm_json "$1"; }
+
+# --- restore after a restart of the Lima VM ----------------------------------
+# The microVM units are transient, so a restart of the Lima VM (a reboot of
+# the Mac) stops every microVM. A VM that was started and not stopped again
+# carries an autostart marker; a crash or a failed boot keeps it, only
+# `cracklet stop` removes it.
+
+mark_autostart() { : > "$(vm_dir "$1")/autostart"; }
+
+# cmd_restore boots the marked VMs once per boot of the Lima VM. It runs from
+# cracklet-restore.service at boot and from the CLI after it started the Lima
+# VM; whichever comes second waits for the agent lock and finds the work done.
+# Prints {"started": [...], "failed": [...]}.
+cmd_restore() {
+  local dir name rc started="[]" failed="[]"
+  if [[ ! -e $RESTORED_FLAG ]]; then
+    for dir in "$VMS_DIR"/*/; do
+      name=$(basename "$dir")
+      [[ -e $dir/autostart ]] || continue
+      if unit_active "$name"; then continue; fi
+      log "restarting $name, which was running before the Lima VM stopped"
+      # The subshell confines a failing VM's die/set -e to that VM; errexit
+      # only applies inside it because the call is no || or if condition.
+      set +e
+      ( set -e; start_vm "$name" ) >&2
+      rc=$?
+      set -e
+      if ((rc == 0)); then
+        started=$(jq -c --arg n "$name" '. + [$n]' <<<"$started")
+      else
+        failed=$(jq -c --arg n "$name" '. + [$n]' <<<"$failed")
+      fi
+    done
+    install -d -m 0755 "$(dirname "$RESTORED_FLAG")"
+    : > "$RESTORED_FLAG"
+  fi
+  jq -cn --argjson started "$started" --argjson failed "$failed" '{started: $started, failed: $failed}'
+}
+
+install_restore_unit() {
+  local agent
+  agent=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")
+  install -d -m 0755 "$SYSTEMD_DIR"
+  cat > "$SYSTEMD_DIR/$RESTORE_UNIT" <<UNIT
+[Unit]
+Description=Restart the cracklet microVMs that ran before the Lima VM stopped
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$agent restore
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable --quiet "$RESTORE_UNIT"
+}
 
 # cmd_rm with OWNER and CREATED is cracklet gc's removal: it runs under the
 # agent lock and removes the VM only if it is still the one gc listed, never
@@ -1144,7 +1210,7 @@ main() {
   if [[ -n $cmd ]]; then shift; fi
   trap on_exit EXIT
   case $cmd in
-    prepare|new|start|stop|rm|forward|unforward) acquire_lock ;;
+    prepare|new|start|stop|rm|forward|unforward|restore) acquire_lock ;;
   esac
   case $cmd in
     prepare) cmd_prepare "$@" ;;
@@ -1153,9 +1219,10 @@ main() {
     stop)    [[ $# -eq 1 ]] || die "usage: stop NAME"; cmd_stop "$1" ;;
     rm)      [[ $# -eq 1 || $# -eq 3 ]] || die "usage: rm NAME [OWNER CREATED|-]"; cmd_rm "$@" ;;
     ls)      cmd_ls ;;
+    restore) cmd_restore ;;
     forward)   [[ $# -ge 2 ]] || die "usage: forward NAME [HOST:]GUEST..."; cmd_forward "$@" ;;
     unforward) [[ $# -ge 2 ]] || die "usage: unforward NAME HOSTPORT..."; cmd_unforward "$@" ;;
-    *)       die "usage: agent.sh {prepare|new|start|stop|rm|ls|forward|unforward} ..." ;;
+    *)       die "usage: agent.sh {prepare|new|start|stop|rm|ls|restore|forward|unforward} ..." ;;
   esac
 }
 

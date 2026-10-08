@@ -170,9 +170,16 @@ func sshEnd(err error) string {
 	}
 }
 
-// vmRunning asks the agent whether the VM exists and runs.
+// vmRunning asks the agent whether the VM exists and runs. It polls in the
+// background, so it never starts a stopped Lima VM.
 func (a *App) vmRunning(ctx context.Context, name string) (bool, error) {
-	vms, err := a.ListVMs(ctx)
+	if err := a.checkRunning(ctx); err != nil {
+		return false, err
+	}
+	if err := a.ensureAgent(ctx); err != nil {
+		return false, err
+	}
+	vms, err := a.agentVMs(ctx)
 	if err != nil {
 		return false, err
 	}

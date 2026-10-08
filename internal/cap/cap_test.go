@@ -139,17 +139,25 @@ func TestEmbeddedDefaultsAreValid(t *testing.T) {
 		t.Errorf("git and gh must share the one token, got %v", refs)
 	}
 	g := set["github"].Guest
-	if g.Env["GH_TOKEN"] == "" {
-		t.Errorf("gh needs a placeholder GH_TOKEN to consider itself logged in")
+	// gh reads its files on every call, a daemon reads /etc/environment only
+	// at start: a token in the environment would miss a later grant.
+	if _, ok := g.Env["GH_TOKEN"]; ok {
+		t.Errorf("the placeholder belongs in gh's hosts.yml, not in GH_TOKEN")
 	}
-	var ghConfig bool
+	blocks := map[string]string{}
 	for _, b := range g.Blocks {
-		if b.Path == "/root/.config/gh/config.yml" && strings.Contains(b.Content, "http_unix_socket: {{ .BrokerSocket }}") {
-			ghConfig = true
-		}
+		blocks[b.Path] = b.Content
 	}
-	if !ghConfig {
+	if !strings.Contains(blocks["/root/.config/gh/config.yml"], "http_unix_socket: {{ .BrokerSocket }}") {
 		t.Errorf("gh must be pointed at the broker socket, blocks = %+v", g.Blocks)
+	}
+	// Already in gh's multi-account shape with a user name, so gh never
+	// migrates it, which would ask the API who the user is.
+	hosts := blocks["/root/.config/gh/hosts.yml"]
+	for _, want := range []string{"github.com:", "user: cracklet", "users:", "oauth_token: {{ .PseudoToken }}"} {
+		if !strings.Contains(hosts, want) {
+			t.Errorf("hosts.yml block lacks %q:\n%s", want, hosts)
+		}
 	}
 }
 

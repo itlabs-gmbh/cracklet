@@ -69,6 +69,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The `github` capability puts gh's placeholder token in
+  `/root/.config/gh/hosts.yml` instead of `GH_TOKEN`: long-running processes
+  such as the Paseo daemon read `/etc/environment` only at start, so gh in
+  them stayed logged out after a later grant.
+
 - The `github` capability sends `Basic x-access-token:<token>` instead of
   `Bearer`, which GitHub rejects for git over HTTPS. Capability templates gain
   a `basicauth` function for this: `{{ secret "ref" | basicauth "user" }}`.

@@ -14,7 +14,7 @@
 #
 # gh: http_unix_socket sends all of gh's API traffic to the broker socket in
 # the guest, still addressed to api.github.com; the broker replaces gh's
-# placeholder token with the real one. REST calls under /repos/<org>/<repo>
+# placeholder token (from hosts.yml) with the real one. REST calls under /repos/<org>/<repo>
 # follow the grant's scope. Calls not tied to one repository (GraphQL, which
 # gh uses for most pr and repo commands, search, /user) could reach any repo
 # the token can, so they need github:*, as do forks, transfer and generate.
@@ -42,10 +42,6 @@ wildcard_subpaths = ["forks", "transfer", "generate"]
 [proxy.routes.headers]
 Authorization = "Bearer {{ secret \"keychain:cracklet/github-token\" }}"
 
-[guest.env]
-# gh only talks to the API when it believes it is logged in.
-GH_TOKEN = "{{ .PseudoToken }}"
-
 [[guest.blocks]]
 path = "/etc/gitconfig"
 content = """
@@ -58,4 +54,22 @@ content = """
 path = "/root/.config/gh/config.yml"
 content = """
 http_unix_socket: {{ .BrokerSocket }}
+"""
+
+# gh only talks to the API when it believes it is logged in. The placeholder
+# lives in hosts.yml rather than GH_TOKEN because gh reads its files on every
+# call, while a long-running process such as the Paseo daemon reads
+# /etc/environment only at start and would miss a later grant. The shape is
+# gh's multi-account format with a user name, so gh never migrates it (which
+# would ask the API for the user and fail under a scoped grant).
+[[guest.blocks]]
+path = "/root/.config/gh/hosts.yml"
+content = """
+github.com:
+    users:
+        cracklet:
+            oauth_token: {{ .PseudoToken }}
+    git_protocol: https
+    user: cracklet
+    oauth_token: {{ .PseudoToken }}
 """

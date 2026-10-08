@@ -241,7 +241,9 @@ See `examples/caps/` for an MCP bridge and an exec plugin.
 
 The embedded `github` capability serves git and the `gh` CLI with one token.
 git is rewritten to the broker in `/etc/gitconfig`; gh sends its API calls
-through `.BrokerSocket` (`http_unix_socket`) with a placeholder `GH_TOKEN`.
+through `.BrokerSocket` (`http_unix_socket`) with a placeholder token in its
+`hosts.yml`, which gh reads on every call, so a grant applies to running
+processes without a restart.
 `github:org/repo` covers git and REST calls under `/repos/org/repo`. Calls that
 are not tied to one repository, GraphQL (most `gh pr` and `gh repo` commands),
 search and `/user`, could reach any repo the token can, so they need

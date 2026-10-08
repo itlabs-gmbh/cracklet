@@ -2,6 +2,7 @@ package cap
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -72,7 +73,7 @@ func render(text string, data TemplateData, secret SecretFunc) (string, error) {
 	if !strings.Contains(text, "{{") {
 		return text, nil
 	}
-	tmpl, err := template.New("cap").Option("missingkey=error").Funcs(template.FuncMap{"secret": secret}).Parse(text)
+	tmpl, err := template.New("cap").Option("missingkey=error").Funcs(funcs(secret)).Parse(text)
 	if err != nil {
 		return "", fmt.Errorf("parse template: %w", err)
 	}
@@ -81,6 +82,18 @@ func render(text string, data TemplateData, secret SecretFunc) (string, error) {
 		return "", unwrapExec(err)
 	}
 	return buf.String(), nil
+}
+
+// funcs is the function set every template sees; secret differs between the
+// broker side, the guest side and SecretRefs' static walk.
+func funcs(secret any) template.FuncMap {
+	return template.FuncMap{"secret": secret, "basicauth": basicAuth}
+}
+
+// basicAuth encodes an HTTP Basic credential. The password comes last so a
+// secret can be piped in: {{ secret "ref" | basicauth "user" }}.
+func basicAuth(user, password string) string {
+	return base64.StdEncoding.EncodeToString([]byte(user + ":" + password))
 }
 
 // unwrapExec strips text/template's "template: cap:1:10: executing ... error

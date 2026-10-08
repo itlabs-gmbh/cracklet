@@ -19,7 +19,9 @@ description = "git over HTTPS to github.com, scoped per org/repo"
 upstream = "https://github.com"
 scope_segments = 2
 [proxy.headers]
-Authorization = "Bearer {{ secret \"keychain:cracklet/github-token\" }}"
+# git over HTTPS only accepts Basic auth; GitHub ignores the user name for
+# tokens, x-access-token is the conventional one.
+Authorization = "Basic {{ secret \"keychain:cracklet/github-token\" | basicauth \"x-access-token\" }}"
 
 [[guest.blocks]]
 path = "/etc/gitconfig"

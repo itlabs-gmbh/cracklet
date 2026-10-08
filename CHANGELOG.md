@@ -58,6 +58,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - `Include ~/.cracklet/ssh_config` lets plain `ssh NAME.cracklet` work via the
   Lima VM as jump host.
 
+### Fixed
+
+- The `github` capability sends `Basic x-access-token:<token>` instead of
+  `Bearer`, which GitHub rejects for git over HTTPS. Capability templates gain
+  a `basicauth` function for this: `{{ secret "ref" | basicauth "user" }}`.
+
 ### Security
 
 - A new microVM never inherits the grants or placeholder token left on the Mac

@@ -29,16 +29,12 @@ func (a *App) CapList() error {
 		return err
 	}
 	w := tabwriter.NewWriter(a.out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tKIND\tSCOPED\tSOURCE\tDESCRIPTION")
+	fmt.Fprintln(w, "NAME\tKIND\tSOURCE\tDESCRIPTION")
 	for _, name := range caps.Names() {
 		c := caps[name]
-		scoped := "no"
-		if c.Proxy != nil && c.Proxy.ScopeSegments > 0 {
-			scoped = "yes"
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", c.Name, c.Kind(), scoped, c.Source, c.Description)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", c.Name, c.Kind(), c.Source, c.Description)
 	}
-	fmt.Fprintf(w, "%s\tbuilt-in\tno\t-\tforward the Mac's SSH agent (ssh -A)\n", grant.SSHAgent)
+	fmt.Fprintf(w, "%s\tbuilt-in\t-\tforward the Mac's SSH agent (ssh -A)\n", grant.SSHAgent)
 	return w.Flush()
 }
 

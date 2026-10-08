@@ -59,7 +59,7 @@ type Spec struct {
 	Forwards []string
 	// Fresh forces a cold boot instead of restoring the golden snapshot.
 	Fresh bool
-	// Grants are capabilities to grant right after creation, as "cap[:scope]".
+	// Grants are capabilities to grant right after creation, by capability name.
 	Grants []string
 	// Owner labels the tool or person that manages the VM; only owned VMs
 	// are candidates for `cracklet gc`. Empty means created by hand.

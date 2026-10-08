@@ -180,12 +180,11 @@ one controlled hole: a **broker** that hands out *connections, never secrets*.
 
 ```sh
 cracklet secret set claude-token          # paste the output of `claude setup-token`
-cracklet secret set github-token          # a fine-grained token for the repos you grant
-cracklet grant agent1 claude github:itlabs-gmbh/cracklet ssh-agent
+cracklet secret set github-token          # a fine-grained token, limited to the repos the agent may use
+cracklet grant agent1 claude github ssh-agent
 cracklet ssh agent1                       # the broker lives as long as this session
 cracklet grants agent1
-cracklet revoke agent1 github:itlabs-gmbh/cracklet
-cracklet revoke agent1 github             # every github grant, whatever its scope
+cracklet revoke agent1 github
 ```
 
 While `cracklet ssh` is open, the broker listens on a Unix socket on the Mac and
@@ -209,7 +208,11 @@ within a few seconds.
 
 Grants are the only policy: default deny, one file per VM in `~/.cracklet/vms/`,
 checked on every request and logged to `~/.cracklet/audit.log`. A denied request
-answers with the exact `cracklet grant` command that would allow it.
+answers with the exact `cracklet grant` command that would allow it. A grant is
+all or nothing per capability: what a granted VM can reach is what the
+credential behind it can reach. Limit that at the source, for GitHub with a
+fine-grained token restricted to the repositories the agent works on. GitHub
+enforces that limit itself, and the token never enters the guest.
 
 The broker is harness-neutral. It knows three primitives, and everything
 specific to Claude Code, GitHub or any other tool is a **capability file**:
@@ -244,13 +247,9 @@ The embedded `github` capability serves git and the `gh` CLI with one token.
 git is rewritten to the broker in `/etc/gitconfig`; gh sends its API calls
 through `.BrokerSocket` (`http_unix_socket`) with a placeholder token in its
 `hosts.yml`, which gh reads on every call, so a grant applies to running
-processes without a restart.
-`github:org/repo` covers git and REST calls under `/repos/org/repo`. Calls that
-are not tied to one repository, GraphQL (most `gh pr` and `gh repo` commands),
-search and `/user`, could reach any repo the token can, so they need
-`github:*`, as do `forks`, `transfer` and `generate`, which act beyond the
-repository in the path. Quote it in the shell (`'github:*'`): zsh and fish
-refuse a glob that matches no file. Route hosts must be public DNS names, never an IP or
+processes without a restart. Paths with percent-encoding are refused, and
+downloads that GitHub redirects to other hosts (`gh release download`) do not
+work through the broker. Route hosts must be public DNS names, never an IP or
 `localhost`, so no capability can catch the requests of another.
 
 The embedded `claude` capability points `ANTHROPIC_BASE_URL` at the broker and

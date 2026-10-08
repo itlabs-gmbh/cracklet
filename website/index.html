@@ -109,20 +109,20 @@ $ cracklet ssh dev uname -a
               <span class="text">cracklet secret set claude-token</span>
               <button type="button" aria-label="Copy cracklet secret set claude-token to the clipboard"></button>
             </div>
-            <div class="cmd" data-copy="cracklet grant ai claude github:acme/app">
+            <div class="cmd" data-copy="cracklet grant ai claude github">
               <span class="prompt" aria-hidden="true">$</span>
-              <span class="text">cracklet grant ai claude github:acme/app</span>
+              <span class="text">cracklet grant ai claude github</span>
               <button type="button" aria-label="Copy the grant command to the clipboard"></button>
             </div>
           </div>
           <div class="card">
             <h3 class="small">Default deny, fully audited</h3>
-            <p>Every request is checked against the VM's grants and written to an audit log. GitHub access is scoped to the repositories you name. A denied request is answered with the exact command that would allow it.</p>
+            <p>Every request is checked against the VM's grants and written to an audit log. GitHub reaches only the repositories your fine-grained token allows, and GitHub enforces that, not a path check in the broker. A denied request is answered with the exact command that would allow it.</p>
             <div class="term term--wrap">$ curl -s :7777/github/acme/app/info/refs
-<span class="dim">{"error":"github:acme/app is not granted to ai","hint":"cracklet grant ai github:acme/app"}</span></div>
-            <div class="cmd" data-copy="cracklet revoke ai github:acme/app">
+<span class="dim">{"error":"github is not granted to ai","hint":"cracklet grant ai github"}</span></div>
+            <div class="cmd" data-copy="cracklet revoke ai github">
               <span class="prompt" aria-hidden="true">$</span>
-              <span class="text">cracklet revoke ai github:acme/app</span>
+              <span class="text">cracklet revoke ai github</span>
               <button type="button" aria-label="Copy the revoke command to the clipboard"></button>
             </div>
           </div>

@@ -20,21 +20,9 @@ type Route struct {
 	Upstream string `toml:"upstream"`
 	// Headers are set on every upstream request, like proxy.headers.
 	Headers map[string]string `toml:"headers"`
-	// ScopePrefix is the path segment the grant scope follows, such as repos
-	// for /repos/org/repo/...; the scope is then the next scope_segments
-	// segments. Requests outside the prefix are not tied to one scope and
-	// need the wildcard grant.
-	ScopePrefix string `toml:"scope_prefix"`
-	// WildcardSubpaths are segments right after the scope whose endpoints act
-	// beyond it (GitHub's /repos/o/r/transfer moves the repo elsewhere); they
-	// need the wildcard grant as well.
-	WildcardSubpaths []string `toml:"wildcard_subpaths"`
 }
 
-var (
-	hostRe    = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$`)
-	segmentRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-)
+var hostRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$`)
 
 // routableHost accepts public DNS names only. The guest reaches the broker as
 // 127.0.0.1, so a route for a loopback, IP or single-label name would catch
@@ -59,19 +47,6 @@ func (p Proxy) validateRoutes() []string {
 		seen[r.Host] = true
 		if err := validateUpstream(r.Upstream); err != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", at, err))
-		}
-		if r.ScopePrefix != "" {
-			if !segmentRe.MatchString(r.ScopePrefix) || r.ScopePrefix == "." || r.ScopePrefix == ".." {
-				problems = append(problems, at+".scope_prefix must be a single path segment")
-			}
-			if p.ScopeSegments == 0 {
-				problems = append(problems, at+".scope_prefix needs scope_segments on the proxy")
-			}
-		}
-		for _, seg := range r.WildcardSubpaths {
-			if !segmentRe.MatchString(seg) || seg == "." || seg == ".." {
-				problems = append(problems, fmt.Sprintf("%s.wildcard_subpaths: %q must be a single path segment", at, seg))
-			}
 		}
 		problems = append(problems, validateHeaders(at+".headers", r.Headers)...)
 	}

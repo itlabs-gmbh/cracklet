@@ -316,7 +316,10 @@ immediately instead of at the kernel's next scheduled reseed.
 - `cracklet doctor` explains what is missing on the host.
 - Console output of a VM: `limactl shell cracklet sudo cat /var/lib/cracklet/vms/<name>/console.log`
 - Agent logs: `limactl shell cracklet sudo journalctl -u cracklet-vm-<name>`
-- After a reboot of the Lima VM, microVMs are stopped; `cracklet start <name>` brings them back.
+- After a reboot of the Mac, the next `cracklet` command starts the stopped Lima VM, and
+  the microVMs that were running come back (also at every boot of the Lima VM, through
+  `cracklet-restore.service`). VMs stopped with `cracklet stop` stay stopped. If one
+  fails to boot, the command warns; `cracklet start <name>` retries it.
 - `cracklet ls` shows `broken` for a VM whose metadata is damaged; `cracklet rm <name>` cleans it up.
 - `cracklet ssh` and `cracklet exec` mirror the remote exit status; exit 255 means the connection failed.
 - `cracklet ssh dev a b` joins its words into one shell command line, as ssh does, so

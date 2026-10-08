@@ -13,7 +13,7 @@ func TestScriptEmbedded(t *testing.T) {
 	if !strings.HasPrefix(Script, "#!/usr/bin/env bash") {
 		t.Fatalf("agent script should start with a bash shebang, got %q", firstLine(Script))
 	}
-	for _, cmd := range []string{"prepare", "new", "start", "stop", "rm", "ls", "forward", "unforward"} {
+	for _, cmd := range []string{"prepare", "new", "start", "stop", "rm", "ls", "restore", "forward", "unforward"} {
 		if !strings.Contains(Script, "cmd_"+cmd+"()") {
 			t.Errorf("agent script missing command handler cmd_%s", cmd)
 		}

@@ -141,7 +141,7 @@
         <h2>Troubleshooting</h2>
         <ul>
           <li>Exit code 255 from <code>ssh</code> or <code>exec</code> means the connection failed; check <code>cracklet ls</code>.</li>
-          <li>After a reboot of the Lima VM, microVMs are stopped; <code>cracklet start NAME</code> brings them back.</li>
+          <li>After a reboot of the Mac, the next <code>cracklet</code> command starts the Lima VM and the microVMs that were running come back; ones stopped with <code>cracklet stop</code> stay stopped. If one fails to boot, <code>cracklet start NAME</code> retries it.</li>
           <li><code>broken</code> in <code>cracklet ls</code> means damaged metadata; <code>cracklet rm NAME</code> cleans it up.</li>
           <li>Console of a VM: <code>limactl shell cracklet sudo cat /var/lib/cracklet/vms/NAME/console.log</code></li>
           <li>Reset everything: <code>limactl delete -f cracklet &amp;&amp; rm -rf ~/.cracklet</code></li>

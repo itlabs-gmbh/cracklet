@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"time"
 
@@ -21,6 +22,7 @@ type App struct {
 	lima     *lima.Client
 	paths    config.Paths
 	out      io.Writer
+	status   io.Writer // progress that must not mix into a command's output
 	lookPath host.LookPathFunc
 	platform hostPlatform
 	probe    PortProbe
@@ -69,6 +71,12 @@ func WithLookPath(fn host.LookPathFunc) Option {
 	return func(a *App) { a.lookPath = fn }
 }
 
+// WithStatus overrides where progress notes such as starting the Lima VM go
+// (stderr by default, so piped output of ssh and exec stays clean).
+func WithStatus(w io.Writer) Option {
+	return func(a *App) { a.status = w }
+}
+
 // WithPortProbe overrides the host port readiness check (used by tests).
 func WithPortProbe(p PortProbe) Option {
 	return func(a *App) { a.probe = p }
@@ -86,7 +94,7 @@ func WithEnvd(src EnvdSource) Option {
 
 // New wires an App.
 func New(r runner.Runner, paths config.Paths, out io.Writer, opts ...Option) *App {
-	a := &App{r: r, lima: lima.NewClient(r, config.Instance), paths: paths, out: out,
+	a := &App{r: r, lima: lima.NewClient(r, config.Instance), paths: paths, out: out, status: os.Stderr,
 		lookPath: exec.LookPath, probe: waitForHostPort, portBusy: hostPortBusy, tunnelRetry: defaultTunnelRetry,
 		brokerWatch: defaultBrokerWatch, now: time.Now}
 	a.envd = a.loadEnvd
@@ -114,17 +122,6 @@ func (a *App) printf(format string, args ...any) {
 	fmt.Fprintf(a.out, format, args...)
 }
 
-// requireRunning fails with a helpful hint unless the Lima instance is up.
-func (a *App) requireRunning(ctx context.Context) error {
-	inst, ok, err := a.lima.Get(ctx)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("Lima instance %q does not exist yet, run 'cracklet prepare' first", config.Instance)
-	}
-	if inst.Status != lima.StatusRunning {
-		return fmt.Errorf("Lima instance %q is %s, run 'cracklet prepare' to start it", config.Instance, inst.Status)
-	}
-	return nil
+func (a *App) statusf(format string, args ...any) {
+	fmt.Fprintf(a.status, format, args...)
 }

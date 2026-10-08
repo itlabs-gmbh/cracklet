@@ -92,6 +92,9 @@ func (p Paths) LimaTemplatePath() string { return filepath.Join(p.Home, "lima.ya
 // LimaLockPath serializes Lima VM restarts against microVM starts across cracklet processes.
 func (p Paths) LimaLockPath() string { return filepath.Join(p.Home, "lima.lock") }
 
+// LimaBootLockPath serializes starting the stopped Lima VM across cracklet processes.
+func (p Paths) LimaBootLockPath() string { return filepath.Join(p.Home, "lima-boot.lock") }
+
 // CapsDir holds the user's capability files (one <name>.toml each).
 func (p Paths) CapsDir() string { return filepath.Join(p.Home, "caps") }
 

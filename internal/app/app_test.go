@@ -21,7 +21,7 @@ func newTestApp(t *testing.T, handle runner.FakeHandler) (*App, *runner.Fake, *b
 	fake := runner.NewFake(handle)
 	out := &bytes.Buffer{}
 	paths := config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}
-	return New(fake, paths, out, WithEnvd(fakeEnvd)), fake, out
+	return New(fake, paths, out, WithEnvd(fakeEnvd), WithStatus(out)), fake, out
 }
 
 // fakeEnvd stands in for the cross-compiled guest daemon so tests do not depend
@@ -87,7 +87,7 @@ func TestNewRejectsInvalidSpec(t *testing.T) {
 
 func TestNewRequiresRunningInstance(t *testing.T) {
 	app, _, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
-		return []byte(`{"name":"cracklet","status":"Stopped"}` + "\n"), nil
+		return []byte(`{"name":"cracklet","status":"Broken"}` + "\n"), nil
 	})
 	_, err := app.NewVM(context.Background(), vm.Spec{Name: "vm1", VCPUs: 2, MemMiB: 1024, Disk: "2G"})
 	if err == nil || !strings.Contains(err.Error(), "cracklet prepare") {

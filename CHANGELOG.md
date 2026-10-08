@@ -7,6 +7,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- After a reboot of the Mac, any command that needs the Lima VM starts it
+  when it is stopped (once, even when several commands run in parallel; never
+  during a resize) instead of asking for `cracklet prepare`. The microVMs that
+  were running come back: `start`/`new` mark a VM, `stop` clears the mark, and
+  the agent's new `restore` boots the marked VMs once per boot of the Lima VM,
+  from the CLI and from `cracklet-restore.service`, which `prepare` installs.
+
 ## [0.0.1] - 2026-10-08
 
 First public release.

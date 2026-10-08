@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grants and capabilities – cracklet docs</title>
+  <meta name="description" content="How cracklet hands GitHub, Claude Code and MCP servers into a microVM without copying a single secret: the broker, grants, secrets and capability files in detail.">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#232323" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body>
+  <header class="container site-header">
+    <a class="brand" href="./">cracklet</a>
+    <nav class="site-nav" aria-label="Main navigation">
+      <a href="docs.html" aria-current="true">Docs</a>
+      <a href="https://github.com/itlabs-gmbh/cracklet">GitHub</a>
+      <a href="https://github.com/itlabs-gmbh/cracklet/issues">Issues</a>
+    </nav>
+  </header>
+
+  <main class="docs">
+    <nav class="docs-nav" aria-label="Documentation">
+      <a href="docs.html">Quickstart</a>
+      <a href="agents.html">Agent guides</a>
+      <a href="capabilities.html" aria-current="page">Grants &amp; capabilities</a>
+      <a href="https://github.com/itlabs-gmbh/cracklet#readme">README</a>
+    </nav>
+
+    <h1>Grants and capabilities</h1>
+    <p class="lead">A microVM is cut off from your Mac on purpose. When the agent inside needs GitHub, Claude Code or an MCP server that only runs on the Mac, cracklet opens one controlled hole: a broker that hands out connections, never secrets.</p>
+
+    <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ol>
+        <li><a href="#model">The model in one minute</a></li>
+        <li><a href="#request">What happens on a request</a></li>
+        <li><a href="#grants">Grant, inspect, revoke</a></li>
+        <li><a href="#reach">What a grant reaches</a></li>
+        <li><a href="#secrets">Secrets</a></li>
+        <li><a href="#lifetime">When the broker is up</a></li>
+        <li><a href="#builtin">Built-in capabilities</a></li>
+        <li><a href="#primitives">The three primitives</a></li>
+        <li><a href="#writing">Writing a capability</a></li>
+        <li><a href="#reference">Capability file reference</a></li>
+        <li><a href="#sharing">Sharing capabilities</a></li>
+        <li><a href="#audit">Audit log and denials</a></li>
+        <li><a href="#security">Security model</a></li>
+      </ol>
+    </nav>
+
+    <div class="prose">
+
+      <section id="model">
+        <h2>The model in one minute</h2>
+        <p>Four words carry the whole design. Keep them apart and everything else follows.</p>
+        <div class="concepts">
+          <div class="concept">
+            <h3>capability</h3>
+            <p>A TOML file that says <strong>how</strong> something reaches the guest: what the broker does on the Mac and what the guest needs to use it. Ships for <code>claude</code> and <code>github</code>; yours live in <code>~/.cracklet/caps</code>.</p>
+          </div>
+          <div class="concept">
+            <h3>grant</h3>
+            <p>A line in a per-VM file that says <strong>whether</strong> a microVM may use a capability, by name, such as <code>github</code>. Default is deny. How far it reaches is up to the credential.</p>
+          </div>
+          <div class="concept">
+            <h3>broker</h3>
+            <p>A process on the Mac, one per VM, that <strong>enforces</strong> the grants. It exists only while a <code>cracklet ssh</code>, <code>exec</code> or <code>tunnel</code> session for that VM is open.</p>
+          </div>
+          <div class="concept">
+            <h3>secret</h3>
+            <p>A credential in the macOS Keychain (or env, file, command) that the broker <strong>injects</strong> into upstream requests. It never enters the guest; the guest holds a placeholder.</p>
+          </div>
+        </div>
+        <p>So a capability file never decides who may use it, and a grant never contains a credential. Policy (<code>~/.cracklet/vms/&lt;vm&gt;/grants</code>), enforcement (the broker) and secrets (the Keychain) all stay on the Mac, next to each other. Nothing in the guest is worth stealing.</p>
+      </section>
+
+      <section id="request">
+        <h2>What happens on a request</h2>
+        <p>Say Claude Code inside the microVM <code>agent1</code> sends a message. It was configured by the <code>claude</code> capability to talk to <code>http://127.0.0.1:7777/claude</code>:</p>
+<pre class="code"><span class="dim">microVM agent1</span>                                  <span class="dim">your Mac</span>
+claude ──► 127.0.0.1:7777/claude/v1/messages
+           <span class="dim">Authorization: Bearer sk-ant-oat01-&lt;placeholder&gt;</span>
+               │
+               │  ssh -R  <span class="dim">(cracklet ssh / exec / tunnel)</span>
+               ▼
+           ~/.cracklet/run/agent1.sock ──► <span class="hl">broker(agent1)</span>
+                                              1 canonical path?
+                                              2 which capability?
+                                              3 granted?  <span class="dim">(grants file, re-read)</span>
+                                              4 drop guest credentials,
+                                                inject the real token
+                                              5 write audit line
+                                              │
+                                              ▼
+                                         https://api.anthropic.com/v1/messages</pre>
+        <ol class="steps">
+          <li><strong>Path check.</strong> The path must have exactly one reading: no percent-encoding, no backslashes, no <code>.</code> or <code>..</code> segments, no empty segments, nothing that changes under cleaning. Otherwise the broker answers <code>400</code>, so the broker and the upstream always read the same path.</li>
+          <li><strong>Locate the capability.</strong> Either from the first path segment (<code>/claude/…</code>, <code>/github/…</code>) or, for clients that keep the real host name, from the <code>Host</code> header through a <a href="#routes">route</a>. Unknown names get <code>404</code> with the hint <code>cracklet cap ls</code>.</li>
+          <li><strong>Check the grant.</strong> The VM's grants file is read on every request, so a <code>cracklet grant</code> or <code>revoke</code> in another terminal applies to the very next request of a running broker. A miss is a <code>403</code> with the exact command that would allow it.</li>
+          <li><strong>Hand over the connection.</strong> For a proxy, credential headers the guest sent are always removed, then the header templates are rendered with the real secret and the request goes upstream over TLS. Responses stream back as they arrive.</li>
+          <li><strong>Audit.</strong> One line per request in <code>~/.cracklet/audit.log</code>: time, VM, capability, decision, method, path, status.</li>
+        </ol>
+      </section>
+
+      <section id="grants">
+        <h2>Grant, inspect, revoke</h2>
+        <p>Store the credential once, then grant capabilities per VM. Several grants fit in one command:</p>
+        <div class="cmd" data-copy="cracklet secret set claude-token">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet secret set claude-token</span>
+          <button type="button" aria-label="Copy cracklet secret set claude-token to the clipboard"></button>
+        </div>
+        <div class="cmd" data-copy="cracklet grant agent1 claude github ssh-agent">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet grant agent1 claude github ssh-agent</span>
+          <button type="button" aria-label="Copy the grant command to the clipboard"></button>
+        </div>
+        <div class="cmd" data-copy="cracklet grants agent1">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet grants agent1</span>
+          <button type="button" aria-label="Copy cracklet grants agent1 to the clipboard"></button>
+        </div>
+        <div class="cmd" data-copy="cracklet revoke agent1 github">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet revoke agent1 github</span>
+          <button type="button" aria-label="Copy the revoke command to the clipboard"></button>
+        </div>
+        <p>Or grant while creating the VM: <code>cracklet new agent1 --grant claude --grant github</code>. <code>cracklet ls</code> shows the grants of every VM in the <code>GRANTS</code> column.</p>
+
+        <h3>What <code>grant</code> does</h3>
+        <ol>
+          <li>Checks that every capability exists. A grant written as <code>cap:something</code> is refused: capabilities have no scopes.</li>
+          <li>Takes a per-VM lock, so two grants or a grant and a revoke running at the same time cannot lose each other's change.</li>
+          <li>Renders the guest configuration of all granted capabilities and applies it over SSH: environment variables, files, managed blocks, JSON merges and the broker socket relay.</li>
+          <li>Only then saves the grant. A provisioning failure never leaves a silent allow behind. The VM therefore has to be running when you grant.</li>
+        </ol>
+        <p><code>revoke</code> runs the other way round: it removes the grant first, then removes exactly the configuration that capability had added to the guest (env lines, files, its managed block in a shared file such as <code>/etc/gitconfig</code>). Settings you made yourself in those files stay.</p>
+
+        <h3>Where grants live</h3>
+        <p>One directory per VM under <code>~/.cracklet/vms/&lt;vm&gt;/</code> on the Mac, with a <code>grants</code> file (one grant per line) and the VM's placeholder <code>token</code>. <code>cracklet rm</code> deletes both. A new VM that reuses the name starts with no grants at all; <code>cracklet gc</code> removes state left behind for VMs that no longer exist.</p>
+      </section>
+
+      <section id="reach">
+        <h2>What a grant reaches</h2>
+        <p>A grant is just the name of a capability: <code>claude</code>, <code>github</code>, <code>chrome-devtools</code>. There are no scopes. The broker does not try to read request paths to decide which repository or project a call touches; the <strong>credential</strong> behind the capability decides that, and the upstream enforces it.</p>
+        <p>That is the more reliable boundary. An API knows exactly which resources a token may reach, including through GraphQL, search and endpoints that act beyond one repository, while a proxy that parses paths always lags behind the API it guards.</p>
+        <div class="callout">
+          <p>Grant a capability, then make the secret behind it as narrow as the task: a fine-grained GitHub token for the repositories the agent may touch, a per-project API key, a key with a spending limit.</p>
+        </div>
+
+        <h3>GitHub in practice</h3>
+        <p>Create a <strong>fine-grained</strong> token on github.com and select only the repositories the agent should work on. Give it the permissions the agent needs and no more:</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>In the guest</th><th>Token permission</th></tr></thead>
+            <tbody>
+              <tr><td><code>git clone</code>, <code>git fetch</code></td><td>Contents: read</td></tr>
+              <tr><td><code>git push</code></td><td>Contents: read and write</td></tr>
+              <tr><td><code>gh pr create</code>, <code>gh pr list</code>, <code>gh pr view</code></td><td>Pull requests: read and write</td></tr>
+              <tr><td><code>gh issue …</code></td><td>Issues: read and write</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>With <code>cracklet grant agent1 github</code>, git and gh in the guest then reach exactly those repositories with exactly those permissions, whichever endpoint they call. The <code>github</code> capability uses one token for every VM it is granted to, so every such VM reaches the same repositories; when a task needs other repositories, change the token's repository selection on github.com.</p>
+
+        <h3>Grants from earlier versions</h3>
+        <p>Grants files written while cracklet still had scopes (<code>github:acme/app</code>, <code>github:*</code>) keep working: the scope is dropped when the file is read, and the next change writes the plain name. A new grant with a scope is refused with a hint to limit the credential instead.</p>
+      </section>
+
+      <section id="secrets">
+        <h2>Secrets</h2>
+        <p>Capabilities refer to credentials by reference, never by value. Four schemes exist:</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Reference</th><th>Resolves to</th></tr></thead>
+            <tbody>
+              <tr><td><code>keychain:cracklet/NAME</code></td><td>the macOS Keychain item with service <code>cracklet</code>, account <code>NAME</code>. This is what <code>cracklet secret set NAME</code> writes.</td></tr>
+              <tr><td><code>env:VAR</code></td><td>an environment variable of the cracklet process on the Mac</td></tr>
+              <tr><td><code>cmd:shell command</code></td><td>the stdout of <code>sh -c</code> on the Mac, e.g. a password manager CLI</td></tr>
+              <tr><td><code>file:/path</code></td><td>the content of a file on the Mac</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="cmd" data-copy="cracklet secret set github-token">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet secret set github-token</span>
+          <button type="button" aria-label="Copy cracklet secret set github-token to the clipboard"></button>
+        </div>
+        <div class="cmd" data-copy='echo "$TOKEN" | cracklet secret set github-token'>
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">echo "$TOKEN" | cracklet secret set github-token</span>
+          <button type="button" aria-label="Copy the piped secret set command to the clipboard"></button>
+        </div>
+        <p><code>secret set</code> prompts without echo on a terminal and reads the first line of stdin otherwise. The value never appears in a process argument list. Empty and multi-line values are refused. <code>cracklet secret rm NAME</code> deletes it again.</p>
+        <ul>
+          <li><strong>Resolved on the Mac, at request time.</strong> Values are cached for 60 seconds, so a rotated token is picked up without a Keychain call per request. Failed lookups are cached for 5 seconds, so a burst of guest requests does not become a burst of Keychain prompts.</li>
+          <li><strong>Broker side only.</strong> <code>{{ secret "…" }}</code> works in <code>proxy.headers</code> and route headers. In any <code>[guest]</code> value it is an error, and <code>cracklet cap lint</code> says so.</li>
+          <li><strong>Literal references only.</strong> <code>{{ secret "keychain:cracklet/x" }}</code> is fine; a reference computed from data such as <code>.VM</code> is rejected. That way the secrets a file uses can be listed before you install it, and cannot change at runtime.</li>
+          <li><strong>Basic auth</strong> is a pipe away: <code>{{ secret "keychain:cracklet/github-token" | basicauth "x-access-token" }}</code> encodes <code>user:secret</code> in base64.</li>
+        </ul>
+      </section>
+
+      <section id="lifetime">
+        <h2>When the broker is up</h2>
+        <p>The broker lives exactly as long as a session that carries it. Close the terminal and the hole closes with it.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Session</th><th>Broker</th></tr></thead>
+            <tbody>
+              <tr><td><code>cracklet ssh agent1</code></td><td>yes, for the session's lifetime</td></tr>
+              <tr><td><code>cracklet exec agent1 -- cmd</code></td><td>yes, for the command's lifetime</td></tr>
+              <tr><td><code>cracklet tunnel agent1</code></td><td>yes, until Ctrl-C or the VM stops; reconnects on its own</td></tr>
+              <tr><td><code>ssh agent1.cracklet</code>, VS Code Remote, an agent runner</td><td><strong>no</strong> – run <code>cracklet tunnel agent1</code> alongside</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>While it runs, the broker listens on <code>~/.cracklet/run/&lt;vm&gt;.sock</code> (mode <code>0600</code>) and ssh forwards that socket to <code>127.0.0.1:7777</code> in the guest. ssh runs with <code>ExitOnForwardFailure</code>, so a process squatting on port 7777 in the guest makes the session fail instead of silently running without a tunnel.</p>
+        <p>For clients that only speak HTTP over a Unix socket (such as <code>gh</code>), the guest additionally gets <code>/run/cracklet/broker.sock</code>: a systemd socket that relays to port 7777. It exists while any capability is granted; without an open session its connections are refused.</p>
+
+        <h3>Several sessions, one broker</h3>
+        <p>Each VM has exactly one broker, owned by one process through a lock. A second <code>cracklet ssh</code> notices the owner and uses its broker instead of forwarding a second time. If the owner ends first, a remaining session takes over within about two seconds. A forward is only ever made by the owner, so none can outlive the broker it points to.</p>
+
+        <h3><code>cracklet tunnel</code></h3>
+        <div class="cmd" data-copy="cracklet tunnel agent1">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet tunnel agent1</span>
+          <button type="button" aria-label="Copy cracklet tunnel agent1 to the clipboard"></button>
+        </div>
+        <p>Holds only the forward, no shell. It detects a dead connection within about 45 seconds, reconnects with a backoff from 5 seconds up to one minute, logs <code>tunnel=open</code> and <code>tunnel=closed</code> to the audit log, and ends when the VM stops. It refuses to start for a VM without broker grants.</p>
+
+        <h3>The <code>ssh-agent</code> grant</h3>
+        <p><code>ssh-agent</code> is built in and has no capability file. It adds <code>ssh -A</code> to <code>cracklet ssh</code> and <code>exec</code>, so the guest can sign with your Mac's SSH keys without holding them. Add keys with <code>ssh-add -c</code> to confirm every single signature on the Mac.</p>
+      </section>
+
+      <section id="builtin">
+        <h2>Built-in capabilities</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Grant</th><th>Primitive</th><th>What the guest gets</th></tr></thead>
+            <tbody>
+              <tr><td><code>claude</code></td><td>proxy → <code>api.anthropic.com</code></td><td><code>ANTHROPIC_BASE_URL</code> pointing at the broker, <code>CLAUDE_CODE_OAUTH_TOKEN</code> set to a placeholder, onboarding marked done in <code>/root/.claude.json</code>. Secret: <code>claude-token</code> from <code>claude setup-token</code>.</td></tr>
+              <tr><td><code>github</code></td><td>proxy → <code>github.com</code>, route for <code>api.github.com</code></td><td>a managed block in <code>/etc/gitconfig</code> that rewrites <code>https://github.com/</code> and <code>git@github.com:</code> to the broker; <code>http_unix_socket</code> and a placeholder token in gh's <code>hosts.yml</code>, which gh reads on every call. Secret: <code>github-token</code>.</td></tr>
+              <tr><td><code>ssh-agent</code></td><td>built in</td><td><code>ssh -A</code> agent forwarding</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>See the exact files with <code>cracklet cap show claude</code>, and what one specific VM receives with <code>cracklet cap show github --render --vm agent1</code>. A file of the same name in <code>~/.cracklet/caps</code> replaces a built-in one.</p>
+        <p>Claude Code runs unmodified and sends exactly the headers of a normal subscription login; the broker only swaps the token. Usage counts against your own plan. Anthropic's terms allow signing in to the unmodified binary with your own subscription, including in sandboxes you run, but not routing other people's requests through your account. Keep the broker personal.</p>
+        <p>GitHub downloads that redirect to other hosts (<code>gh release download</code>) do not work through the broker, and percent-encoded paths are refused.</p>
+      </section>
+
+      <section id="primitives">
+        <h2>The three primitives</h2>
+        <p>The broker itself knows nothing about Claude, GitHub or any other tool. It has three primitives; every tool-specific detail lives in a capability file. Each file uses exactly one.</p>
+
+        <h3 id="proxy"><code>[proxy]</code> – inject credentials, forward the request</h3>
+        <p>Requests to <code>/&lt;cap&gt;/rest</code> go to <code>upstream</code> + <code>/rest</code>. Use it for any HTTP API that authenticates with a header.</p>
+        <ul>
+          <li>The upstream must be <code>https://</code>. Plain <code>http://</code> is only accepted for <code>localhost</code>, <code>127.0.0.1</code> and <code>::1</code>, because the broker attaches credentials.</li>
+          <li>The guest's own credential headers are always removed: <code>Authorization</code>, <code>Proxy-Authorization</code>, <code>Cookie</code>, <code>X-Api-Key</code>, <code>Api-Key</code>, <code>X-Auth-Token</code>, <code>Private-Token</code>, <code>X-Github-Token</code>, <code>X-Goog-Api-Key</code>, <code>X-Amz-Security-Token</code>, <code>X-Access-Token</code>. A guest can neither smuggle its own credential upstream nor override the injected one.</li>
+          <li><code>strip_headers</code> removes more. <code>allow_headers</code> turns the filter into an allow list; <code>Content-Type</code>, <code>Content-Length</code>, <code>Content-Encoding</code>, <code>Accept</code> and <code>Accept-Encoding</code> always survive.</li>
+          <li id="routes"><code>[[proxy.routes]]</code> serve clients that cannot take a base URL but can be pointed at a Unix socket, such as gh through <code>.BrokerSocket</code>: they keep their real host name and path, and the broker picks the route by the <code>Host</code> header, with its own upstream and headers. Route hosts must be public DNS names, never an IP or <code>localhost</code>, and each host may be routed by one capability only, so no capability can catch the requests of another.</li>
+          <li>Responses are flushed as they arrive, so server-sent events and streaming completions work.</li>
+          <li>If the upstream is unreachable or a secret cannot be resolved, the guest gets a generic <code>502</code>; the details are in the audit log on the Mac.</li>
+        </ul>
+
+        <h3 id="mcp"><code>[mcp]</code> – an MCP server on the Mac, as HTTP in the guest</h3>
+        <p>Runs a stdio MCP server on your Mac and serves it to the guest as a Streamable HTTP endpoint at <code>/&lt;cap&gt;</code>. Use it for tools that need the Mac: your browser, your local apps, your files.</p>
+        <ul>
+          <li>The server starts lazily on the first request and stops when the broker closes.</li>
+          <li>Every <code>POST</code> carries one JSON-RPC message. Requests are answered with their response, notifications with <code>202</code>. Request IDs are rewritten on the way in and back on the way out, so several clients in the guest cannot collide.</li>
+          <li>Server-initiated requests (sampling, elicitation) are not supported and are answered with a JSON-RPC error; <code>GET</code> answers <code>405</code>.</li>
+          <li>A request may take up to five minutes. The server's stderr goes to the audit log.</li>
+        </ul>
+        <div class="callout">
+          <p>An MCP capability runs code on your Mac, outside the microVM. Pin versions (<code>chrome-devtools-mcp@1.10.1</code>, not <code>@latest</code>) and bump them deliberately.</p>
+        </div>
+
+        <h3 id="exec"><code>[exec]</code> – run a program per request</h3>
+        <p>Runs a program on the Mac for every request at <code>/&lt;cap&gt;/…</code>: the request body goes to stdin, stdout becomes the response body. Use it when the guest should get an <em>answer</em> computed with a credential, never the credential itself.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Variable</th><th>Value</th></tr></thead>
+            <tbody>
+              <tr><td><code>CRACKLET_VM</code></td><td>the VM name</td></tr>
+              <tr><td><code>CRACKLET_CAP</code></td><td>the capability name</td></tr>
+              <tr><td><code>CRACKLET_METHOD</code>, <code>CRACKLET_PATH</code>, <code>CRACKLET_QUERY</code></td><td>the request line, path without the <code>/&lt;cap&gt;</code> prefix</td></tr>
+              <tr><td><code>CRACKLET_CONTENT_TYPE</code></td><td>the request's <code>Content-Type</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Limits: 8 MiB in, 8 MiB out, two minutes per call, four concurrent runs per capability. A non-zero exit becomes a generic <code>502</code> in the guest, with the last stderr line in the audit log. Whatever the program prints lands in the VM, so never print a token.</p>
+      </section>
+
+      <section id="writing">
+        <h2>Writing a capability</h2>
+        <p>Say an agent in the guest uses an OpenAI-compatible SDK that honours <code>OPENAI_BASE_URL</code>. Start from the commented skeleton:</p>
+        <div class="cmd" data-copy="cracklet cap init openai">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet cap init openai</span>
+          <button type="button" aria-label="Copy cracklet cap init openai to the clipboard"></button>
+        </div>
+        <p>Edit <code>~/.cracklet/caps/openai.toml</code> down to what you need:</p>
+        <p class="code-title">~/.cracklet/caps/openai.toml</p>
+<pre class="code">name = "openai"
+description = "OpenAI API via the broker, key stays on the Mac"
+
+[proxy]
+upstream = "https://api.openai.com"
+[proxy.headers]
+Authorization = "Bearer {{ secret \"keychain:cracklet/openai-token\" }}"
+
+[guest.env]
+OPENAI_BASE_URL = "{{ .BrokerURL }}/openai/v1"
+<span class="dim"># SDKs refuse to start without a key; the broker replaces it anyway.</span>
+OPENAI_API_KEY = "{{ .PseudoToken }}"</pre>
+        <p>Then lint it, store the key, check what the guest will receive and grant it:</p>
+        <div class="cmd" data-copy="cracklet cap lint openai">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet cap lint openai</span>
+          <button type="button" aria-label="Copy cracklet cap lint openai to the clipboard"></button>
+        </div>
+        <div class="cmd" data-copy="cracklet secret set openai-token">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet secret set openai-token</span>
+          <button type="button" aria-label="Copy cracklet secret set openai-token to the clipboard"></button>
+        </div>
+        <div class="cmd" data-copy="cracklet cap show openai --render --vm agent1">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet cap show openai --render --vm agent1</span>
+          <button type="button" aria-label="Copy the cap show render command to the clipboard"></button>
+        </div>
+        <div class="cmd" data-copy="cracklet grant agent1 openai">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet grant agent1 openai</span>
+          <button type="button" aria-label="Copy cracklet grant agent1 openai to the clipboard"></button>
+        </div>
+        <p>Two more complete examples ship in the repository: <a href="https://github.com/itlabs-gmbh/cracklet/blob/main/examples/caps/chrome-devtools.toml"><code>chrome-devtools.toml</code></a> bridges the Chrome DevTools MCP server from the Mac, <a href="https://github.com/itlabs-gmbh/cracklet/blob/main/examples/caps/gh-api.toml"><code>gh-api.toml</code></a> answers read-only GitHub API calls with <code>gh</code> on the Mac through <code>exec</code>.</p>
+
+        <h3>Template data</h3>
+        <p>Every guest string and every header is a Go template with these fields:</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Field</th><th>Value</th></tr></thead>
+            <tbody>
+              <tr><td><code>{{ .VM }}</code></td><td>the VM name</td></tr>
+              <tr><td><code>{{ .BrokerURL }}</code></td><td><code>http://127.0.0.1:7777</code>, the broker as seen from the guest</td></tr>
+              <tr><td><code>{{ .BrokerSocket }}</code></td><td><code>/run/cracklet/broker.sock</code>, for clients that only take a Unix socket</td></tr>
+              <tr><td><code>{{ .PseudoToken }}</code></td><td>a random per-VM placeholder for clients that insist on a token. The broker never checks it: the tunnel is the identity.</td></tr>
+              <tr><td><code>{{ secret "ref" }}</code></td><td>broker side only, see <a href="#secrets">Secrets</a></td></tr>
+              <tr><td><code>… | basicauth "user"</code></td><td>base64 of <code>user:value</code> for HTTP Basic</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Unknown fields are errors, so a typo such as <code>.BrokerUrl</code> is caught by <code>lint</code> instead of rendering empty.</p>
+
+        <h3>How the guest is configured</h3>
+        <ul>
+          <li><strong><code>guest.env</code></strong> goes into <code>/etc/environment</code>, which pam_env reads for every SSH session, interactive or not. Processes that were already running, such as a daemon, only see it after a restart; if a tool can read its settings from a file instead, prefer a file or block.</li>
+          <li><strong><code>guest.files</code></strong> are written whole, with an optional octal <code>mode</code>.</li>
+          <li><strong><code>guest.blocks</code></strong> are managed sections inside files other tools also write, such as <code>/etc/gitconfig</code>. Marker comments name the capability, so several capabilities can share one file and <code>revoke</code> removes exactly its own block. <code>comment</code> picks the marker syntax: <code>#</code> (default), <code>;</code> or <code>//</code>.</li>
+          <li><strong><code>guest.json_merge</code></strong> sets one dotted key in a JSON file, creating the file if needed. Use it for <code>mcpServers.&lt;name&gt;</code> in <code>/root/.claude.json</code>.</li>
+        </ul>
+        <p>Everything is rendered on the Mac and applied over SSH with plain POSIX tools, so the guest image needs nothing cracklet-specific. Two granted capabilities may not set the same variable, file or JSON key; <code>grant</code> refuses the combination and names both.</p>
+      </section>
+
+      <section id="reference">
+        <h2>Capability file reference</h2>
+        <p>One file per capability in <code>~/.cracklet/caps/&lt;name&gt;.toml</code>. Unknown keys are errors, so typos surface at <code>lint</code>.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Key</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><td><code>name</code></td><td>required; lowercase letters, digits and dashes, starting with a letter, at most 32 characters. Must equal the file name without <code>.toml</code>.</td></tr>
+              <tr><td><code>description</code></td><td>shown by <code>cracklet cap ls</code></td></tr>
+              <tr><td><code>[proxy] upstream</code></td><td>base URL, <code>https://</code> (or <code>http://</code> on loopback)</td></tr>
+              <tr><td><code>[proxy.headers]</code></td><td>header name → template; may use <code>secret</code></td></tr>
+              <tr><td><code>proxy.strip_headers</code></td><td>extra guest headers to remove</td></tr>
+              <tr><td><code>proxy.allow_headers</code></td><td>if set, the only guest headers passed through (plus the always-kept five)</td></tr>
+              <tr><td><code>[[proxy.routes]] host</code></td><td>a public DNS name with a dot; no IPs, no <code>localhost</code>. Each host may be routed by one capability only.</td></tr>
+              <tr><td><code>routes.upstream</code>, <code>[proxy.routes.headers]</code></td><td>like the proxy's own; <code>strip_headers</code>/<code>allow_headers</code> apply as well</td></tr>
+              <tr><td><code>[mcp] command</code>, <code>args</code>, <code>env</code></td><td>the stdio MCP server to run on the Mac</td></tr>
+              <tr><td><code>[exec] command</code>, <code>args</code></td><td>the program to run per request on the Mac</td></tr>
+              <tr><td><code>[guest.env]</code></td><td>variable → template; names <code>[A-Z_][A-Z0-9_]*</code></td></tr>
+              <tr><td><code>[[guest.files]] path</code>, <code>mode</code>, <code>content</code></td><td>absolute path, octal mode like <code>0644</code></td></tr>
+              <tr><td><code>[[guest.blocks]] path</code>, <code>comment</code>, <code>content</code></td><td>managed section; <code>comment</code> is <code>#</code>, <code>;</code> or <code>//</code></td></tr>
+              <tr><td><code>[[guest.json_merge]] path</code>, <code>key</code>, <code>value</code></td><td>dotted key; <code>value</code> is any TOML value, strings are templated</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td><code>cracklet cap ls</code></td><td>every capability with kind, source and description, plus <code>ssh-agent</code></td></tr>
+              <tr><td><code>cracklet cap show NAME</code></td><td>the TOML source, embedded or yours</td></tr>
+              <tr><td><code>cracklet cap show NAME --render [--vm VM]</code></td><td>the env, files, blocks and JSON merges a guest would receive</td></tr>
+              <tr><td><code>cracklet cap init NAME</code></td><td>write a commented skeleton to <code>~/.cracklet/caps</code></td></tr>
+              <tr><td><code>cracklet cap lint [NAME]</code></td><td>validate one file, or all of yours together</td></tr>
+              <tr><td><code>cracklet cap add URL [-y]</code></td><td>download, review and install, see below</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="sharing">
+        <h2>Sharing capabilities</h2>
+        <p>A capability is one self-contained file, so it can be shared by URL:</p>
+        <div class="cmd" data-copy="cracklet cap add https://example.com/gemini.toml">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet cap add https://example.com/gemini.toml</span>
+          <button type="button" aria-label="Copy the cap add example to the clipboard"></button>
+        </div>
+        <p>Before anything is installed, cracklet prints the file and a plain-language summary of what it would do with your secrets and your Mac, then asks:</p>
+<pre class="code"><span class="dim">=&gt;</span> gemini proxies guest requests to https://generativelanguage.googleapis.com
+<span class="dim">   and sends the secret</span> keychain:cracklet/gemini-token <span class="dim">in the</span> X-Goog-Api-Key <span class="dim">header</span>
+install as ~/.cracklet/caps/gemini.toml? [y/N]</pre>
+        <ul>
+          <li>Only <code>https://</code> URLs and redirects, at most 256 KiB.</li>
+          <li>A downloaded file may not replace a built-in capability: a remote <code>claude.toml</code> could otherwise point your stored token at any upstream. Overriding a built-in stays a manual copy.</li>
+          <li>It may not route a host another installed capability already routes.</li>
+          <li>Control characters and Unicode format characters are stripped from the preview, so nothing can hide lines from your review.</li>
+          <li>Installing does not grant anything. You still decide per VM with <code>cracklet grant</code>.</li>
+        </ul>
+      </section>
+
+      <section id="audit">
+        <h2>Audit log and denials</h2>
+        <div class="cmd" data-copy="tail -f ~/.cracklet/audit.log">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">tail -f ~/.cracklet/audit.log</span>
+          <button type="button" aria-label="Copy the audit log tail command to the clipboard"></button>
+        </div>
+<pre class="code">2026-10-08T09:10:02Z vm=agent1 tunnel=open
+2026-10-08T09:12:44Z vm=agent1 cap=github <span class="hl">allow</span> GET "/github/acme/app/info/refs" 200
+2026-10-08T09:12:51Z vm=agent1 cap=claude <span class="hl">allow</span> POST "/claude/v1/messages" 200
+2026-10-08T09:13:05Z vm=agent2 cap=github <span class="hl">denied</span> GET "/github/acme/app/info/refs" 403</pre>
+        <p>The decision is one of <code>allow</code>, <code>denied</code>, <code>unknown cap</code>, <code>no cap</code>, <code>unsafe path</code>, <code>grants</code> or <code>setup</code>. Host-side diagnostics, such as a missing Keychain item or an MCP server's stderr, appear as indented lines underneath. The guest only ever sees a generic message, so paths, commands and item names stay on the Mac.</p>
+        <p>A denied request tells the guest exactly what would allow it, which also tells an agent what to ask you for:</p>
+<pre class="code">$ curl -s 127.0.0.1:7777/github/acme/app/info/refs
+{"error":"github is not granted to agent2","hint":"cracklet grant agent2 github"}</pre>
+      </section>
+
+      <section id="security">
+        <h2>Security model</h2>
+        <h3>What the design guarantees</h3>
+        <ul>
+          <li><strong>No credential in the guest.</strong> The guest holds a placeholder that is worth nothing outside the tunnel. A copied disk, a leaked environment, a malicious dependency: none of them yields a token.</li>
+          <li><strong>The connection is the identity.</strong> Each VM's broker listens on its own socket on the Mac, and the only way in from a guest is that VM's own ssh forward. One VM can never present itself as another.</li>
+          <li><strong>Default deny, re-checked per request.</strong> A revoke applies to the next request, not the next session.</li>
+          <li><strong>Time-boxed.</strong> No session, no broker. The hole is open while you are working with the VM, not while it merely runs.</li>
+          <li><strong>Reviewable.</strong> The secrets a capability can send are fixed in its file and shown before installation; upstreams must use TLS; route hosts cannot be <code>localhost</code> or an IP and cannot catch another capability's traffic.</li>
+        </ul>
+        <h3>What it does not do</h3>
+        <ul>
+          <li><strong>Limit the upstream.</strong> With a capability granted, the guest can do whatever its token allows. The token is the boundary: use fine-grained GitHub tokens and per-project API keys.</li>
+          <li><strong>Tell processes apart inside the guest.</strong> While the tunnel is open, any process in the VM can use what the VM was granted. One VM per task keeps that blast radius small.</li>
+          <li><strong>Sandbox <code>mcp</code> and <code>exec</code>.</strong> Those programs run on your Mac with your user's rights. Read them before you install them and pin their versions.</li>
+          <li><strong>Hide what the agent saves itself.</strong> If an agent logs in inside the VM on its own, that credential is on the VM's disk like any other file.</li>
+        </ul>
+      </section>
+
+    </div>
+
+    <nav class="next" aria-label="Read next">
+      <a href="agents.html"><span>Guide</span><strong>Run Claude Code, git and MCPs in a microVM</strong></a>
+      <a href="docs.html"><span>Quickstart</span><strong>Install cracklet and start a microVM</strong></a>
+    </nav>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <a href="./">cracklet</a>
+      <span aria-hidden="true">·</span>
+      <a href="docs.html">Docs</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/itlabs-gmbh/cracklet">GitHub</a>
+      <span aria-hidden="true">·</span>
+      <a href="impressum.html">Impressum</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://www.it-labs.de">IT-Labs GmbH</a>
+    </div>
+  </footer>
+
+  <script src="copy.js" defer></script>
+</body>
+</html>

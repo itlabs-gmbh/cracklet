@@ -1,11 +1,14 @@
-/* cracklet website – design tokens modelled on a neutral shadcn palette */
+/* cracklet website – design tokens modelled on a neutral shadcn palette,
+   with one ember accent (Firecracker) as the brand colour */
 :root {
   --background: oklch(100% 0 0);
   --foreground: oklch(14.5% 0 0);
   --card: oklch(100% 0 0);
   --muted-foreground: oklch(55.6% 0 0);
   --border: oklch(92.2% 0 0);
-  --accent: oklch(79.5% .184 86.047);
+  --muted: oklch(97% .006 60);
+  --accent: oklch(64% .2 40);
+  --accent-soft: oklch(64% .2 40 / .12);
   --radius: .375rem;
   --max-width: 64rem;
   --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -20,6 +23,9 @@
     --card: oklch(20.5% 0 0);
     --muted-foreground: oklch(70.8% 0 0);
     --border: oklch(100% 0 0 / .1);
+    --muted: oklch(19% .008 60);
+    --accent: oklch(74% .17 52);
+    --accent-soft: oklch(74% .17 52 / .14);
   }
 }
 
@@ -42,6 +48,8 @@ body {
 
 a { color: inherit; text-decoration: none; }
 a:hover { color: var(--foreground); }
+
+::selection { background: var(--accent-soft); }
 
 code, .mono { font-family: var(--font-mono); }
 p code { font-size: .9em; }
@@ -66,10 +74,22 @@ h1, h2, h3 { margin: 0; letter-spacing: -.01em; }
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
   font-family: var(--font-mono);
   font-size: .875rem;
   font-weight: 600;
   letter-spacing: -.01em;
+}
+
+.brand::before {
+  content: "";
+  width: .5rem;
+  height: .5rem;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 .5rem var(--accent);
 }
 
 .site-nav {
@@ -78,6 +98,14 @@ h1, h2, h3 { margin: 0; letter-spacing: -.01em; }
   font-family: var(--font-mono);
   font-size: .875rem;
   color: var(--muted-foreground);
+}
+.site-nav a[aria-current="page"],
+.site-nav a[aria-current="true"] {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 6px;
 }
 
 main { flex: 1; display: flex; flex-direction: column; }
@@ -100,7 +128,8 @@ main { flex: 1; display: flex; flex-direction: column; }
   align-items: center;
   height: 1.25rem;
   padding: 0 .5rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
   font-family: var(--font-mono);
   font-size: .75rem;
   font-weight: 500;
@@ -142,7 +171,7 @@ main { flex: 1; display: flex; flex-direction: column; }
   text-align: left;
 }
 
-.cmd .prompt { color: var(--muted-foreground); user-select: none; }
+.cmd .prompt { color: var(--accent); font-weight: 600; user-select: none; }
 .cmd .text { flex: 1; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
 
 .cmd button {
@@ -160,7 +189,11 @@ main { flex: 1; display: flex; flex-direction: column; }
 
 .hero .cmd { margin-top: 1rem; }
 .hero .hint { margin: 0 0 .75rem; font-size: .75rem; color: var(--muted-foreground); }
-.hero .hint a, .hint a, .link { text-decoration: underline; text-underline-offset: 2px; }
+.hero .hint a, .hint a, .link {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 2px;
+}
 
 /* terminal output block */
 .term {
@@ -231,7 +264,7 @@ section { border-top: 1px solid var(--border); }
 .card { min-width: 0; }
 .card h3, .card h2 {
   padding-top: 1rem;
-  border-top: 2px solid var(--foreground);
+  border-top: 2px solid var(--accent);
   font-size: 1rem;
   font-weight: 600;
 }
@@ -251,7 +284,7 @@ section { border-top: 1px solid var(--border); }
 .narrow { max-width: 36rem; }
 .narrow h2 {
   padding-top: 1rem;
-  border-top: 2px solid var(--foreground);
+  border-top: 2px solid var(--accent);
   font-size: 1.125rem;
   font-weight: 600;
 }
@@ -289,7 +322,7 @@ section { border-top: 1px solid var(--border); }
   line-height: 1.75;
   color: var(--muted-foreground);
 }
-.legal a { color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; }
+.legal a { color: var(--foreground); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 2px; }
 
 /* the legal page reuses .narrow for width only, not the ruled headings */
 .legal .narrow h2 { padding-top: 0; border-top: 0; }

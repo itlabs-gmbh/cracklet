@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent guides – cracklet docs</title>
+  <meta name="description" content="Run Claude Code and other coding agents in their own Firecracker microVM on your Mac, with GitHub, MCP servers and SSH keys handed in through the broker.">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#232323" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body>
+  <header class="container site-header">
+    <a class="brand" href="./">cracklet</a>
+    <nav class="site-nav" aria-label="Main navigation">
+      <a href="docs.html" aria-current="true">Docs</a>
+      <a href="https://github.com/itlabs-gmbh/cracklet">GitHub</a>
+      <a href="https://github.com/itlabs-gmbh/cracklet/issues">Issues</a>
+    </nav>
+  </header>
+
+  <main class="docs">
+    <nav class="docs-nav" aria-label="Documentation">
+      <a href="docs.html">Quickstart</a>
+      <a href="agents.html" aria-current="page">Agent guides</a>
+      <a href="capabilities.html">Grants &amp; capabilities</a>
+      <a href="https://github.com/itlabs-gmbh/cracklet#readme">README</a>
+    </nav>
+
+    <h1>Run your coding agent</h1>
+    <p class="lead">Give every agent its own microVM with root, a package manager and the freedom to run what it just wrote. Hand in Claude, GitHub and your Mac's MCP servers through the broker, never as copies.</p>
+
+    <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ol>
+        <li><a href="#workspace">Prepare the workspace</a></li>
+        <li><a href="#claude">Claude Code</a></li>
+        <li><a href="#github">GitHub: clone, push, PRs</a></li>
+        <li><a href="#mcp">MCP servers from your Mac</a></li>
+        <li><a href="#ssh-keys">SSH keys instead of tokens</a></li>
+        <li><a href="#other">Codex, Gemini and others</a></li>
+        <li><a href="#runners">Editors and agent runners</a></li>
+        <li><a href="#pools">Many agents, side by side</a></li>
+        <li><a href="#automation">Driving cracklet from a tool</a></li>
+        <li><a href="#leave">Before you leave</a></li>
+      </ol>
+    </nav>
+
+    <div class="prose">
+
+      <section id="workspace">
+        <h2>Prepare the workspace</h2>
+        <p>The <code>base</code> profile is a plain Ubuntu 24.04 with curl and python3. The <code>paseo</code> profile adds Node 22, Claude Code, git, gh, rsync and the paseo CLI on an 8 GiB disk, which is what most agent sessions want. Build it once:</p>
+        <div class="cmd" data-copy="cracklet prepare --profile paseo">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet prepare --profile paseo</span>
+          <button type="button" aria-label="Copy cracklet prepare --profile paseo to the clipboard"></button>
+        </div>
+        <p>From then on, a new agent VM restores a golden snapshot of that image in about three seconds:</p>
+        <div class="cmd" data-copy="cracklet new task-42 --profile paseo -p 3000">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet new task-42 --profile paseo -p 3000</span>
+          <button type="button" aria-label="Copy the create command to the clipboard"></button>
+        </div>
+        <p><code>-p 3000</code> brings the agent's dev server to <code>localhost:3000</code> on your Mac. Use one VM per task or per untrusted repository, not one VM for everything: whatever a VM is granted, every process in it can use while the broker is up.</p>
+        <div class="callout">
+          <p>The VM keeps no copy of your credentials, but the agent's own model traffic still goes to its provider. cracklet isolates the workspace; it does not change where inference happens.</p>
+        </div>
+      </section>
+
+      <section id="claude">
+        <h2>Claude Code</h2>
+        <p>Create a long-lived subscription token on the Mac and store it in the Keychain. This is a one-time step.</p>
+        <div class="cmd" data-copy="claude setup-token">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">claude setup-token</span>
+          <button type="button" aria-label="Copy claude setup-token to the clipboard"></button>
+        </div>
+        <div class="cmd" data-copy="cracklet secret set claude-token">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet secret set claude-token</span>
+          <button type="button" aria-label="Copy cracklet secret set claude-token to the clipboard"></button>
+        </div>
+        <p>Grant <code>claude</code> to the VM and open a session. The broker runs for as long as this terminal is open:</p>
+        <div class="cmd" data-copy="cracklet grant task-42 claude">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet grant task-42 claude</span>
+          <button type="button" aria-label="Copy cracklet grant task-42 claude to the clipboard"></button>
+        </div>
+        <div class="cmd" data-copy="cracklet ssh task-42">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet ssh task-42</span>
+          <button type="button" aria-label="Copy cracklet ssh task-42 to the clipboard"></button>
+        </div>
+        <p>Inside, just run <code>claude</code> in your project. No login screen: the grant set <code>ANTHROPIC_BASE_URL</code> to the broker and <code>CLAUDE_CODE_OAUTH_TOKEN</code> to a placeholder, and the broker swaps the placeholder for your token on every request. On the <code>base</code> profile, install Claude Code first with <code>curl -fsSL https://claude.ai/install.sh | bash</code>.</p>
+        <p>Usage draws on your own subscription like any other session. Anthropic's terms allow your own subscription in sandboxes you run, not routing other people's requests through your account, so keep the broker personal. Use <code>tmux</code> in the guest if the agent should survive a dropped session; it will lose the broker until you reconnect.</p>
+      </section>
+
+      <section id="github">
+        <h2>GitHub: clone, push, PRs</h2>
+        <p>Create a fine-grained token on github.com and select only the repositories the agent may touch, with <em>Contents: read and write</em> and, for <code>gh pr</code>, <em>Pull requests: read and write</em>. The token is the boundary: the agent reaches exactly those repositories, through git and gh alike. Store it once:</p>
+        <div class="cmd" data-copy="cracklet secret set github-token">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet secret set github-token</span>
+          <button type="button" aria-label="Copy cracklet secret set github-token to the clipboard"></button>
+        </div>
+        <p>Grant it to the VM. git in the guest then works with ordinary GitHub URLs, both <code>https://github.com/</code> and <code>git@github.com:</code>, and gh needs no login:</p>
+        <div class="cmd" data-copy="cracklet grant task-42 github">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet grant task-42 github</span>
+          <button type="button" aria-label="Copy the GitHub grant command to the clipboard"></button>
+        </div>
+        <div class="cmd" data-copy="git clone https://github.com/acme/app &amp;&amp; cd app">
+          <span class="prompt" aria-hidden="true">#</span>
+          <span class="text">git clone https://github.com/acme/app &amp;&amp; cd app</span>
+          <button type="button" aria-label="Copy the clone command to the clipboard"></button>
+        </div>
+        <p>Commits are authored inside the guest, so set <code>git config --global user.name</code> and <code>user.email</code> there. Which permission each command needs is in <a href="capabilities.html#reach">What a grant reaches</a>.</p>
+      </section>
+
+      <section id="mcp">
+        <h2>MCP servers from your Mac</h2>
+        <p>Some tools only make sense on the Mac: your browser, your local apps. An <code>mcp</code> capability runs the stdio server on the Mac and hands it to Claude Code in the guest as an HTTP MCP server. The repository ships one for Chrome DevTools:</p>
+        <div class="cmd" data-copy="curl -fsSL --create-dirs https://raw.githubusercontent.com/itlabs-gmbh/cracklet/main/examples/caps/chrome-devtools.toml -o ~/.cracklet/caps/chrome-devtools.toml">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">curl -fsSL --create-dirs https://raw.githubusercontent.com/itlabs-gmbh/cracklet/main/examples/caps/chrome-devtools.toml -o ~/.cracklet/caps/chrome-devtools.toml</span>
+          <button type="button" aria-label="Copy the download command to the clipboard"></button>
+        </div>
+        <div class="cmd" data-copy="cracklet cap lint chrome-devtools &amp;&amp; cracklet grant task-42 chrome-devtools">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet cap lint chrome-devtools &amp;&amp; cracklet grant task-42 chrome-devtools</span>
+          <button type="button" aria-label="Copy the lint and grant command to the clipboard"></button>
+        </div>
+        <p>The grant merges <code>mcpServers.chrome-devtools</code> into <code>/root/.claude.json</code> in the guest. The server starts on the first request. It runs on your Mac with your rights, which is why the example pins its version.</p>
+      </section>
+
+      <section id="ssh-keys">
+        <h2>SSH keys instead of tokens</h2>
+        <p>If the agent needs your SSH keys (a private git server, a deploy host), forward the agent instead of copying keys:</p>
+        <div class="cmd" data-copy="ssh-add -c ~/.ssh/id_ed25519">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">ssh-add -c ~/.ssh/id_ed25519</span>
+          <button type="button" aria-label="Copy the ssh-add command to the clipboard"></button>
+        </div>
+        <div class="cmd" data-copy="cracklet grant task-42 ssh-agent">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet grant task-42 ssh-agent</span>
+          <button type="button" aria-label="Copy the ssh-agent grant to the clipboard"></button>
+        </div>
+        <p><code>-c</code> makes macOS ask you to confirm every signature, so you see each time the agent uses a key.</p>
+      </section>
+
+      <section id="other">
+        <h2>Codex, Gemini and others</h2>
+        <p>Any agent whose CLI accepts a base URL or an API key from the environment can go through the broker. Write a capability with a <code>proxy</code> to the provider's API, put the real key in a header from the Keychain and point the CLI at <code>{{ .BrokerURL }}/&lt;name&gt;</code> with a placeholder key. <a href="capabilities.html#writing">Writing a capability</a> walks through a complete example.</p>
+        <div class="cmd" data-copy="cracklet cap init codex">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet cap init codex</span>
+          <button type="button" aria-label="Copy cracklet cap init codex to the clipboard"></button>
+        </div>
+        <p>Agents that insist on an interactive login with a browser or a device code can of course log in inside the VM. That works, but then the credential lives on the VM's disk; remove the VM when the task is done.</p>
+      </section>
+
+      <section id="runners">
+        <h2>Editors and agent runners</h2>
+        <p>With <code>Include ~/.cracklet/ssh_config</code> in your <code>~/.ssh/config</code>, every VM is a plain SSH host named <code>NAME.cracklet</code>, so VS Code Remote, rsync and agent runners with their own ssh session work unchanged. Plain ssh does <strong>not</strong> carry the broker, though. Keep it up in a second terminal:</p>
+        <div class="cmd" data-copy="cracklet tunnel task-42">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet tunnel task-42</span>
+          <button type="button" aria-label="Copy cracklet tunnel task-42 to the clipboard"></button>
+        </div>
+        <p>The tunnel reconnects if the connection drops and ends with Ctrl-C or when the VM stops. <code>cracklet ssh task-42</code> works alongside it and shares the same broker.</p>
+      </section>
+
+      <section id="pools">
+        <h2>Many agents, side by side</h2>
+        <p>VMs cannot reach each other, your Mac or your LAN; only the internet. Running several agents on different branches is just several VMs:</p>
+        <div class="cmd" data-copy="for n in a b c; do cracklet new agent-$n --profile paseo --grant claude --grant github; done">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">for n in a b c; do cracklet new agent-$n --profile paseo --grant claude --grant github; done</span>
+          <button type="button" aria-label="Copy the loop that creates three agent VMs to the clipboard"></button>
+        </div>
+        <p>All microVMs share the Lima VM's CPUs and memory. The defaults (4 CPUs, 8 GiB) fit about two or three task VMs at a time; grow it while no microVM runs with <code>cracklet prepare --cpus 8 --memory 16</code>.</p>
+
+        <h3>Pools owned by a tool</h3>
+        <p>A tool that keeps a pool of agent VMs labels them with an owner and a slot. <code>cracklet ls</code> shows both in <code>OWNER</code> and the age in <code>AGE</code>:</p>
+        <div class="cmd" data-copy="cracklet new paseo-3 --profile paseo --owner paseo --slot 3">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet new paseo-3 --profile paseo --owner paseo --slot 3</span>
+          <button type="button" aria-label="Copy the owned create command to the clipboard"></button>
+        </div>
+        <div class="cmd" data-copy="cracklet gc --owner paseo --keep paseo-1 --keep paseo-2">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet gc --owner paseo --keep paseo-1 --keep paseo-2</span>
+          <button type="button" aria-label="Copy the gc command to the clipboard"></button>
+        </div>
+        <p><code>gc</code> only removes VMs that have an owner; VMs you created by hand are never collected. <code>--older-than 7d</code> selects by age, <code>--dry-run</code> shows the plan, and a plain <code>cracklet gc</code> only cleans grants and tokens left on the Mac for VMs that no longer exist.</p>
+      </section>
+
+      <section id="automation">
+        <h2>Driving cracklet from a tool</h2>
+        <p>When an orchestrator or an agent on your Mac manages VMs, these keep it reliable:</p>
+        <ul>
+          <li><strong>Read JSON.</strong> <code>ls</code>, <code>new</code>, <code>inspect</code> and <code>gc</code> take <code>--json</code>; human output goes to stderr then.</li>
+          <li><strong>Pass argv, not strings.</strong> <code>cracklet exec NAME -- git commit -m "it's done"</code> quotes every argument, so the guest sees exactly that argv. <code>cracklet ssh NAME cmd</code> joins words into a shell line, like ssh.</li>
+          <li><strong>Check exit codes.</strong> <code>ssh</code> and <code>exec</code> return the remote status; 255 means the connection failed.</li>
+          <li><strong>Pipe secrets.</strong> <code>echo "$TOKEN" | cracklet secret set NAME</code> reads stdin when it is not a terminal.</li>
+          <li><strong>Read denials.</strong> A <code>403</code> from the broker carries a <code>hint</code> with the exact <code>cracklet grant</code> command. Surface it to the human; do not grant yourself what the hint asks for.</li>
+        </ul>
+      </section>
+
+      <section id="leave">
+        <h2>Before you leave</h2>
+        <div class="cmd" data-copy="cracklet stop task-42">
+          <span class="prompt" aria-hidden="true">$</span>
+          <span class="text">cracklet stop task-42</span>
+          <button type="button" aria-label="Copy cracklet stop task-42 to the clipboard"></button>
+        </div>
+        <p>Stop keeps the disk and the grants; <code>cracklet start</code> brings both back. When the task is done, <code>cracklet rm task-42</code> deletes the VM together with its grants and placeholder token. Push the agent's work first: the VM disk is the only copy of anything not pushed.</p>
+      </section>
+
+    </div>
+
+    <nav class="next" aria-label="Read next">
+      <a href="capabilities.html"><span>Concepts</span><strong>Grants and capabilities in detail</strong></a>
+      <a href="docs.html"><span>Quickstart</span><strong>Install cracklet and start a microVM</strong></a>
+    </nav>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <a href="./">cracklet</a>
+      <span aria-hidden="true">·</span>
+      <a href="docs.html">Docs</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://github.com/itlabs-gmbh/cracklet">GitHub</a>
+      <span aria-hidden="true">·</span>
+      <a href="impressum.html">Impressum</a>
+      <span aria-hidden="true">·</span>
+      <a href="https://www.it-labs.de">IT-Labs GmbH</a>
+    </div>
+  </footer>
+
+  <script src="copy.js" defer></script>
+</body>
+</html>

@@ -2,6 +2,7 @@ package cap
 
 import (
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -153,11 +154,62 @@ func TestEmbeddedDefaultsAreValid(t *testing.T) {
 	}
 	// Already in gh's multi-account shape with a user name, so gh never
 	// migrates it, which would ask the API who the user is.
-	hosts := blocks["/root/.config/gh/hosts.yml"]
-	for _, want := range []string{"github.com:", "user: cracklet", "users:", "oauth_token: {{ .PseudoToken }}"} {
-		if !strings.Contains(hosts, want) {
-			t.Errorf("hosts.yml block lacks %q:\n%s", want, hosts)
+	hosts, err := RenderGuest(blocks["/root/.config/gh/hosts.yml"], TemplateData{PseudoToken: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"github.com.users.cracklet.oauth_token": "tok",
+		"github.com.git_protocol":               "https",
+		"github.com.user":                       "cracklet",
+		"github.com.oauth_token":                "tok",
+	}
+	if got := yamlLeaves(t, hosts); !maps.Equal(got, want) {
+		t.Errorf("hosts.yml block has the wrong shape:\n got %v\nwant %v\n%s", got, want, hosts)
+	}
+}
+
+// yamlLeaves flattens a block-style YAML mapping (no lists, no flow style)
+// into dotted key paths of its scalar leaves, so a test can check nesting,
+// not just that some text occurs.
+func yamlLeaves(t *testing.T, text string) map[string]string {
+	t.Helper()
+	type level struct {
+		indent int
+		key    string
+	}
+	var stack []level
+	leaves := map[string]string{}
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
 		}
+		indent := len(line) - len(strings.TrimLeft(line, " "))
+		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok {
+			t.Fatalf("not a mapping line: %q", line)
+		}
+		for len(stack) > 0 && stack[len(stack)-1].indent >= indent {
+			stack = stack[:len(stack)-1]
+		}
+		path := key
+		if len(stack) > 0 {
+			path = stack[len(stack)-1].key + "." + key
+		}
+		if value = strings.TrimSpace(value); value != "" {
+			leaves[path] = value
+			continue
+		}
+		stack = append(stack, level{indent: indent, key: path})
+	}
+	return leaves
+}
+
+func TestYAMLLeavesSeesNesting(t *testing.T) {
+	// The token one level too shallow must not pass for users.cracklet.oauth_token.
+	got := yamlLeaves(t, "github.com:\n    users:\n        cracklet:\n    oauth_token: tok\n")
+	if _, ok := got["github.com.users.cracklet.oauth_token"]; ok || got["github.com.oauth_token"] != "tok" {
+		t.Errorf("misnested token read as %v", got)
 	}
 }
 

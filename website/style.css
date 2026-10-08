@@ -99,7 +99,8 @@ h1, h2, h3 { margin: 0; letter-spacing: -.01em; }
   font-size: .875rem;
   color: var(--muted-foreground);
 }
-.site-nav a[aria-current="page"] {
+.site-nav a[aria-current="page"],
+.site-nav a[aria-current="true"] {
   color: var(--foreground);
   text-decoration: underline;
   text-decoration-color: var(--accent);

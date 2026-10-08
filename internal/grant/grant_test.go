@@ -11,70 +11,50 @@ import (
 )
 
 func TestParseAndString(t *testing.T) {
-	for in, want := range map[string]Grant{
-		"claude":          {Cap: "claude"},
-		"github:org/repo": {Cap: "github", Scope: "org/repo"},
-		"github:*":        {Cap: "github", Scope: "*"},
-		"a:b:c":           {Cap: "a", Scope: "b:c"},
-	} {
-		g, err := Parse(in)
-		if err != nil || g != want {
-			t.Errorf("Parse(%q) = %+v, %v; want %+v", in, g, err, want)
-		}
-		if g.String() != in {
-			t.Errorf("String() = %q, want %q", g.String(), in)
-		}
+	g, err := Parse("claude")
+	if err != nil || g != (Grant{Cap: "claude"}) || g.String() != "claude" {
+		t.Errorf("Parse(claude) = %+v, %v", g, err)
 	}
-	for _, bad := range []string{"", "Bad", "x:a b", ":scope"} {
+	for _, bad := range []string{"", "Bad", "x y", ":scope"} {
 		if _, err := Parse(bad); err == nil {
 			t.Errorf("Parse(%q) should fail", bad)
 		}
 	}
 }
 
+func TestParseRejectsScopes(t *testing.T) {
+	for _, in := range []string{"github:*", "github:org/repo"} {
+		_, err := Parse(in)
+		if err == nil || !strings.Contains(err.Error(), "cracklet grant VM github") {
+			t.Errorf("Parse(%q) = %v; want an error that names the plain grant", in, err)
+		}
+	}
+}
+
 func TestSetOperationsAreImmutable(t *testing.T) {
-	base, err := ParseSet([]string{"github:org/repo", "claude", "claude"})
+	base, err := ParseSet([]string{"github", "claude", "claude"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(base) != 2 || base[0].Cap != "claude" {
-		t.Fatalf("ParseSet should dedupe and sort, got %v", base.Strings())
+		t.Fatalf("ParseSet should dedupe and sort, got %v", base.Caps())
 	}
 	added := base.Add(Grant{Cap: "chrome-devtools"})
 	if len(base) != 2 || len(added) != 3 {
-		t.Errorf("Add must not mutate: base=%v added=%v", base.Strings(), added.Strings())
+		t.Errorf("Add must not mutate: base=%v added=%v", base.Caps(), added.Caps())
 	}
 	removed := added.Remove(Grant{Cap: "claude"})
 	if len(added) != 3 || removed.Contains(Grant{Cap: "claude"}) {
-		t.Errorf("Remove must not mutate: added=%v removed=%v", added.Strings(), removed.Strings())
+		t.Errorf("Remove must not mutate: added=%v removed=%v", added.Caps(), removed.Caps())
 	}
 	if got := added.Caps(); strings.Join(got, ",") != "chrome-devtools,claude,github" {
 		t.Errorf("Caps = %v", got)
 	}
-}
-
-func TestAllows(t *testing.T) {
-	set, _ := ParseSet([]string{"claude", "github:org/repo", "gitlab:*"})
-	cases := []struct {
-		name, scope string
-		want        bool
-	}{
-		{"claude", "", true},
-		{"claude", "x", false},
-		{"github", "org/repo", true},
-		{"github", "org/other", false},
-		{"github", "", false},
-		{"gitlab", "anything", true},
-		{"gitlab", "", true},
-		{"nope", "", false},
+	if !added.Contains(Grant{Cap: "github"}) || added.Contains(Grant{Cap: "gitlab"}) {
+		t.Errorf("Contains is wrong for %v", added.Caps())
 	}
-	for _, tc := range cases {
-		if got := set.Allows(tc.name, tc.scope); got != tc.want {
-			t.Errorf("Allows(%q,%q) = %v, want %v", tc.name, tc.scope, got, tc.want)
-		}
-	}
-	if Hint("vm1", "github", "o/r") != "cracklet grant vm1 github:o/r" {
-		t.Errorf("Hint = %q", Hint("vm1", "github", "o/r"))
+	if Hint("vm1", "github") != "cracklet grant vm1 github" {
+		t.Errorf("Hint = %q", Hint("vm1", "github"))
 	}
 }
 
@@ -83,12 +63,12 @@ func TestStoreRoundTrip(t *testing.T) {
 	if set, err := s.Load("vm1"); err != nil || len(set) != 0 {
 		t.Fatalf("fresh VM should have no grants, got %v, %v", set, err)
 	}
-	set, _ := ParseSet([]string{"github:o/r", "claude"})
+	set, _ := ParseSet([]string{"github", "claude"})
 	if err := s.Save("vm1", set); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	got, err := s.Load("vm1")
-	if err != nil || strings.Join(got.Strings(), ",") != "claude,github:o/r" {
+	if err != nil || strings.Join(got.Caps(), ",") != "claude,github" {
 		t.Fatalf("Load = %v, %v", got, err)
 	}
 	info, _ := os.Stat(filepath.Join(s.Dir, "vm1", "grants"))

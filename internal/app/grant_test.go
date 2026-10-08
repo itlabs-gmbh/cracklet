@@ -77,12 +77,12 @@ func newGrantApp(t *testing.T, scripts *sshScripts, agent map[string]string) (*A
 func TestGrantProvisionsGuestAndPersists(t *testing.T) {
 	scripts := &sshScripts{state: "/etc/cracklet/manifest\n\n/root/.claude.json\n\n"}
 	app, fake := newGrantApp(t, scripts, nil)
-	set, err := app.Grant(context.Background(), "agent1", []string{"claude", "github:org/repo"})
+	set, err := app.Grant(context.Background(), "agent1", []string{"claude", "github"})
 	if err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
-	if strings.Join(set.Strings(), ",") != "claude,github:org/repo" {
-		t.Errorf("grants = %v", set.Strings())
+	if strings.Join(set.Caps(), ",") != "claude,github" {
+		t.Errorf("grants = %v", set.Caps())
 	}
 	if scripts.calls != 2 {
 		t.Fatalf("expected a read and an apply script, got %d:\n%s", scripts.calls, fake.Dump())
@@ -103,7 +103,7 @@ func TestGrantProvisionsGuestAndPersists(t *testing.T) {
 		t.Errorf("no secret reference may reach the guest:\n%s", apply)
 	}
 	again, err := app.Grants("agent1")
-	if err != nil || strings.Join(again.Strings(), ",") != "claude,github:org/repo" {
+	if err != nil || strings.Join(again.Caps(), ",") != "claude,github" {
 		t.Errorf("Grants = %v, %v", again, err)
 	}
 }
@@ -120,18 +120,18 @@ func TestGrantIsNotPersistedWhenProvisionFails(t *testing.T) {
 		t.Fatal("expected provision failure")
 	}
 	if set, _ := app.Grants("agent1"); len(set) != 0 {
-		t.Errorf("failed grant must not be persisted, got %v", set.Strings())
+		t.Errorf("failed grant must not be persisted, got %v", set.Caps())
 	}
 }
 
 func TestGrantValidation(t *testing.T) {
 	app, _ := newGrantApp(t, &sshScripts{}, nil)
 	cases := map[string]string{
-		"nope":        "unknown capability",
-		"github":      "needs a scope",
-		"claude:x":    "takes no scope",
-		"ssh-agent:x": "takes no scope",
-		"Bad Grant":   "cap name",
+		"nope":            "unknown capability",
+		"github:org/repo": "have no scopes",
+		"github:*":        "have no scopes",
+		"ssh-agent:x":     "have no scopes",
+		"Bad Grant":       "cap name",
 	}
 	for spec, want := range cases {
 		_, err := app.Grant(context.Background(), "agent1", []string{spec})
@@ -154,14 +154,38 @@ func TestRevokeRemovesAndReprovisions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
-	if strings.Join(set.Strings(), ",") != "ssh-agent" {
-		t.Errorf("grants after revoke = %v", set.Strings())
+	if strings.Join(set.Caps(), ",") != "ssh-agent" {
+		t.Errorf("grants after revoke = %v", set.Caps())
 	}
 	if decoded := decodeAll(scripts.last()); strings.Contains(decoded, "ANTHROPIC_BASE_URL") {
 		t.Errorf("revoked env must not be written:\n%s", decoded)
 	}
-	if _, err := app.Revoke(context.Background(), "agent1", []string{"github:x/y"}); err == nil || !strings.Contains(err.Error(), "is not granted") {
+	if _, err := app.Revoke(context.Background(), "agent1", []string{"github"}); err == nil || !strings.Contains(err.Error(), "is not granted") {
 		t.Errorf("revoking a missing grant should fail, got %v", err)
+	}
+}
+
+func TestRevokeIsAllOrNothing(t *testing.T) {
+	scripts := &sshScripts{state: "/etc/cracklet/manifest\n\n"}
+	app, _ := newGrantApp(t, scripts, nil)
+	if _, err := app.Grant(context.Background(), "agent1", []string{"claude", "github"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Revoke(context.Background(), "agent1", []string{"github", "gitlab"}); err == nil || !strings.Contains(err.Error(), "gitlab is not granted") {
+		t.Errorf("a cap that was never granted should fail, got %v", err)
+	}
+	if got, _ := app.Grants("agent1"); strings.Join(got.Caps(), ",") != "claude,github" {
+		t.Errorf("a failed revoke must not change grants, got %v", got.Caps())
+	}
+	if _, err := app.Revoke(context.Background(), "agent1", []string{"github:*"}); err == nil || !strings.Contains(err.Error(), "have no scopes") {
+		t.Errorf("a scoped revoke should be refused, got %v", err)
+	}
+	set, err := app.Revoke(context.Background(), "agent1", []string{"github", "github"})
+	if err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if strings.Join(set.Caps(), ",") != "claude" {
+		t.Errorf("grants after revoke = %v", set.Caps())
 	}
 }
 

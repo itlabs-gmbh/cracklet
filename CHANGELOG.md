@@ -30,7 +30,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `paseo.service` installed but disabled), and `cracklet new --profile paseo`
   restores its own golden snapshot. `--disk` now defaults to the profile's
   image size.
-- Capability broker: `cracklet grant NAME CAP[:SCOPE]`, `revoke`, `grants` and
+- Capability broker: `cracklet grant NAME CAP...`, `revoke`, `grants` and
   `new --grant` let a microVM use GitHub, Claude Code or host-side MCP servers
   through a per-VM Unix socket that `cracklet ssh` forwards into the guest.
   Credentials stay on the Mac; the guest gets a placeholder token and a
@@ -41,13 +41,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `claude` and `github`, user overrides in `~/.cracklet/caps/`.
 - The `github` capability also serves the `gh` CLI: API calls for
   `api.github.com` reach the broker through `/run/cracklet/broker.sock` and use
-  the same `github-token`. REST calls under `/repos/<org>/<repo>` follow the
-  grant's scope; GraphQL, search, other calls not tied to one repository and
-  `forks`, `transfer` and `generate` need `github:*`.
+  the same `github-token`. A grant is per capability: what the VM reaches on
+  GitHub is what the token reaches, so use a fine-grained token limited to the
+  agent's repositories.
 - Capability files: `[[proxy.routes]]` reach further upstreams by `Host`
-  header (public DNS names only; `wildcard_subpaths` mark endpoints that need
-  the wildcard grant), and guest templates get `.BrokerSocket`, a Unix socket that systemd
-  relays to the broker tunnel while any capability is granted.
+  header (public DNS names only), and guest templates get `.BrokerSocket`, a
+  Unix socket that systemd relays to the broker tunnel while any capability is
+  granted.
 - `cracklet secret set|rm` stores credentials in the macOS Keychain for
   capabilities to reference as `keychain:cracklet/<name>`.
 - `cracklet ls` shows a GRANTS column.

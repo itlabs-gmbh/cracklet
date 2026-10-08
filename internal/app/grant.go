@@ -60,7 +60,7 @@ func (a *App) Grant(ctx context.Context, name string, specs []string) (grant.Set
 	if err := store.Save(name, set); err != nil {
 		return nil, err
 	}
-	a.printf("%s may now use: %s\n", name, strings.Join(set.Strings(), ", "))
+	a.printf("%s may now use: %s\n", name, strings.Join(set.Caps(), ", "))
 	return set, nil
 }
 
@@ -79,12 +79,15 @@ func (a *App) Revoke(ctx context.Context, name string, specs []string) (grant.Se
 		return nil, err
 	}
 	defer unlock()
-	set, err := store.Load(name)
+	stored, err := store.Load(name)
 	if err != nil {
 		return nil, err
 	}
+	// Check every grant before withdrawing any, so a typo in one leaves the
+	// others in place.
+	set := stored
 	for _, g := range requested {
-		if !set.Contains(g) {
+		if !stored.Contains(g) {
 			return nil, fmt.Errorf("%s is not granted to %s", g, name)
 		}
 		set = set.Remove(g)
@@ -102,7 +105,7 @@ func (a *App) Revoke(ctx context.Context, name string, specs []string) (grant.Se
 	if len(set) == 0 {
 		a.printf("%s has no grants left\n", name)
 	} else {
-		a.printf("%s may still use: %s\n", name, strings.Join(set.Strings(), ", "))
+		a.printf("%s may still use: %s\n", name, strings.Join(set.Caps(), ", "))
 	}
 	return set, nil
 }
@@ -115,25 +118,13 @@ func (a *App) Grants(name string) (grant.Set, error) {
 	return a.grantStore().Load(name)
 }
 
-// checkGrant verifies that a grant names a known capability and that a scope
-// is only given where the capability is scoped.
+// checkGrant verifies that a grant names a known capability.
 func checkGrant(caps cap.Set, g grant.Grant) error {
 	if g.Cap == grant.SSHAgent {
-		if g.Scope != "" {
-			return fmt.Errorf("%s takes no scope", grant.SSHAgent)
-		}
 		return nil
 	}
-	c, ok := caps[g.Cap]
-	if !ok {
+	if _, ok := caps[g.Cap]; !ok {
 		return fmt.Errorf("unknown capability %q (see 'cracklet cap ls')", g.Cap)
-	}
-	scoped := c.Proxy != nil && c.Proxy.ScopeSegments > 0
-	switch {
-	case scoped && g.Scope == "":
-		return fmt.Errorf("%s needs a scope, e.g. %s:org/repo or %s:*", g.Cap, g.Cap, g.Cap)
-	case !scoped && g.Scope != "":
-		return fmt.Errorf("%s takes no scope", g.Cap)
 	}
 	return nil
 }

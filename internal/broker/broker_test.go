@@ -100,10 +100,10 @@ func (f fakeSecrets) Resolve(_ context.Context, ref string) (string, error) {
 	return v, nil
 }
 
-func proxyCap(name, upstream string, scope int) cap.Cap {
+func proxyCap(name, upstream string) cap.Cap {
 	return cap.Cap{Name: name, Proxy: &cap.Proxy{
-		Upstream: upstream, ScopeSegments: scope,
-		Headers: map[string]string{"Authorization": `Bearer {{ secret "env:TOKEN" }}`, "X-Vm": "{{ .VM }}"},
+		Upstream: upstream,
+		Headers:  map[string]string{"Authorization": `Bearer {{ secret "env:TOKEN" }}`, "X-Vm": "{{ .VM }}"},
 	}}
 }
 
@@ -136,7 +136,7 @@ func TestProxyInjectsCredentialsAndStripsGuestHeaders(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	b, audit := newBroker(t, cap.Set{"claude": proxyCap("claude", upstream.URL+"/base", 0)}, []string{"claude"})
+	b, audit := newBroker(t, cap.Set{"claude": proxyCap("claude", upstream.URL+"/base")}, []string{"claude"})
 	srv := httptest.NewServer(b.Handler())
 	defer srv.Close()
 
@@ -171,7 +171,7 @@ func TestProxyInjectsCredentialsAndStripsGuestHeaders(t *testing.T) {
 	}
 	// The audit line is written after the response has been flushed to the
 	// client, so it may trail the client's read by a moment.
-	want := "1970-01-01T00:00:00Z vm=agent1 cap=claude scope=- allow POST \"/claude/v1/messages\" 200\n"
+	want := "1970-01-01T00:00:00Z vm=agent1 cap=claude allow POST \"/claude/v1/messages\" 200\n"
 	waitFor(t, "audit line", func() bool { return audit.String() == want })
 }
 
@@ -179,7 +179,7 @@ func TestProxyAllowHeadersKeepsOnlyListed(t *testing.T) {
 	var seen http.Header
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { seen = r.Header.Clone() }))
 	defer upstream.Close()
-	c := proxyCap("strict", upstream.URL, 0)
+	c := proxyCap("strict", upstream.URL)
 	c.Proxy.AllowHeaders = []string{"Anthropic-Version"}
 	b, _ := newBroker(t, cap.Set{"strict": c}, []string{"strict"})
 	srv := httptest.NewServer(b.Handler())
@@ -205,8 +205,8 @@ func TestProxyAllowHeadersKeepsOnlyListed(t *testing.T) {
 func TestDenyUnknownAndUngranted(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer upstream.Close()
-	caps := cap.Set{"claude": proxyCap("claude", upstream.URL, 0), "github": proxyCap("github", upstream.URL, 2)}
-	b, audit := newBroker(t, caps, []string{"github:org/repo"})
+	caps := cap.Set{"claude": proxyCap("claude", upstream.URL), "github": proxyCap("github", upstream.URL)}
+	b, audit := newBroker(t, caps, []string{"github"})
 	srv := httptest.NewServer(b.Handler())
 	defer srv.Close()
 
@@ -218,10 +218,9 @@ func TestDenyUnknownAndUngranted(t *testing.T) {
 		{"/", 404, "cracklet cap ls"},
 		{"/nope/x", 404, "cracklet cap ls"},
 		{"/claude/v1/messages", 403, "cracklet grant agent1 claude"},
-		{"/github/org/other.git/info/refs", 403, "cracklet grant agent1 github:org/other"},
 		{"/github/org/repo.git/info/refs", 200, ""},
-		{"/github/org/repo/git-upload-pack", 200, ""},
-		{"/github/org", 403, "cracklet grant agent1 github"},
+		{"/github/org/other/git-upload-pack", 200, ""},
+		{"/github/org", 200, ""},
 		{"/github/org/repo/../other/info/refs", 400, ""},
 		{"/github/org/repo/./info/refs", 400, ""},
 		{"/github/org/repo%2F..%2Fother/info/refs", 400, ""},
@@ -245,7 +244,7 @@ func TestDenyUnknownAndUngranted(t *testing.T) {
 		}
 	}
 	waitFor(t, "denial in audit", func() bool {
-		return strings.Contains(audit.String(), "cap=claude scope=- denied GET \"/claude/v1/messages\" 403")
+		return strings.Contains(audit.String(), "cap=claude denied GET \"/claude/v1/messages\" 403")
 	})
 	waitFor(t, "rejected path in audit", func() bool {
 		return strings.Contains(audit.String(), "unsafe path GET \"/github/org/repo/../other/info/refs\" 400")

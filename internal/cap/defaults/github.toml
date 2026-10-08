@@ -1,10 +1,13 @@
-# GitHub through the broker, for git and the gh CLI. Scoped per repository:
-#   cracklet grant <vm> github:itlabs-gmbh/cracklet
-#   cracklet grant <vm> github:*
+# GitHub through the broker, for git and the gh CLI:
+#   cracklet grant <vm> github
 #
-# Store a token once (a fine-grained token limited to the repos you grant is
-# the safest choice; Contents read/write for git, Pull requests for gh pr):
+# Store a token once:
 #   cracklet secret set github-token
+# The token is the only limit on what the VM can reach: the broker checks
+# that github is granted, not which repository a request names. Use a
+# fine-grained token restricted to the repositories the agent should work on
+# (Contents read/write for git, Pull requests for gh pr). The token itself
+# never enters the guest.
 #
 # git: a managed section in the guest's /etc/gitconfig rewrites
 # https://github.com/ and git@github.com: to the broker, so plain
@@ -14,19 +17,15 @@
 #
 # gh: http_unix_socket sends all of gh's API traffic to the broker socket in
 # the guest, still addressed to api.github.com; the broker replaces gh's
-# placeholder token (from hosts.yml) with the real one. REST calls under /repos/<org>/<repo>
-# follow the grant's scope. Calls not tied to one repository (GraphQL, which
-# gh uses for most pr and repo commands, search, /user) could reach any repo
-# the token can, so they need github:*, as do forks, transfer and generate.
-# Paths with percent-encoding are refused, and downloads that GitHub redirects
-# to other hosts (gh release download) do not work through the broker.
+# placeholder token (from hosts.yml) with the real one. Paths with
+# percent-encoding are refused, and downloads that GitHub redirects to other
+# hosts (gh release download) do not work through the broker.
 
 name = "github"
-description = "git and gh to GitHub, scoped per org/repo"
+description = "git and gh to GitHub, limited by the token's repositories"
 
 [proxy]
 upstream = "https://github.com"
-scope_segments = 2
 [proxy.headers]
 # git over HTTPS only accepts Basic auth; GitHub ignores the user name for
 # tokens, x-access-token is the conventional one.
@@ -35,10 +34,6 @@ Authorization = "Basic {{ secret \"keychain:cracklet/github-token\" | basicauth 
 [[proxy.routes]]
 host = "api.github.com"
 upstream = "https://api.github.com"
-scope_prefix = "repos"
-# These act beyond the repository in the path: fork into another org, move
-# the repo to a new owner, create a repo from a template.
-wildcard_subpaths = ["forks", "transfer", "generate"]
 [proxy.routes.headers]
 Authorization = "Bearer {{ secret \"keychain:cracklet/github-token\" }}"
 
@@ -61,7 +56,7 @@ http_unix_socket: {{ .BrokerSocket }}
 # call, while a long-running process such as the Paseo daemon reads
 # /etc/environment only at start and would miss a later grant. The shape is
 # gh's multi-account format with a user name, so gh never migrates it (which
-# would ask the API for the user and fail under a scoped grant).
+# would ask the API for the user and rewrite the file behind cracklet's back).
 [[guest.blocks]]
 path = "/root/.config/gh/hosts.yml"
 content = """

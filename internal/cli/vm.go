@@ -43,7 +43,7 @@ func newNewCmd(get func() *app.App) *cobra.Command {
 		"guest image: "+strings.Join(vm.ProfileNames(), ", ")+" (build it first with 'cracklet prepare --profile')")
 	cmd.Flags().StringArrayVarP(&spec.Forwards, "port", "p", nil, "forward localhost:[HOST:]GUEST to the VM (repeatable)")
 	cmd.Flags().BoolVar(&spec.Fresh, "fresh", false, "cold-boot instead of restoring the golden snapshot")
-	cmd.Flags().StringArrayVar(&spec.Grants, "grant", nil, "grant a capability right away, e.g. claude or github:org/repo (repeatable)")
+	cmd.Flags().StringArrayVar(&spec.Grants, "grant", nil, "grant a capability right away, e.g. claude or github (repeatable)")
 	cmd.Flags().StringVar(&spec.Owner, "owner", "", "label the tool or person managing the VM; owned VMs can be collected by 'cracklet gc'")
 	cmd.Flags().StringVar(&spec.Slot, "slot", "", "the VM's position in its owner's pool, e.g. 3 (needs --owner)")
 	return cmd

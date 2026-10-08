@@ -17,7 +17,6 @@ description = "describe what this hands into the guest"
 # --- proxy: forward requests to an upstream and inject credentials on the Mac
 [proxy]
 upstream = "https://api.example.com"
-# scope_segments = 2            # grant per path prefix, e.g. %s:org/repo
 # allow_headers = ["Content-Type", "Accept"]
 [proxy.headers]
 Authorization = "Bearer {{ secret \"keychain:cracklet/%s-token\" }}"
@@ -44,5 +43,5 @@ EXAMPLE_BASE_URL = "{{ .BrokerURL }}/%s"
 # path = "/root/.claude.json"
 # key = "mcpServers.%s"
 # value = { type = "http", url = "{{ .BrokerURL }}/%s" }
-`, name, name, name, name, name, name, name, name, name), nil
+`, name, name, name, name, name, name, name, name), nil
 }

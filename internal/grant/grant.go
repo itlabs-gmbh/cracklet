@@ -5,43 +5,38 @@ package grant
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/itlabs-gmbh/cracklet/internal/cap"
 )
 
-// Any is the wildcard scope.
-const Any = "*"
-
 // SSHAgent is a built-in grant with no cap file: it forwards the Mac's SSH
 // agent into the guest with `ssh -A`.
 const SSHAgent = "ssh-agent"
 
-// Grant allows one capability, optionally limited to a scope such as org/repo.
+// Grant allows one capability. There are no scopes: what a capability may
+// reach is decided by its credential (a fine-grained GitHub token, say),
+// which the upstream enforces, not by the broker reading request paths.
 type Grant struct {
-	Cap   string
-	Scope string
+	Cap string
 }
 
-// Parse reads "cap" or "cap:scope".
+// Parse reads a capability name.
 func Parse(s string) (Grant, error) {
-	name, scope, _ := strings.Cut(s, ":")
-	if err := cap.ValidateName(name); err != nil {
+	if name, _, scoped := strings.Cut(s, ":"); scoped && cap.ValidateName(name) == nil {
+		return Grant{}, fmt.Errorf("grant %q: capabilities have no scopes; limit the credential instead and use 'cracklet grant VM %s'", s, name)
+	}
+	if err := cap.ValidateName(s); err != nil {
 		return Grant{}, fmt.Errorf("grant %q: %w", s, err)
 	}
-	if strings.ContainsAny(scope, " \t\n") {
-		return Grant{}, fmt.Errorf("grant %q: scope must not contain whitespace", s)
-	}
-	return Grant{Cap: name, Scope: scope}, nil
+	return Grant{Cap: s}, nil
 }
 
 // String renders the grant in the form Parse accepts.
 func (g Grant) String() string {
-	if g.Scope == "" {
-		return g.Cap
-	}
-	return g.Cap + ":" + g.Scope
+	return g.Cap
 }
 
 // Set is an immutable collection of grants.
@@ -66,7 +61,7 @@ func (s Set) Add(g Grant) Set {
 		return s
 	}
 	out := append(append(Set(nil), s...), g)
-	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
+	sort.Slice(out, func(i, j int) bool { return out[i].Cap < out[j].Cap })
 	return out
 }
 
@@ -81,55 +76,21 @@ func (s Set) Remove(g Grant) Set {
 	return out
 }
 
-// Contains reports whether exactly g is in the set.
+// Contains reports whether g is in the set.
 func (s Set) Contains(g Grant) bool {
-	for _, x := range s {
-		if x == g {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s, g)
 }
 
-// Allows reports whether a request for capability name with the given scope
-// is covered. An unscoped request needs an unscoped or wildcard grant; a
-// scoped request needs the same scope or the wildcard.
-func (s Set) Allows(name, scope string) bool {
-	for _, g := range s {
-		if g.Cap != name {
-			continue
-		}
-		if g.Scope == Any || g.Scope == scope {
-			return true
-		}
-	}
-	return false
-}
-
-// Caps returns the distinct capability names in the set, sorted.
+// Caps returns the capability names in the set, sorted.
 func (s Set) Caps() []string {
-	seen := map[string]bool{}
-	var names []string
-	for _, g := range s {
-		if !seen[g.Cap] {
-			seen[g.Cap] = true
-			names = append(names, g.Cap)
-		}
+	names := make([]string, len(s))
+	for i, g := range s {
+		names[i] = g.Cap
 	}
-	sort.Strings(names)
 	return names
 }
 
-// Strings renders every grant.
-func (s Set) Strings() []string {
-	out := make([]string, len(s))
-	for i, g := range s {
-		out[i] = g.String()
-	}
-	return out
-}
-
 // Hint is the command that would allow a denied request.
-func Hint(vm, name, scope string) string {
-	return "cracklet grant " + vm + " " + Grant{Cap: name, Scope: scope}.String()
+func Hint(vm, name string) string {
+	return "cracklet grant " + vm + " " + name
 }

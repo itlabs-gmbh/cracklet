@@ -45,6 +45,9 @@ const (
 	// BrokerGuestPort is where the broker tunnel appears inside a microVM
 	// (127.0.0.1:PORT) while `cracklet ssh` is open.
 	BrokerGuestPort = 7777
+	// BrokerGuestSocket is a Unix socket in the microVM that relays to the
+	// tunnel port, for clients such as gh that cannot take a base URL.
+	BrokerGuestSocket = "/run/cracklet/broker.sock"
 )
 
 // Paths describes the host-side directories cracklet works with.

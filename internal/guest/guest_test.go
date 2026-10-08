@@ -54,7 +54,8 @@ func TestRenderMergesCapsAndRejectsConflicts(t *testing.T) {
 	if len(plan.Merges) != 2 || plan.Merges[1].Value.(map[string]any)["url"] != "http://127.0.0.1:7777/devtools" {
 		t.Errorf("merges = %+v", plan.Merges)
 	}
-	want := []string{"file:/etc/gitconfig", "json:/root/.claude.json#hasCompletedOnboarding", "json:/root/.claude.json#mcpServers.devtools"}
+	want := []string{"file:/etc/gitconfig", "file:" + RelayServiceUnit, "file:" + RelaySocketUnit,
+		"json:/root/.claude.json#hasCompletedOnboarding", "json:/root/.claude.json#mcpServers.devtools"}
 	if strings.Join(plan.Manifest(), ",") != strings.Join(want, ",") {
 		t.Errorf("manifest = %v", plan.Manifest())
 	}
@@ -199,7 +200,7 @@ func TestApplyScriptRemovesStaleAndMergesJSON(t *testing.T) {
 		t.Errorf("env block missing:\n%s", script)
 	}
 	manifest := decodeHeredoc(t, script, ManifestPath)
-	if manifest != "json:/root/.claude.json#hasCompletedOnboarding\n" {
+	if manifest != "file:"+RelayServiceUnit+"\nfile:"+RelaySocketUnit+"\njson:/root/.claude.json#hasCompletedOnboarding\n" {
 		t.Errorf("manifest = %q", manifest)
 	}
 

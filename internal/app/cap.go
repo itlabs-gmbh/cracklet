@@ -197,6 +197,11 @@ func (a *App) CapAdd(ctx context.Context, url string, yes bool, confirm io.Reade
 	if _, shadows := embedded[c.Name]; shadows {
 		return fmt.Errorf("%q is an embedded capability; downloaded files may not replace it (copy it into %s by hand if you really want that)", c.Name, a.paths.CapsDir())
 	}
+	// Nor may it claim a host another capability routes: the broker would
+	// refuse to load the set afterwards.
+	if err := a.checkFitsInstalled(c); err != nil {
+		return err
+	}
 	// Control characters could hide lines from the review below.
 	a.printf("%s\n", strings.ToValidUTF8(stripControl(string(body)), "?"))
 	a.printf("%s", stripControl(capSummary(c)))
@@ -230,6 +235,23 @@ func sortedKeys(m map[string]string) []string {
 	return keys
 }
 
+// checkFitsInstalled validates the installed caps with c added or replaced.
+func (a *App) checkFitsInstalled(c cap.Cap) error {
+	installed, err := a.loadCaps()
+	if err != nil {
+		return err
+	}
+	merged := make(cap.Set, len(installed)+1)
+	for k, v := range installed {
+		merged[k] = v
+	}
+	merged[c.Name] = c
+	if err := merged.Validate(); err != nil {
+		return fmt.Errorf("%s does not fit the installed capabilities: %w", c.Name, err)
+	}
+	return nil
+}
+
 // capSummary spells out what a capability would do with your secrets, so the
 // confirmation is about consequences rather than TOML.
 func capSummary(c cap.Cap) string {
@@ -237,10 +259,10 @@ func capSummary(c cap.Cap) string {
 	switch c.Kind() {
 	case cap.KindProxy:
 		fmt.Fprintf(&b, "=> %s proxies guest requests to %s\n", c.Name, c.Proxy.Upstream)
-		for _, k := range sortedKeys(c.Proxy.Headers) {
-			for _, ref := range secretRefs(c.Proxy.Headers[k]) {
-				fmt.Fprintf(&b, "   and sends the secret %s in the %s header\n", ref, k)
-			}
+		writeHeaderSecrets(&b, c.Proxy.Headers)
+		for _, r := range c.Proxy.Routes {
+			fmt.Fprintf(&b, "=> %s answers requests for %s with %s\n", c.Name, r.Host, r.Upstream)
+			writeHeaderSecrets(&b, r.Headers)
 		}
 	case cap.KindMCP:
 		fmt.Fprintf(&b, "=> %s runs %q on this Mac\n", c.Name, strings.Join(append([]string{c.MCP.Command}, c.MCP.Args...), " "))
@@ -248,6 +270,14 @@ func capSummary(c cap.Cap) string {
 		fmt.Fprintf(&b, "=> %s runs %q on this Mac for every request\n", c.Name, strings.Join(append([]string{c.Exec.Command}, c.Exec.Args...), " "))
 	}
 	return b.String()
+}
+
+func writeHeaderSecrets(b *strings.Builder, headers map[string]string) {
+	for _, k := range sortedKeys(headers) {
+		for _, ref := range secretRefs(headers[k]) {
+			fmt.Fprintf(b, "   and sends the secret %s in the %s header\n", ref, k)
+		}
+	}
 }
 
 // secretRefs lists the secrets a header template sends. The template was

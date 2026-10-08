@@ -193,7 +193,9 @@ talk to that address with a per-VM placeholder token; the broker swaps it for
 the real credential from the macOS Keychain. The socket identifies the VM, so
 there is nothing in the guest worth stealing, and the hole closes with the
 terminal. `ssh-agent` is a built-in grant that adds `-A`; pair it with
-`ssh-add -c` to confirm every signature.
+`ssh-add -c` to confirm every signature. For clients that only speak HTTP over
+a Unix socket, the guest also gets `/run/cracklet/broker.sock` while any
+capability is granted: a systemd socket that relays to the same tunnel.
 
 When something other than `cracklet ssh` drives the guest, such as an editor or
 an agent runner with its own ssh session, keep the broker up with
@@ -213,7 +215,7 @@ specific to Claude Code, GitHub or any other tool is a **capability file**:
 
 | Primitive | What the broker does                                                        |
 |-----------|-----------------------------------------------------------------------------|
-| `proxy`   | reverse-proxies `/<cap>/...` to an upstream and injects headers from secrets |
+| `proxy`   | reverse-proxies `/<cap>/...` (or a routed `Host`) to an upstream and injects headers from secrets |
 | `mcp`     | runs a stdio MCP server on the Mac and serves it as an HTTP MCP endpoint     |
 | `exec`    | pipes the request through an external program (`cracklet-cap-<name>`)        |
 
@@ -227,10 +229,25 @@ cracklet cap add https://example.com/gemini.toml   # shown before it is installe
 
 A capability declares the primitive plus a `[guest]` section with environment
 variables, files, managed blocks inside shared files (such as `/etc/gitconfig`)
-and JSON merges, all templated with `.BrokerURL`, `.PseudoToken` and `.VM`. Secrets (`keychain:`, `env:`, `cmd:`, `file:`) are only valid on the
-broker side; `cracklet cap lint` rejects them in guest sections. A user file in
+and JSON merges, all templated with `.BrokerURL`, `.BrokerSocket`, `.PseudoToken`
+and `.VM`. Secrets (`keychain:`, `env:`, `cmd:`, `file:`) are only valid on the
+broker side; `cracklet cap lint` rejects them in guest sections. Header
+templates can encode Basic credentials with
+`{{ secret "ref" | basicauth "user" }}`. A proxy can add `[[proxy.routes]]`:
+requests that reach the broker for another `host` (for example through
+`.BrokerSocket`) go to that route's upstream with its own headers. A user file in
 `~/.cracklet/caps/<name>.toml` replaces an embedded capability of the same name.
 See `examples/caps/` for an MCP bridge and an exec plugin.
+
+The embedded `github` capability serves git and the `gh` CLI with one token.
+git is rewritten to the broker in `/etc/gitconfig`; gh sends its API calls
+through `.BrokerSocket` (`http_unix_socket`) with a placeholder `GH_TOKEN`.
+`github:org/repo` covers git and REST calls under `/repos/org/repo`. Calls that
+are not tied to one repository, GraphQL (most `gh pr` and `gh repo` commands),
+search and `/user`, could reach any repo the token can, so they need
+`github:*`, as do `forks`, `transfer` and `generate`, which act beyond the
+repository in the path. Route hosts must be public DNS names, never an IP or
+`localhost`, so no capability can catch the requests of another.
 
 The embedded `claude` capability points `ANTHROPIC_BASE_URL` at the broker and
 sets `CLAUDE_CODE_OAUTH_TOKEN` to the placeholder, so the unmodified Claude Code

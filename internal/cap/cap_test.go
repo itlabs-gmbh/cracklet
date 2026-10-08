@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -126,6 +127,29 @@ func TestEmbeddedDefaultsAreValid(t *testing.T) {
 		func(string) (string, error) { return "tok", nil })
 	if err != nil || auth != "Basic eC1hY2Nlc3MtdG9rZW46dG9r" {
 		t.Errorf("github Authorization = %q, %v", auth, err)
+	}
+	// gh reaches the API through the same cap and the same token.
+	_, api, ok := set.RouteFor("api.github.com")
+	if !ok || api.Upstream != "https://api.github.com" || api.ScopePrefix != "repos" ||
+		!slices.Contains(api.WildcardSubpaths, "transfer") || !slices.Contains(api.WildcardSubpaths, "forks") ||
+		!slices.Contains(api.WildcardSubpaths, "generate") {
+		t.Fatalf("github should route api.github.com, got %+v, %v", api, ok)
+	}
+	if refs := set["github"].Proxy.SecretRefs(); strings.Join(refs, ",") != "keychain:cracklet/github-token,keychain:cracklet/github-token" {
+		t.Errorf("git and gh must share the one token, got %v", refs)
+	}
+	g := set["github"].Guest
+	if g.Env["GH_TOKEN"] == "" {
+		t.Errorf("gh needs a placeholder GH_TOKEN to consider itself logged in")
+	}
+	var ghConfig bool
+	for _, b := range g.Blocks {
+		if b.Path == "/root/.config/gh/config.yml" && strings.Contains(b.Content, "http_unix_socket: {{ .BrokerSocket }}") {
+			ghConfig = true
+		}
+	}
+	if !ghConfig {
+		t.Errorf("gh must be pointed at the broker socket, blocks = %+v", g.Blocks)
 	}
 }
 

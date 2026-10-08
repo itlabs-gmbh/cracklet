@@ -18,6 +18,9 @@ type TemplateData struct {
 	// PseudoToken is a per-VM placeholder for clients that insist on a token;
 	// the broker never checks it, the tunnel is the identity.
 	PseudoToken string
+	// BrokerSocket is a Unix socket in the guest that reaches the broker, for
+	// clients that cannot be given BrokerURL (gh's http_unix_socket).
+	BrokerSocket string
 }
 
 // SecretFunc resolves a secret reference such as keychain:cracklet/claude-token.
@@ -110,7 +113,7 @@ func unwrapExec(err error) error {
 }
 
 // lintData has every field set so missingkey=error catches typos.
-var lintData = TemplateData{VM: "lint", BrokerURL: "http://127.0.0.1:1", PseudoToken: "lint"}
+var lintData = TemplateData{VM: "lint", BrokerURL: "http://127.0.0.1:1", PseudoToken: "lint", BrokerSocket: "/run/lint.sock"}
 
 // checkTemplate parses and dry-runs a template. Broker-side templates may use
 // secret (resolved to a placeholder); guest-side ones must not.

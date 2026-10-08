@@ -1,19 +1,28 @@
-# Git over HTTPS to github.com through the broker. Scoped per repository:
+# GitHub through the broker, for git and the gh CLI. Scoped per repository:
 #   cracklet grant <vm> github:itlabs-gmbh/cracklet
 #   cracklet grant <vm> github:*
 #
 # Store a token once (a fine-grained token limited to the repos you grant is
-# the safest choice):
+# the safest choice; Contents read/write for git, Pull requests for gh pr):
 #   cracklet secret set github-token
 #
-# A managed section in the guest's /etc/gitconfig rewrites https://github.com/
-# and git@github.com: to the broker, so plain `git clone https://github.com/org/repo`
-# and `git push` just work, also in sessions that were already open. Other
-# settings in that file are left alone and `cracklet revoke` removes the
-# section again.
+# git: a managed section in the guest's /etc/gitconfig rewrites
+# https://github.com/ and git@github.com: to the broker, so plain
+# `git clone https://github.com/org/repo` and `git push` just work, also in
+# sessions that were already open. Other settings in that file are left alone
+# and `cracklet revoke` removes the section again.
+#
+# gh: http_unix_socket sends all of gh's API traffic to the broker socket in
+# the guest, still addressed to api.github.com; the broker replaces gh's
+# placeholder token with the real one. REST calls under /repos/<org>/<repo>
+# follow the grant's scope. Calls not tied to one repository (GraphQL, which
+# gh uses for most pr and repo commands, search, /user) could reach any repo
+# the token can, so they need github:*, as do forks, transfer and generate.
+# Paths with percent-encoding are refused, and downloads that GitHub redirects
+# to other hosts (gh release download) do not work through the broker.
 
 name = "github"
-description = "git over HTTPS to github.com, scoped per org/repo"
+description = "git and gh to GitHub, scoped per org/repo"
 
 [proxy]
 upstream = "https://github.com"
@@ -23,10 +32,30 @@ scope_segments = 2
 # tokens, x-access-token is the conventional one.
 Authorization = "Basic {{ secret \"keychain:cracklet/github-token\" | basicauth \"x-access-token\" }}"
 
+[[proxy.routes]]
+host = "api.github.com"
+upstream = "https://api.github.com"
+scope_prefix = "repos"
+# These act beyond the repository in the path: fork into another org, move
+# the repo to a new owner, create a repo from a template.
+wildcard_subpaths = ["forks", "transfer", "generate"]
+[proxy.routes.headers]
+Authorization = "Bearer {{ secret \"keychain:cracklet/github-token\" }}"
+
+[guest.env]
+# gh only talks to the API when it believes it is logged in.
+GH_TOKEN = "{{ .PseudoToken }}"
+
 [[guest.blocks]]
 path = "/etc/gitconfig"
 content = """
 [url "{{ .BrokerURL }}/github/"]
 	insteadOf = https://github.com/
 	insteadOf = git@github.com:
+"""
+
+[[guest.blocks]]
+path = "/root/.config/gh/config.yml"
+content = """
+http_unix_socket: {{ .BrokerSocket }}
 """

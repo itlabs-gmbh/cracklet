@@ -56,6 +56,8 @@ type Proxy struct {
 	// ScopeSegments is how many leading path segments form the grant scope
 	// (for example 2 for github:org/repo); 0 means the grant is unscoped.
 	ScopeSegments int `toml:"scope_segments"`
+	// Routes reach further upstreams of the same capability by Host header.
+	Routes []Route `toml:"routes"`
 }
 
 // MCP configures the stdio-to-HTTP MCP bridge primitive.
@@ -185,16 +187,8 @@ func (p Proxy) validate() []string {
 	if p.ScopeSegments < 0 || p.ScopeSegments > 4 {
 		problems = append(problems, "proxy.scope_segments must be between 0 and 4")
 	}
-	for _, k := range sortedKeys(p.Headers) {
-		if err := checkTemplate(p.Headers[k], true); err != nil {
-			problems = append(problems, fmt.Sprintf("proxy.headers.%s: %v", k, err))
-			continue
-		}
-		if _, err := SecretRefs(p.Headers[k]); err != nil {
-			problems = append(problems, fmt.Sprintf("proxy.headers.%s: %v", k, err))
-		}
-	}
-	return problems
+	problems = append(problems, validateHeaders("proxy.headers", p.Headers)...)
+	return append(problems, p.validateRoutes()...)
 }
 
 // validateUpstream insists on TLS: the broker injects credentials, which

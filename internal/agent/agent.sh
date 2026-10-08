@@ -13,7 +13,7 @@ FC_BIN=${FC_BIN:-/usr/local/bin/firecracker}
 HOSTS_FILE=${HOSTS_FILE:-/etc/hosts}
 SYSCTL_DROPIN=${SYSCTL_DROPIN:-/etc/sysctl.d/99-cracklet.conf}
 SYSTEMD_DIR=${SYSTEMD_DIR:-/etc/systemd/system}
-RESTORED_FLAG=${RESTORED_FLAG:-/run/cracklet/restored}   # tmpfs: gone after every boot
+RESTORED_FLAG=${RESTORED_FLAG:-/run/cracklet/restored}   # restore's result; tmpfs, gone after every boot
 readonly CRACKLET_ROOT FC_BIN HOSTS_FILE SYSCTL_DROPIN SYSTEMD_DIR RESTORED_FLAG
 readonly IMAGES_DIR=$CRACKLET_ROOT/images
 readonly VMS_DIR=$CRACKLET_ROOT/vms
@@ -1016,32 +1016,36 @@ mark_autostart() { : > "$(vm_dir "$1")/autostart"; }
 
 # cmd_restore boots the marked VMs once per boot of the Lima VM. It runs from
 # cracklet-restore.service at boot and from the CLI after it started the Lima
-# VM; whichever comes second waits for the agent lock and finds the work done.
+# VM; whichever comes second waits for the agent lock and gets the first
+# one's result, so the CLI still warns about a VM the boot unit could not start.
 # Prints {"started": [...], "failed": [...]}.
 cmd_restore() {
-  local dir name rc started="[]" failed="[]"
-  if [[ ! -e $RESTORED_FLAG ]]; then
-    for dir in "$VMS_DIR"/*/; do
-      name=$(basename "$dir")
-      [[ -e $dir/autostart ]] || continue
-      if unit_active "$name"; then continue; fi
-      log "restarting $name, which was running before the Lima VM stopped"
-      # The subshell confines a failing VM's die/set -e to that VM; errexit
-      # only applies inside it because the call is no || or if condition.
-      set +e
-      ( set -e; start_vm "$name" ) >&2
-      rc=$?
-      set -e
-      if ((rc == 0)); then
-        started=$(jq -c --arg n "$name" '. + [$n]' <<<"$started")
-      else
-        failed=$(jq -c --arg n "$name" '. + [$n]' <<<"$failed")
-      fi
-    done
-    install -d -m 0755 "$(dirname "$RESTORED_FLAG")"
-    : > "$RESTORED_FLAG"
+  local dir name rc started="[]" failed="[]" result
+  if [[ -s $RESTORED_FLAG ]]; then
+    cat "$RESTORED_FLAG"
+    return 0
   fi
-  jq -cn --argjson started "$started" --argjson failed "$failed" '{started: $started, failed: $failed}'
+  for dir in "$VMS_DIR"/*/; do
+    name=$(basename "$dir")
+    [[ -e $dir/autostart ]] || continue
+    if unit_active "$name"; then continue; fi
+    log "restarting $name, which was running before the Lima VM stopped"
+    # The subshell confines a failing VM's die/set -e to that VM; errexit
+    # only applies inside it because the call is no || or if condition.
+    set +e
+    ( set -e; start_vm "$name" ) >&2
+    rc=$?
+    set -e
+    if ((rc == 0)); then
+      started=$(jq -c --arg n "$name" '. + [$n]' <<<"$started")
+    else
+      failed=$(jq -c --arg n "$name" '. + [$n]' <<<"$failed")
+    fi
+  done
+  result=$(jq -cn --argjson started "$started" --argjson failed "$failed" '{started: $started, failed: $failed}')
+  install -d -m 0755 "$(dirname "$RESTORED_FLAG")"
+  atomic_write "$RESTORED_FLAG" "$result"
+  echo "$result"
 }
 
 install_restore_unit() {

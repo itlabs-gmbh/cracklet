@@ -41,8 +41,9 @@ func TestAgentStartMarksAndStopClearsAutostart(t *testing.T) {
 }
 
 // TestAgentRestoreBootsMarkedVMsOncePerBoot: restore starts only the VMs
-// that were running, keeps going when one of them fails, and does nothing
-// the second time within the same boot of the Lima VM.
+// that were running, keeps going when one of them fails, and the second time
+// within the same boot of the Lima VM only repeats the first result, so the
+// CLI still reports what the boot unit restored.
 func TestAgentRestoreBootsMarkedVMsOncePerBoot(t *testing.T) {
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("jq not available")
@@ -87,11 +88,11 @@ func TestAgentRestoreBootsMarkedVMsOncePerBoot(t *testing.T) {
 	if strings.Join(first.Started, ",") != "alpha,zeta" || strings.Join(first.Failed, ",") != "broken" {
 		t.Errorf("first restore: %+v", first)
 	}
-	if len(second.Started)+len(second.Failed) != 0 {
-		t.Errorf("second restore in the same boot must do nothing: %+v", second)
+	if strings.Join(second.Started, ",") != "alpha,zeta" || strings.Join(second.Failed, ",") != "broken" {
+		t.Errorf("second restore must repeat the first result: %+v", second)
 	}
-	if strings.Count(out, "booted alpha") != 1 {
-		t.Errorf("alpha booted more than once:\n%s", out)
+	if strings.Count(out, "booted alpha") != 1 || strings.Count(out, "booting broken") != 1 {
+		t.Errorf("the second restore must not boot again:\n%s", out)
 	}
 }
 

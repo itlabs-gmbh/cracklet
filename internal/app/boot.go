@@ -18,10 +18,21 @@ var errLimaStopped = errors.New("stopped")
 // a reboot of the Mac, is started, and the microVMs that ran before it
 // stopped come back; anything else needs 'cracklet prepare'.
 func (a *App) requireRunning(ctx context.Context) error {
-	if err := a.checkRunning(ctx); !errors.Is(err, errLimaStopped) {
+	err := a.checkRunning(ctx)
+	switch {
+	case errors.Is(err, errLimaStopped):
+		return a.bootLima(ctx)
+	case err != nil:
 		return err
 	}
-	return a.bootLima(ctx)
+	// Another command may have started it and still restore its microVMs;
+	// the boot lock is only held for that, so this rarely waits.
+	release, err := a.waitForLimaBoot(ctx)
+	if err != nil {
+		return err
+	}
+	release()
+	return nil
 }
 
 // checkRunning fails unless the Lima instance is up, without starting it:

@@ -98,6 +98,42 @@ func TestLimaStartedByAnotherProcessIsNotStartedAgain(t *testing.T) {
 	}
 }
 
+// TestRunningLimaWaitsForAnOngoingRestore: a command that finds the Lima VM
+// already running while another one still restores its microVMs waits for
+// that restore, so `exec` or `ls` do not see the VMs half back.
+func TestRunningLimaWaitsForAnOngoingRestore(t *testing.T) {
+	restoring, finish := make(chan struct{}), make(chan struct{})
+	base := limaAfterReboot(`{"started":["vm1"],"failed":[]}`, false)
+	app, _, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
+		if strings.HasSuffix(strings.Join(args, " "), config.AgentPath+" restore") {
+			close(restoring)
+			<-finish
+		}
+		return base(name, args)
+	})
+	booted := make(chan error, 1)
+	go func() { booted <- app.requireRunning(context.Background()) }()
+	<-restoring // the first command has started Lima and is restoring
+	second := make(chan error, 1)
+	go func() { second <- app.requireRunning(context.Background()) }()
+	select {
+	case err := <-second:
+		t.Fatalf("the second command returned before the restore finished: %v", err)
+	case <-time.After(3 * bootLockPoll):
+	}
+	close(finish)
+	for _, ch := range []chan error{booted, second} {
+		select {
+		case err := <-ch:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("command did not finish after the restore")
+		}
+	}
+}
+
 func TestStoppedLimaIsNotStartedDuringResize(t *testing.T) {
 	app, fake, _ := newTestApp(t, limaAfterReboot(`{"started":[],"failed":[]}`, false))
 	release, err := app.holdLimaForResize()

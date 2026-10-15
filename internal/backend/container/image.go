@@ -16,7 +16,7 @@ const (
 	// ImageRef is the guest image every machine boots from.
 	ImageRef = "cracklet/guest:latest"
 	// imageRev is bumped whenever the Dockerfile changes.
-	imageRev = "1"
+	imageRev = "2"
 	labelRev = "cracklet.rev"
 	labelKey = "cracklet.key"
 )

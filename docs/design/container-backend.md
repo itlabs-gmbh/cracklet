@@ -188,11 +188,16 @@ secrets. None of that knows about Lima once `requireRunning` is behind
 
    ```dockerfile
    FROM ubuntu:24.04
-   RUN apt-get install systemd systemd-sysv systemd-resolved openssh-server sudo curl ca-certificates iproute2 \
+   ENV DEBIAN_FRONTEND=noninteractive
+   RUN apt-get update && apt-get install -y --no-install-recommends \
+         systemd systemd-sysv systemd-resolved openssh-server sudo curl ca-certificates iproute2 \
+    && rm -rf /var/lib/apt/lists/* \
     && systemctl enable ssh systemd-networkd systemd-resolved
    # networkd DHCP on e*: the guest gets the IP that `machine ls` reports
    RUN printf '[Match]\nName=e*\n\n[Network]\nDHCP=yes\n' > /etc/systemd/network/10-eth.network
-   RUN echo '<pubkey>' > /root/.ssh/authorized_keys && printf 'PermitRootLogin prohibit-password\n' > /etc/ssh/sshd_config.d/10-root.conf
+   RUN install -d -m 0700 /root/.ssh && echo '<pubkey>' > /root/.ssh/authorized_keys \
+    && chmod 0600 /root/.ssh/authorized_keys \
+    && printf 'PermitRootLogin prohibit-password\n' > /etc/ssh/sshd_config.d/10-root.conf
    LABEL cracklet.rev=<rev> cracklet.key=<sha256 of pubkey>
    ```
 
@@ -318,8 +323,9 @@ makes. Options, in order of preference:
   (argument lists are the contract) and JSON fixtures recorded from 1.5.0
   (`machine ls --format json`, `machine inspect`, `image inspect`).
 - Contract test shared by both backends (`backendtest` package): New → List
-  shows it running with an IP → Dial(22) connects → Stop → Start → Remove.
-  Runs in CI only against a fake; locally `make e2e BACKEND=container`.
+  shows it running with an IP → Stop → Start → Remove. A separate test checks
+  that Dial(22) connects on the container backend only (Lima returns
+  `ErrNoDial`). Runs in CI only against a fake; locally `make e2e BACKEND=container`.
 - Spike harness (`ccbench`, `tui_ready.py`) becomes `examples/bench/` so the
   numbers on the website can be reproduced.
 

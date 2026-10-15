@@ -86,7 +86,7 @@ func (b *Backend) List(ctx context.Context) ([]vm.Info, error) {
 		} else if err != nil {
 			return nil, err
 		}
-		infos = append(infos, infoFrom(m, r))
+		infos = append(infos, b.info(ctx, m, r))
 	}
 	return infos, nil
 }
@@ -101,7 +101,7 @@ func (b *Backend) Create(ctx context.Context, spec vm.Spec, createdAt time.Time)
 	if err != nil {
 		return vm.Info{}, err
 	}
-	name, err := b.createLocked(ctx, spec, createdAt)
+	name, id, err := b.createLocked(ctx, spec, createdAt)
 	release()
 	if err != nil {
 		return vm.Info{}, err
@@ -110,26 +110,33 @@ func (b *Backend) Create(ctx context.Context, spec vm.Spec, createdAt time.Time)
 	if errors.Is(err, errStoppedWhileBooting) {
 		return vm.Info{}, fmt.Errorf("%w and is kept; 'cracklet start %s' boots it", err, name)
 	}
+	if err == nil {
+		err = b.pinHostKeys(ctx, name, id, info.IP)
+	}
+	if errors.Is(err, errReplaced) {
+		return vm.Info{}, err // the name now belongs to another VM; nothing of ours is left
+	}
 	if err != nil {
 		return vm.Info{}, b.discard(ctx, name, err)
 	}
 	return info, nil
 }
 
-// createLocked records and creates the machine; it returns the chosen name.
-func (b *Backend) createLocked(ctx context.Context, spec vm.Spec, createdAt time.Time) (string, error) {
+// createLocked records and creates the machine; it returns the chosen name
+// and the record's id.
+func (b *Backend) createLocked(ctx context.Context, spec vm.Spec, createdAt time.Time) (string, string, error) {
 	machines, err := b.machines(ctx)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if err := b.pruneRecords(machines); err != nil {
-		return "", err
+		return "", "", err
 	}
 	name := spec.Name
 	if name == "" {
 		records, err := b.recordNames()
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		taken := make(map[string]bool, len(machines)+len(records))
 		for n := range machines {
@@ -140,24 +147,28 @@ func (b *Backend) createLocked(ctx context.Context, spec vm.Spec, createdAt time
 		}
 		name = freeName(taken)
 	} else if _, exists := machines[name]; exists {
-		return "", fmt.Errorf("VM '%s' already exists", name)
+		return "", "", fmt.Errorf("VM '%s' already exists", name)
 	}
-	rec := record{Owner: spec.Owner, Slot: spec.Slot, Profile: spec.ProfileName(), Running: true}
+	id, err := newRecordID()
+	if err != nil {
+		return "", "", err
+	}
+	rec := record{ID: id, Owner: spec.Owner, Slot: spec.Slot, Profile: spec.ProfileName(), Running: true}
 	if spec.Owner != "" {
 		created := createdAt.UTC()
 		rec.CreatedAt = &created
 	}
 	if err := b.saveRecord(name, rec); err != nil {
-		return "", err
+		return "", "", err
 	}
 	b.statusf("==> Creating %s (%d vCPUs, %d MiB)\n", name, spec.VCPUs, spec.MemMiB)
 	if _, err := b.runLong(ctx, "machine", "create", ImageRef, "--name", name,
 		"--cpus", strconv.Itoa(spec.VCPUs), "--memory", strconv.Itoa(spec.MemMiB)+"M", "--home-mount", "none"); err != nil {
 		cctx, cancel := cleanupContext(ctx)
 		defer cancel()
-		return "", b.discardLocked(cctx, name, err) // the caller holds the lock
+		return "", "", b.discardLocked(cctx, name, err) // the caller holds the lock
 	}
-	return name, nil
+	return name, id, nil
 }
 
 // cleanupTimeout bounds the removal of a failed creation, lock wait included,
@@ -221,6 +232,7 @@ func (b *Backend) Start(ctx context.Context, name string) (vm.Info, error) {
 	if err != nil {
 		return vm.Info{}, err
 	}
+	b.kickRelayFor(ctx, name)
 	return b.waitForSSH(ctx, name)
 }
 
@@ -289,25 +301,6 @@ func sameTime(a, b *time.Time) bool {
 	return a.Equal(*b)
 }
 
-// Forward implements backend.Backend; forwards arrive with the relay in a
-// later phase (Capabilities.Forwards is false, so app refuses them earlier).
-func (b *Backend) Forward(ctx context.Context, name string, _ []vm.Forward) (vm.Info, error) {
-	return vm.Info{}, b.noForwards(ctx, name)
-}
-
-// Unforward implements backend.Backend.
-func (b *Backend) Unforward(ctx context.Context, name string, _ []int) (vm.Info, error) {
-	return vm.Info{}, b.noForwards(ctx, name)
-}
-
-func (b *Backend) noForwards(ctx context.Context, name string) error {
-	hint := ""
-	if m, err := b.machine(ctx, name); err == nil && m.addr() != "" {
-		hint = fmt.Sprintf("; the Mac reaches %s directly at %s:PORT", name, m.addr())
-	}
-	return fmt.Errorf("port forwards are not supported on the container backend yet%s", hint)
-}
-
 // machine looks one of cracklet's machines up (read-only).
 func (b *Backend) machine(ctx context.Context, name string) (machine, error) {
 	if _, ok, err := b.loadRecord(name); err != nil && !errors.Is(err, errCorruptRecord) {
@@ -335,5 +328,13 @@ func (b *Backend) describe(ctx context.Context, name string) (vm.Info, error) {
 	if err != nil && !errors.Is(err, errCorruptRecord) {
 		return vm.Info{}, err
 	}
-	return infoFrom(m, r), nil
+	return b.info(ctx, m, r), nil
+}
+
+// info combines what `container` reports with the record, forwards and
+// their observed state included.
+func (b *Backend) info(ctx context.Context, m machine, r record) vm.Info {
+	info := infoFrom(m, r)
+	info.Forwards = b.forwardStates(ctx, m, r)
+	return info
 }

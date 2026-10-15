@@ -22,3 +22,10 @@ func TestDialIsNotSupported(t *testing.T) {
 		t.Errorf("Dial = %v, want ErrNoDial", err)
 	}
 }
+
+func TestLimaPinsNoHostKeys(t *testing.T) {
+	b := newTestBackend(t)
+	if got := b.KnownHostsFile(); got != "" {
+		t.Errorf("KnownHostsFile = %q; Lima guests share an image-wide host key", got)
+	}
+}

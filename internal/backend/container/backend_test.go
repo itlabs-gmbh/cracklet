@@ -425,18 +425,11 @@ func TestDialAndProxyCommand(t *testing.T) {
 	_ = conn.Close()
 }
 
-func TestForwardsAreRefusedWithTheAddress(t *testing.T) {
-	f := newFake()
-	b, _, _ := newTestBackend(t, f)
-	if _, err := b.Create(context.Background(), vm.Spec{Name: "web", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	_, err := b.Forward(context.Background(), "web", []vm.Forward{{Host: 8080, Guest: 80}})
-	if err == nil || !strings.Contains(err.Error(), "192.168.64.2:PORT") {
-		t.Errorf("want refusal with the direct address, got %v", err)
-	}
-	if b.Capabilities().Forwards {
-		t.Error("Capabilities must say no forwards")
+func TestCapabilitiesHaveForwardsAndTheGuardRail(t *testing.T) {
+	b, _, _ := newTestBackend(t, newFake())
+	caps := b.Capabilities()
+	if !caps.Forwards || !caps.GuestFirewall || caps.Snapshots || caps.Profiles || caps.Resize {
+		t.Errorf("Capabilities = %+v", caps)
 	}
 }
 

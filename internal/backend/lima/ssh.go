@@ -21,3 +21,8 @@ func (b *Backend) SSHProxyCommand() string {
 func (b *Backend) Dial(context.Context, string, int) (backend.Conn, error) {
 	return nil, fmt.Errorf("lima backend: %w", backend.ErrNoDial)
 }
+
+// KnownHostsFile implements backend.Backend. Every Lima guest boots the same
+// image and so presents the same host key; a firewall per guest keeps a guest
+// from posing as another, so there is nothing to pin.
+func (b *Backend) KnownHostsFile() string { return "" }

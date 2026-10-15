@@ -19,13 +19,16 @@ func (b *Backend) SSHProxyCommand() string {
 	return shquote.Quote(strings.ReplaceAll(b.exe, "%", "%%")) + " _dial %h %p"
 }
 
+// KnownHostsFile implements backend.Backend: the host keys read from every
+// VM at creation (see pinHostKeys), so ssh refuses a neighbour on the shared
+// vmnet that answers under another VM's address.
+func (b *Backend) KnownHostsFile() string { return b.paths.KnownHostsPath() }
+
 // Dial implements backend.Backend. The address comes from `machine ls`; on
 // vmnet every guest shares one /24 and nothing stops a guest from taking
-// another guest's address, while the generated ssh_config does not verify
-// host keys. A hostile guest could therefore pose as its neighbour towards the
-// Mac. The Lima backend is not exposed to this (one /30 and a firewall per
-// guest); for this backend, pinning each VM's host key at creation is part of
-// Phase 4 (docs/design/container-backend.md, "Network isolation").
+// another guest's address, so ssh verifies the host key pinned at creation
+// (hostkeys.go). Port forwards carry no such check: a neighbour on a VM's
+// address receives that VM's forwarded connections.
 func (b *Backend) Dial(ctx context.Context, name string, port int) (backend.Conn, error) {
 	m, err := b.machine(ctx, name)
 	if err != nil {

@@ -16,9 +16,22 @@ import (
 const runningWithForward = `{"name":"web","index":1,"ip":"172.16.1.2","state":"running","vcpus":2,"mem_mib":1024,` +
 	`"forwards":[{"host":8080,"guest":80,"state":"active"}]}`
 
+// runningNoForward is the same VM before any forward, as `ls` reports it.
+const runningNoForward = `{"name":"web","index":1,"ip":"172.16.1.2","state":"running","vcpus":2,"mem_mib":1024,"forwards":[]}`
+
+// withList adds the `ls` answer Forward needs to see the VM's current
+// forwards: the VM as listed before the forward.
+func withList(responses map[string]string) map[string]string {
+	merged := map[string]string{"ls": "[" + runningNoForward + "]"}
+	for k, v := range responses {
+		merged[k] = v
+	}
+	return merged
+}
+
 func forwardApp(t *testing.T, responses map[string]string, probeResult bool) (*App, *runner.Fake, *bytes.Buffer, *[]int) {
 	t.Helper()
-	fake := runner.NewFake(defaultHandler(responses))
+	fake := runner.NewFake(defaultHandler(withList(responses)))
 	out := &bytes.Buffer{}
 	probed := &[]int{}
 	app := New(fake, config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}, out,
@@ -31,7 +44,7 @@ func forwardApp(t *testing.T, responses map[string]string, probeResult bool) (*A
 }
 
 func TestForwardRefusesBusyHostPorts(t *testing.T) {
-	fake := runner.NewFake(defaultHandler(map[string]string{"forward": runningWithForward}))
+	fake := runner.NewFake(defaultHandler(withList(map[string]string{"forward": runningWithForward})))
 	app := New(fake, config.Paths{Home: t.TempDir()}, &bytes.Buffer{},
 		WithPortProbe(func(context.Context, int) bool { return true }),
 		WithPortCheck(func(port int) bool { return port == 8080 }))
@@ -178,12 +191,31 @@ func TestForwardSurfacesAgentErrors(t *testing.T) {
 		if strings.Contains(strings.Join(args, " "), " forward ") {
 			return nil, errors.New("host port 8080 is already forwarded to VM 'other'")
 		}
-		return defaultHandler(nil)(name, args)
+		return defaultHandler(withList(nil))(name, args)
 	})
 	app := New(fake, config.Paths{Home: t.TempDir()}, &bytes.Buffer{},
 		WithPortProbe(func(context.Context, int) bool { return true }),
 		WithPortCheck(func(int) bool { return false }))
 	if _, err := app.Forward(context.Background(), "web", []string{"8080"}); err == nil || !strings.Contains(err.Error(), "already forwarded") {
 		t.Fatalf("expected agent error, got %v", err)
+	}
+}
+
+// TestForwardMayReplaceItsOwnBusyPort: a host port the VM already owns is
+// busy on the Mac (the relay or Lima serve it), yet re-forwarding it to
+// another guest port must work; only ports of other listeners are refused.
+func TestForwardMayReplaceItsOwnBusyPort(t *testing.T) {
+	fake := runner.NewFake(defaultHandler(map[string]string{"forward": runningWithForward, "ls": "[" + runningWithForward + "]"}))
+	app := New(fake, config.Paths{Home: t.TempDir()}, &bytes.Buffer{},
+		WithPortProbe(func(context.Context, int) bool { return true }),
+		WithPortCheck(func(port int) bool { return port == 8080 || port == 9090 }))
+	if _, err := app.Forward(context.Background(), "web", []string{"8080:8080"}); err != nil {
+		t.Fatalf("re-forwarding the VM's own port must pass: %v", err)
+	}
+	if !fake.CalledWithSuffix(" forward web 8080:8080") {
+		t.Errorf("agent call missing:\n%s", fake.Dump())
+	}
+	if _, err := app.Forward(context.Background(), "web", []string{"9090:90"}); err == nil || !strings.Contains(err.Error(), "already in use") {
+		t.Errorf("a port of another listener must still be refused, got %v", err)
 	}
 }

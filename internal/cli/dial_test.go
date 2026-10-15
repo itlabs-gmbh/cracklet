@@ -42,3 +42,16 @@ func TestDialOnLimaExplainsItself(t *testing.T) {
 		t.Errorf("no command may run for an unsupported dial:\n%s", fake.Dump())
 	}
 }
+
+func TestRelayCommandIsHiddenAndTakesNoArgs(t *testing.T) {
+	cmd, _, err := newRoot(nil).Find([]string{"_relay"})
+	if err != nil || cmd == nil || !cmd.Hidden {
+		t.Fatalf("_relay must exist and be hidden: %v", err)
+	}
+	if err := cmd.Args(cmd, []string{"extra"}); err == nil {
+		t.Error("_relay takes no arguments")
+	}
+	if _, _, err := run(t, "_relay"); err == nil || !strings.Contains(err.Error(), "relay") {
+		t.Errorf("the Lima backend has no relay to run, got %v", err)
+	}
+}

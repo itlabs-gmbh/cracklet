@@ -2,6 +2,8 @@ package container
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,11 +23,20 @@ import (
 // restart of the service brings it back). The Lima agent keeps the same facts
 // inside its VM; here they live on the Mac, next to the backend choice.
 type record struct {
+	// ID tells this VM from a later one created under the same name while
+	// an unlocked step (the host key scan) of the first was still running.
+	ID        string     `json:"id,omitempty"`
 	Owner     string     `json:"owner,omitempty"`
 	Slot      string     `json:"slot,omitempty"`
 	CreatedAt *time.Time `json:"created_at,omitempty"`
 	Profile   string     `json:"profile,omitempty"`
 	Running   bool       `json:"running"`
+	// HostKeys are the "TYPE KEY" lines ssh-keyscan read from the VM on its
+	// first boot; known_hosts is rendered from them.
+	HostKeys []string `json:"host_keys,omitempty"`
+	// Forwards are served by the relay (relay.go); only host and guest port
+	// are stored, the state is observed when the VM is described.
+	Forwards []vm.Forward `json:"forwards,omitempty"`
 }
 
 // errCorruptRecord marks a record file that exists but cannot be parsed; the
@@ -104,11 +115,13 @@ func (b *Backend) setRunning(name string, running bool) error {
 	return b.saveRecord(name, r)
 }
 
+// removeRecord drops the record and, with it, the VM's line in known_hosts.
+// Callers hold the lock.
 func (b *Backend) removeRecord(name string) error {
 	if err := os.Remove(b.recordPath(name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("remove %s: %w", b.recordPath(name), err)
 	}
-	return nil
+	return b.writeKnownHosts()
 }
 
 // recordNames lists the VMs cracklet created, sorted.
@@ -146,6 +159,15 @@ func (b *Backend) pruneRecords(machines map[string]machine) error {
 		}
 	}
 	return nil
+}
+
+// newRecordID returns a random identifier for a record.
+func newRecordID() (string, error) {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", fmt.Errorf("generate record id: %w", err)
+	}
+	return hex.EncodeToString(buf[:]), nil
 }
 
 // freeName picks the first vm<N> that neither a record nor a machine uses.

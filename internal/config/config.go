@@ -86,6 +86,10 @@ func (p Paths) PubKeyPath() string { return p.KeyPath() + ".pub" }
 // SSHConfigPath is the generated ssh_config with the *.cracklet host alias.
 func (p Paths) SSHConfigPath() string { return filepath.Join(p.Home, "ssh_config") }
 
+// KnownHostsPath holds the pinned host keys of microVMs on backends that
+// read them at creation (the container backend).
+func (p Paths) KnownHostsPath() string { return filepath.Join(p.Home, "known_hosts") }
+
 // LimaTemplatePath is the rendered Lima template used to create the instance.
 func (p Paths) LimaTemplatePath() string { return filepath.Join(p.Home, "lima.yaml") }
 
@@ -127,6 +131,13 @@ func (p Paths) ContainerLockPath() string { return filepath.Join(p.Home, "contai
 // ContainerBootLockPath is held while the container system service is started
 // and its machines restored, so parallel commands wait for the VMs to be back.
 func (p Paths) ContainerBootLockPath() string { return filepath.Join(p.Home, "container-boot.lock") }
+
+// RelayLockPath is held by the running forward relay (`cracklet _relay`), so
+// a command can tell whether one serves this state directory.
+func (p Paths) RelayLockPath() string { return filepath.Join(p.Home, "relay.lock") }
+
+// RelayLogPath collects what the detached relay prints.
+func (p Paths) RelayLogPath() string { return filepath.Join(p.Home, "relay.log") }
 
 // LimaSSHConfig is the ssh_config Lima writes for an instance.
 func (p Paths) LimaSSHConfig(instance string) string {

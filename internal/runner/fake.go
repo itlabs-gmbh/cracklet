@@ -25,6 +25,13 @@ func NewFake(handle FakeHandler) *Fake {
 	return &Fake{handler: handle, inputs: map[string]string{}}
 }
 
+// Reset forgets the recorded calls, so a test can assert on one step alone.
+func (f *Fake) Reset() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls, f.argv, f.inputs = nil, nil, map[string]string{}
+}
+
 func (f *Fake) record(name string, args []string, input string) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()

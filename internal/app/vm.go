@@ -75,8 +75,8 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 		}
 	}
 	a.printf("%s is running at %s\n  cracklet ssh %s\n  ssh %s.%s\n", info.Name, info.IP, info.Name, info.Name, config.Instance)
-	if len(spec.Forwards) > 0 {
-		if info, err = a.Forward(ctx, info.Name, spec.Forwards); err != nil {
+	if len(forwards) > 0 {
+		if info, err = a.forward(ctx, info, forwards); err != nil {
 			return info, err
 		}
 	}

@@ -51,6 +51,14 @@ type Conn interface {
 // directly; their ssh_config uses another ProxyCommand.
 var ErrNoDial = errors.New("direct connections to guests are not supported")
 
+// ForwardRelay is implemented by backends whose port forwards are served on
+// the Mac by `cracklet _relay` (a detached child process of the command that
+// needed it) rather than inside a runtime VM. ServeForwards listens on every recorded forward until ctx ends or the
+// backend decides the relay has nothing left to do.
+type ForwardRelay interface {
+	ServeForwards(ctx context.Context) error
+}
+
 // Capabilities tells app which optional features a backend has, so an
 // unsupported flag fails early with a clear message.
 type Capabilities struct {
@@ -119,6 +127,10 @@ type Backend interface {
 	// SSHProxyCommand is the ProxyCommand line rendered into ssh_config, with
 	// ssh's %h and %p placeholders (e.g. "cracklet _dial %h %p").
 	SSHProxyCommand() string
+	// KnownHostsFile is the file with the pinned host key of every microVM,
+	// rendered into ssh_config with strict host key checking; empty when the
+	// backend does not pin keys.
+	KnownHostsFile() string
 	// Dial opens a TCP connection to port inside the named VM. It backs
 	// `cracklet _dial` and the forward relay; backends without a direct path
 	// return ErrNoDial.

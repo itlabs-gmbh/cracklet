@@ -507,3 +507,42 @@ func TestPrepareRestoresMachinesAfterReboot(t *testing.T) {
 		t.Errorf("prepare as the first command after a reboot must restore the VMs:\n%s", fake.Dump())
 	}
 }
+
+// TestStopDuringBootKeepsTheVM: a stop that lands while Create still waits
+// for sshd must not turn the creation into a failure that removes the disk.
+func TestStopDuringBootKeepsTheVM(t *testing.T) {
+	f := newFake()
+	b, fake, _ := newTestBackend(t, f, WithSSHWait(2*time.Second, 5*time.Millisecond),
+		WithDialer(func(context.Context, string) (backend.Conn, error) { return nil, errors.New("not yet") }))
+	ctx := context.Background()
+	done := make(chan error, 1)
+	go func() {
+		_, err := b.Create(ctx, vm.Spec{Name: "slow", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now())
+		done <- err
+	}()
+	// Wait until the machine exists and Create is polling, then stop it.
+	for {
+		f.mu.Lock()
+		_, exists := f.machines["slow"]
+		f.mu.Unlock()
+		if exists {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if _, err := b.Stop(ctx, "slow"); err != nil {
+		t.Fatalf("stop during boot: %v", err)
+	}
+	err := <-done
+	if err == nil || !strings.Contains(err.Error(), "is kept") {
+		t.Fatalf("Create must report the stop and keep the VM, got %v", err)
+	}
+	if fake.CalledWithSuffix("machine rm slow") {
+		t.Errorf("stop promises to keep the disk:\n%s", fake.Dump())
+	}
+	list, err := b.List(ctx)
+	if err != nil || len(list) != 1 || list[0].State != vm.StateStopped {
+		t.Errorf("List = %+v, %v; want the stopped VM", list, err)
+	}
+}

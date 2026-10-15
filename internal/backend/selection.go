@@ -59,11 +59,21 @@ func SaveName(paths config.Paths, name string) error {
 	if err := os.MkdirAll(paths.Home, 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", paths.Home, err)
 	}
-	tmp := paths.BackendPath() + ".tmp"
-	if err := os.WriteFile(tmp, []byte(name+"\n"), 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", tmp, err)
+	tmp, err := os.CreateTemp(paths.Home, "backend-*.tmp")
+	if err != nil {
+		return fmt.Errorf("write %s: %w", paths.BackendPath(), err)
 	}
-	if err := os.Rename(tmp, paths.BackendPath()); err != nil {
+	if _, err := tmp.WriteString(name + "\n"); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("write %s: %w", tmp.Name(), err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("write %s: %w", tmp.Name(), err)
+	}
+	if err := os.Rename(tmp.Name(), paths.BackendPath()); err != nil {
+		_ = os.Remove(tmp.Name())
 		return fmt.Errorf("write %s: %w", paths.BackendPath(), err)
 	}
 	return nil

@@ -35,3 +35,29 @@ func TestSelectionRoundTripAndValidation(t *testing.T) {
 		t.Error("a corrupt backend file must be reported, not silently defaulted")
 	}
 }
+
+func TestSaveNameConcurrently(t *testing.T) {
+	paths := config.Paths{Home: t.TempDir()}
+	done := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		go func(i int) {
+			name := NameLima
+			if i%2 == 0 {
+				name = NameContainer
+			}
+			done <- SaveName(paths, name)
+		}(i)
+	}
+	for i := 0; i < 8; i++ {
+		if err := <-done; err != nil {
+			t.Errorf("concurrent SaveName: %v", err)
+		}
+	}
+	if _, err := LoadName(paths); err != nil {
+		t.Errorf("LoadName after concurrent saves: %v", err)
+	}
+	entries, _ := os.ReadDir(paths.Home)
+	if len(entries) != 1 {
+		t.Errorf("temp files left behind: %v", entries)
+	}
+}

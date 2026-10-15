@@ -150,14 +150,27 @@ func (b *Backend) createLocked(ctx context.Context, spec vm.Spec, createdAt time
 	b.statusf("==> Creating %s (%d vCPUs, %d MiB)\n", name, spec.VCPUs, spec.MemMiB)
 	if _, err := b.runLong(ctx, "machine", "create", ImageRef, "--name", name,
 		"--cpus", strconv.Itoa(spec.VCPUs), "--memory", strconv.Itoa(spec.MemMiB)+"M", "--home-mount", "none"); err != nil {
-		return "", b.discardLocked(ctx, name, err) // the caller holds the lock
+		cctx, cancel := cleanupContext(ctx)
+		defer cancel()
+		return "", b.discardLocked(cctx, name, err) // the caller holds the lock
 	}
 	return name, nil
 }
 
+// cleanupTimeout bounds the removal of a failed creation, lock wait included,
+// so a hanging `machine rm` cannot hold container.lock forever.
+const cleanupTimeout = 2 * time.Minute
+
+// cleanupContext survives Ctrl-C (the cleanup is the one thing that must still
+// happen) but not forever.
+func cleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+}
+
 // discard removes a VM whose creation failed; it takes the lock first.
 func (b *Backend) discard(ctx context.Context, name string, err error) error {
-	ctx = context.WithoutCancel(ctx)
+	ctx, cancel := cleanupContext(ctx)
+	defer cancel()
 	release, lockErr := b.lock(ctx)
 	if lockErr != nil {
 		return errors.Join(err, lockErr)
@@ -168,10 +181,13 @@ func (b *Backend) discard(ctx context.Context, name string, err error) error {
 
 // discardLocked removes the machine (if the API created one) and the record
 // of a failed creation and folds a failed cleanup into err, so the user learns
-// about a leftover instead of finding an invisible machine later. It survives
-// Ctrl-C: the cleanup is the one thing that must still happen.
+// about a leftover instead of finding an invisible machine later. A VM that
+// `cracklet stop` stopped while it was still booting is kept: its record says
+// so, and stop promises to keep the disk.
 func (b *Backend) discardLocked(ctx context.Context, name string, err error) error {
-	ctx = context.WithoutCancel(ctx)
+	if rec, ok, recErr := b.loadRecord(name); recErr == nil && ok && !rec.Running {
+		return fmt.Errorf("%w; %s was stopped while it booted and is kept, 'cracklet start %s' boots it", err, name, name)
+	}
 	machines, lsErr := b.machines(ctx)
 	if lsErr != nil {
 		return errors.Join(err, lsErr)

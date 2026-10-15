@@ -29,5 +29,6 @@ func (a *App) Prepare(ctx context.Context, o PrepareOptions) error {
 
 // Doctor prints the host and runtime state without changing anything.
 func (a *App) Doctor(ctx context.Context) error {
+	a.printf("backend: %s\n", a.backend.Name())
 	return a.backend.Doctor(ctx)
 }

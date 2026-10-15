@@ -41,7 +41,7 @@ func run(t *testing.T, args ...string) (string, *runner.Fake, error) {
 	t.Helper()
 	fake := runner.NewFake(fakeHandler(t))
 	buf := &bytes.Buffer{}
-	root := newRoot(func(out io.Writer) (*app.App, error) {
+	root := newRoot(func(out io.Writer, _ string) (*app.App, error) {
 		return app.New(fake, config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}, out), nil
 	})
 	root.SetOut(buf)
@@ -124,7 +124,7 @@ func TestSSHStripsLeadingSeparator(t *testing.T) {
 }
 
 func TestBuilderErrorsSurface(t *testing.T) {
-	root := newRoot(func(io.Writer) (*app.App, error) { return nil, errors.New("no home") })
+	root := newRoot(func(io.Writer, string) (*app.App, error) { return nil, errors.New("no home") })
 	root.SetOut(io.Discard)
 	root.SetErr(io.Discard)
 	root.SetArgs([]string{"ls"})
@@ -160,7 +160,7 @@ func TestStartStopForwardToAgent(t *testing.T) {
 	}
 	fake := runner.NewFake(handler)
 	for _, verb := range []string{"start", "stop"} {
-		root := newRoot(func(out io.Writer) (*app.App, error) {
+		root := newRoot(func(out io.Writer, _ string) (*app.App, error) {
 			return app.New(fake, config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}, out), nil
 		})
 		root.SetOut(io.Discard)
@@ -190,7 +190,7 @@ func TestPrepareAndDoctorWiring(t *testing.T) {
 	}
 	fake := runner.NewFake(handler)
 	home := t.TempDir()
-	build := func(out io.Writer) (*app.App, error) {
+	build := func(out io.Writer, _ string) (*app.App, error) {
 		return app.New(fake, config.Paths{Home: home, LimaHome: "/tmp/lima"}, out,
 			app.WithPlatform("darwin", "arm64"),
 			app.WithLookPath(func(string) (string, error) { return "/usr/local/bin/x", nil })), nil
@@ -242,7 +242,7 @@ func TestPrepareResizesOnlyExplicitFlags(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	root := newRoot(func(out io.Writer) (*app.App, error) {
+	root := newRoot(func(out io.Writer, _ string) (*app.App, error) {
 		return app.New(fake, paths, out,
 			app.WithPlatform("darwin", "arm64"),
 			app.WithLookPath(func(string) (string, error) { return "/usr/local/bin/x", nil }),
@@ -262,7 +262,7 @@ func TestPrepareResizesOnlyExplicitFlags(t *testing.T) {
 
 func TestDefaultBuilder(t *testing.T) {
 	t.Setenv("CRACKLET_HOME", t.TempDir())
-	if a, err := defaultBuilder(io.Discard); err != nil || a == nil {
+	if a, err := defaultBuilder(io.Discard, ""); err != nil || a == nil {
 		t.Fatalf("defaultBuilder: %v", err)
 	}
 }
@@ -283,7 +283,7 @@ func TestForwardCommands(t *testing.T) {
 	fake := runner.NewFake(handler)
 	exec := func(args ...string) (string, error) {
 		buf := &bytes.Buffer{}
-		root := newRoot(func(out io.Writer) (*app.App, error) {
+		root := newRoot(func(out io.Writer, _ string) (*app.App, error) {
 			return app.New(fake, config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}, out,
 				app.WithPortProbe(func(context.Context, int) bool { return true }),
 				app.WithPortCheck(func(int) bool { return false })), nil
@@ -330,7 +330,7 @@ func TestNewWithPortFlags(t *testing.T) {
 		return fakeHandler(t)(name, args)
 	}
 	fake := runner.NewFake(handler)
-	root := newRoot(func(out io.Writer) (*app.App, error) {
+	root := newRoot(func(out io.Writer, _ string) (*app.App, error) {
 		return app.New(fake, config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}, out,
 			app.WithPortProbe(func(context.Context, int) bool { return true }),
 			app.WithPortCheck(func(int) bool { return false })), nil

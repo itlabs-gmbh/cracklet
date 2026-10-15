@@ -13,19 +13,31 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/itlabs-gmbh/cracklet/internal/app"
+	"github.com/itlabs-gmbh/cracklet/internal/backend"
 	"github.com/itlabs-gmbh/cracklet/internal/config"
 	"github.com/itlabs-gmbh/cracklet/internal/runner"
 )
 
-// appBuilder constructs the App once the output writer is known.
-type appBuilder func(out io.Writer) (*app.App, error)
+// appBuilder constructs the App once the output writer is known. backendName
+// is the choice `prepare --backend` made on this run, or "" to use the
+// stored one.
+type appBuilder func(out io.Writer, backendName string) (*app.App, error)
 
-func defaultBuilder(out io.Writer) (*app.App, error) {
+func defaultBuilder(out io.Writer, backendName string) (*app.App, error) {
 	paths, err := config.DefaultPaths()
 	if err != nil {
 		return nil, err
 	}
-	return app.New(runner.NewExec(), paths, out), nil
+	if backendName != "" {
+		if err := backend.SaveName(paths, backendName); err != nil {
+			return nil, err
+		}
+	}
+	name, err := backend.LoadName(paths)
+	if err != nil {
+		return nil, err
+	}
+	return app.New(runner.NewExec(), paths, out, app.WithBackendName(name)), nil
 }
 
 // Main runs the CLI and returns the process exit code. Ctrl-C or SIGTERM
@@ -68,7 +80,7 @@ root disk, IP address and SSH access.`,
 			if wantsJSON(cmd) || cmd.Annotations[annotationStdoutIsData] != "" {
 				out = cmd.ErrOrStderr()
 			}
-			a, err = build(out)
+			a, err = build(out, chosenBackend(cmd))
 			return err
 		},
 	}

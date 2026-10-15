@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/itlabs-gmbh/cracklet/internal/backend"
+	"github.com/itlabs-gmbh/cracklet/internal/backend/container"
 	"github.com/itlabs-gmbh/cracklet/internal/backend/lima"
 	"github.com/itlabs-gmbh/cracklet/internal/config"
 	"github.com/itlabs-gmbh/cracklet/internal/host"
@@ -103,7 +104,20 @@ func WithBackend(b backend.Backend) Option {
 	return func(a *App) { a.newBackend = func(*App) backend.Backend { return b } }
 }
 
-// New wires an App. Without WithBackend it drives the Lima backend.
+// WithBackendName selects the backend by its stored name (see
+// backend.LoadName); the App builds it from its own runner and writers.
+func WithBackendName(name string) Option {
+	return func(a *App) {
+		switch name {
+		case backend.NameContainer:
+			a.newBackend = containerBackend
+		default:
+			a.newBackend = limaBackend
+		}
+	}
+}
+
+// New wires an App. Without WithBackend or WithBackendName it drives the Lima backend.
 func New(r runner.Runner, paths config.Paths, out io.Writer, opts ...Option) *App {
 	a := &App{r: r, paths: paths, out: out, status: os.Stderr,
 		lookPath: exec.LookPath, probe: waitForHostPort, portBusy: hostPortBusy, tunnelRetry: defaultTunnelRetry,
@@ -116,6 +130,12 @@ func New(r runner.Runner, paths config.Paths, out io.Writer, opts ...Option) *Ap
 	}
 	a.backend = a.newBackend(a)
 	return a
+}
+
+// containerBackend builds the apple/container backend.
+func containerBackend(a *App) backend.Backend {
+	return container.New(a.r, a.paths, a.out, a.status,
+		container.WithFacts(a.gatherFacts), container.WithLookPath(a.lookPath))
 }
 
 // limaBackend builds the Lima backend from the App's runner, writers and the

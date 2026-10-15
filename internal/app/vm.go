@@ -26,6 +26,9 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 		f, _ := vm.ParseForward(s) // validated above
 		forwards = append(forwards, f)
 	}
+	if err := a.checkForwardsSupported(forwards); err != nil {
+		return VMInfo{}, err
+	}
 	if err := a.checkHostPortsFree(forwards); err != nil {
 		return VMInfo{}, err
 	}

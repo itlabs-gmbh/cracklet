@@ -18,7 +18,7 @@ func runIn(t *testing.T, home string, stdin string, args ...string) (string, *ru
 	t.Helper()
 	fake := runner.NewFake(fakeHandler(t))
 	buf := &bytes.Buffer{}
-	root := newRoot(func(out io.Writer) (*app.App, error) {
+	root := newRoot(func(out io.Writer, _ string) (*app.App, error) {
 		tunnel := func(ctx contextT, name string) (string, func(), error) { return "/tmp/t.sock", func() {}, nil }
 		return app.New(fake, config.Paths{Home: home, LimaHome: "/tmp/lima"}, out, app.WithTunnel(tunnel)), nil
 	})

@@ -3,6 +3,7 @@ package container
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -52,7 +53,7 @@ func TestPrepareInstallsCLIStartsServiceAndBuildsImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"brew install container", "container system start --enable-kernel-install", "container build --tag " + ImageRef} {
-		if !fake.CalledWithSuffix(want) && !called(fake.Calls(), want) {
+		if !called(fake.Calls(), want) {
 			t.Errorf("missing %q in:\n%s", want, fake.Dump())
 		}
 	}
@@ -109,10 +110,153 @@ func TestOlderThan(t *testing.T) {
 	for _, tc := range []struct {
 		have, want string
 		older      bool
-	}{{"1.5.0", "1.5.0", false}, {"1.4.9", "1.5.0", true}, {"1.10.0", "1.5.0", false}, {"2", "1.5.0", false}, {"0.9", "1.5.0", true}} {
-		if got := olderThan(tc.have, tc.want); got != tc.older {
-			t.Errorf("olderThan(%s, %s) = %v", tc.have, tc.want, got)
+		bad        bool
+	}{{"1.5.0", "1.5.0", false, false}, {"1.4.9", "1.5.0", true, false}, {"1.10.0", "1.5.0", false, false},
+		{"2", "1.5.0", false, false}, {"0.9", "1.5.0", true, false}, {"1.6.0-rc1", "1.5.0", false, false},
+		{"garbage", "1.5.0", false, true}, {"", "1.5.0", false, true}} {
+		got, err := olderThan(tc.have, tc.want)
+		if (err != nil) != tc.bad || got != tc.older {
+			t.Errorf("olderThan(%q, %s) = %v, %v", tc.have, tc.want, got, err)
 		}
+	}
+}
+
+// TestListDoesNotPruneARecordBeingCreated: a record is written before its
+// machine shows up in `machine ls`; an unlocked List must leave it alone.
+func TestListDoesNotPruneARecordBeingCreated(t *testing.T) {
+	f := newFake()
+	b, _, _ := newTestBackend(t, f)
+	if err := b.saveRecord("fresh", record{Running: true}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := b.List(context.Background())
+	if err != nil || len(list) != 0 {
+		t.Fatalf("List = %+v, %v; the machine does not exist yet", list, err)
+	}
+	if names, _ := b.recordNames(); len(names) != 1 {
+		t.Fatalf("record must survive a concurrent List, got %v", names)
+	}
+	// Create prunes leftovers itself, under the lock.
+	if _, err := b.Create(context.Background(), vm.Spec{Name: "other", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if names, _ := b.recordNames(); len(names) != 1 || names[0] != "other" {
+		t.Errorf("stale record must be pruned by Create, got %v", names)
+	}
+}
+
+func TestCreateFailureRemovesMachineAndRecord(t *testing.T) {
+	f := newFake()
+	b, fake, _ := newTestBackend(t, f)
+	f.failing["container machine create"] = errors.New("apiserver: boom")
+	// The API may have created the machine before failing.
+	f.mu.Lock()
+	f.machines["half"] = &machine{ID: "half", Status: "stopped"}
+	f.mu.Unlock()
+	_, err := b.Create(context.Background(), vm.Spec{VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("want the create error, got %v", err)
+	}
+	if names, _ := b.recordNames(); len(names) != 0 {
+		t.Errorf("record must be gone, got %v", names)
+	}
+	// vm1 was the auto-picked name (half is unrecorded but taken): rm only if it exists.
+	if fake.CalledWithSuffix("machine rm vm1") {
+		t.Errorf("no rm for a machine the API never created:\n%s", fake.Dump())
+	}
+	auto, err := b.Create(context.Background(), vm.Spec{VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now())
+	if err == nil {
+		t.Fatalf("create still failing, got %+v", auto)
+	}
+}
+
+func TestAutoNameSkipsUnrecordedMachines(t *testing.T) {
+	f := newFake()
+	f.machines["vm1"] = &machine{ID: "vm1", Status: "running", IP: "192.168.64.50"}
+	b, _, _ := newTestBackend(t, f)
+	info, err := b.Create(context.Background(), vm.Spec{VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now())
+	if err != nil || info.Name != "vm2" {
+		t.Fatalf("auto name = %q, %v; want vm2 (vm1 belongs to the user)", info.Name, err)
+	}
+	if _, err := b.Create(context.Background(), vm.Spec{Name: "vm1", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("an unrecorded machine still blocks its name: %v", err)
+	}
+}
+
+func TestRemoveOnlyTouchesCrackletsMachines(t *testing.T) {
+	f := newFake()
+	f.machines["theirs"] = &machine{ID: "theirs", Status: "running", IP: "192.168.64.60"}
+	b, fake, _ := newTestBackend(t, f)
+	if _, err := b.Remove(context.Background(), "theirs", nil); err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("a machine without a record must not be removable, got %v", err)
+	}
+	if fake.CalledWithSuffix("machine rm theirs") {
+		t.Errorf("machine rm must not run:\n%s", fake.Dump())
+	}
+	// A stale record whose machine is gone: unguarded rm reports it removed
+	// (gone=false, like Lima), guarded rm reports gone.
+	if err := b.saveRecord("stale", record{}); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := b.Remove(context.Background(), "stale", nil)
+	if err != nil || gone {
+		t.Errorf("unguarded remove of a stale record: gone=%v err=%v", gone, err)
+	}
+	if err := b.saveRecord("stale2", record{Owner: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	gone, err = b.Remove(context.Background(), "stale2", &backend.RemoveGuard{Owner: "x"})
+	if err != nil || !gone {
+		t.Errorf("guarded remove of a stale record: gone=%v err=%v", gone, err)
+	}
+}
+
+func TestCorruptRecordStillListsAndRemoves(t *testing.T) {
+	f := newFake()
+	b, _, out := newTestBackend(t, f)
+	if _, err := b.Create(context.Background(), vm.Spec{Name: "odd", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b.recordPath("odd"), []byte("{truncated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	list, err := b.List(context.Background())
+	if err != nil || len(list) != 1 || list[0].Name != "odd" || !strings.Contains(out.String(), "corrupt record") {
+		t.Fatalf("List = %+v, %v\n%s", list, err, out.String())
+	}
+	if _, err := b.Remove(context.Background(), "odd", nil); err != nil {
+		t.Fatalf("rm must still work: %v", err)
+	}
+}
+
+func TestDialRefusesStoppedMachine(t *testing.T) {
+	f := newFake()
+	b, _, _ := newTestBackend(t, f)
+	if _, err := b.Create(context.Background(), vm.Spec{Name: "s", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Stop(context.Background(), "s"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Dial(context.Background(), "s", 22); err == nil || !strings.Contains(err.Error(), "stopped") {
+		t.Errorf("want a stopped hint, got %v", err)
+	}
+}
+
+func TestProxyCommandEscapesPercent(t *testing.T) {
+	b, _, _ := newTestBackend(t, newFake(), WithExecutable("/Users/a%b/cracklet"))
+	if got := b.SSHProxyCommand(); got != "/Users/a%%b/cracklet _dial %h %p" {
+		t.Errorf("SSHProxyCommand = %q", got)
+	}
+}
+
+func TestReadyIsANoopWhileAlive(t *testing.T) {
+	b, fake, _ := newTestBackend(t, newFake())
+	if err := b.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if called(fake.Calls(), "system start") {
+		t.Errorf("no start while the service runs:\n%s", fake.Dump())
 	}
 }
 
@@ -203,7 +347,7 @@ func TestCreateCleansUpWhenSSHNeverAnswers(t *testing.T) {
 	}
 }
 
-func TestListDropsRecordsOfVanishedMachines(t *testing.T) {
+func TestListHidesVanishedMachinesUntilPruned(t *testing.T) {
 	f := newFake()
 	b, _, _ := newTestBackend(t, f)
 	if _, err := b.Create(context.Background(), vm.Spec{Name: "gone", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
@@ -215,6 +359,11 @@ func TestListDropsRecordsOfVanishedMachines(t *testing.T) {
 	list, err := b.List(context.Background())
 	if err != nil || len(list) != 0 {
 		t.Fatalf("List = %+v, %v", list, err)
+	}
+	// List is read-only (it cannot tell a vanished VM from one being created);
+	// the stale record goes with the next locked operation.
+	if _, err := b.Remove(context.Background(), "gone", nil); err != nil {
+		t.Fatalf("rm of a vanished VM clears its record: %v", err)
 	}
 	if names, _ := b.recordNames(); len(names) != 0 {
 		t.Errorf("stale record must be dropped, got %v", names)

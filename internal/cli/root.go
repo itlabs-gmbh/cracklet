@@ -28,13 +28,12 @@ func defaultBuilder(out io.Writer, backendName string) (*app.App, error) {
 	if err != nil {
 		return nil, err
 	}
-	if backendName != "" {
-		if err := backend.SaveName(paths, backendName); err != nil {
+	name := backendName
+	if name == "" {
+		if name, err = backend.LoadName(paths); err != nil {
 			return nil, err
 		}
-	}
-	name, err := backend.LoadName(paths)
-	if err != nil {
+	} else if err := backend.ValidateName(name); err != nil {
 		return nil, err
 	}
 	return app.New(runner.NewExec(), paths, out, app.WithBackendName(name)), nil

@@ -1,6 +1,7 @@
 package container
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,8 +12,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"context"
 
 	"github.com/itlabs-gmbh/cracklet/internal/vm"
 )
@@ -29,10 +28,17 @@ type record struct {
 	Running   bool       `json:"running"`
 }
 
+// errCorruptRecord marks a record file that exists but cannot be parsed; the
+// VM is then treated as one without metadata, so it can still be listed and
+// removed.
+var errCorruptRecord = errors.New("corrupt record")
+
 func (b *Backend) recordPath(name string) string {
 	return filepath.Join(b.paths.MachinesDir(), name+".json")
 }
 
+// loadRecord returns the record and whether one exists. A corrupt file is
+// reported with errCorruptRecord and ok=true.
 func (b *Backend) loadRecord(name string) (record, bool, error) {
 	data, err := os.ReadFile(b.recordPath(name))
 	switch {
@@ -43,12 +49,13 @@ func (b *Backend) loadRecord(name string) (record, bool, error) {
 	}
 	var r record
 	if err := json.Unmarshal(data, &r); err != nil {
-		return record{}, false, fmt.Errorf("parse %s: %w", b.recordPath(name), err)
+		return record{}, true, fmt.Errorf("%s: %w (%v)", b.recordPath(name), errCorruptRecord, err)
 	}
 	return r, true, nil
 }
 
-// saveRecord writes the record atomically (temp file + rename).
+// saveRecord writes the record atomically: temp file, fsync, rename. Writers
+// run under the backend lock, so the fixed temp name cannot collide.
 func (b *Backend) saveRecord(name string, r record) error {
 	if err := os.MkdirAll(b.paths.MachinesDir(), 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", b.paths.MachinesDir(), err)
@@ -57,20 +64,41 @@ func (b *Backend) saveRecord(name string, r record) error {
 	if err != nil {
 		return err
 	}
-	tmp := b.recordPath(name) + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	return writeAtomic(b.recordPath(name), data)
+}
+
+// writeAtomic lands data in path without ever exposing a partial file.
+func writeAtomic(path string, data []byte) error {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
 		return fmt.Errorf("write %s: %w", tmp, err)
 	}
-	if err := os.Rename(tmp, b.recordPath(name)); err != nil {
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("sync %s: %w", tmp, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("rename %s: %w", tmp, err)
 	}
 	return nil
 }
 
+// setRunning records whether the VM should come back after a service restart.
 func (b *Backend) setRunning(name string, running bool) error {
 	r, ok, err := b.loadRecord(name)
-	if err != nil || !ok {
+	if err != nil && !errors.Is(err, errCorruptRecord) {
 		return err
+	}
+	if !ok {
+		return nil
 	}
 	r.Running = running
 	return b.saveRecord(name, r)
@@ -100,6 +128,24 @@ func (b *Backend) recordNames() ([]string, error) {
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+// pruneRecords drops records of machines that no longer exist. It must run
+// under the lock: a record is written before its machine appears, so an
+// unlocked reader would mistake a VM being created for a vanished one.
+func (b *Backend) pruneRecords(machines map[string]machine) error {
+	names, err := b.recordNames()
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		if _, ok := machines[name]; !ok {
+			if err := b.removeRecord(name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // freeName picks the first vm<N> that neither a record nor a machine uses.
@@ -146,10 +192,10 @@ func (b *Backend) lock(ctx context.Context) (func(), error) {
 
 // infoFrom combines what `container` reports with cracklet's record.
 func infoFrom(m machine, r record) vm.Info {
-	info := vm.Info{Name: m.ID, IP: m.IP, State: m.state(), VCPUs: m.CPUs, MemMiB: int(m.Memory >> 20),
+	info := vm.Info{Name: m.ID, IP: m.addr(), State: m.state(), VCPUs: m.CPUs, MemMiB: int(m.Memory >> 20),
 		Profile: r.Profile, Forwards: []vm.Forward{}, Owner: r.Owner, Slot: r.Slot, CreatedAt: r.CreatedAt}
-	if i := strings.LastIndex(m.IP, "."); i >= 0 {
-		fmt.Sscanf(m.IP[i+1:], "%d", &info.Index)
+	if i := strings.LastIndex(info.IP, "."); i >= 0 {
+		_, _ = fmt.Sscanf(info.IP[i+1:], "%d", &info.Index)
 	}
 	return info
 }

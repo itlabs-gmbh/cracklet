@@ -3,8 +3,8 @@ package container
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +32,12 @@ func (m machine) state() string {
 	return m.Status
 }
 
+// addr is the bare address; 1.5.0 prints one, a later release might add /24.
+func (m machine) addr() string {
+	ip, _, _ := strings.Cut(m.IP, "/")
+	return ip
+}
+
 // machines lists every machine the service knows.
 func (b *Backend) machines(ctx context.Context) (map[string]machine, error) {
 	out, err := b.run(ctx, "machine", "ls", "--format", "json")
@@ -39,8 +45,10 @@ func (b *Backend) machines(ctx context.Context) (map[string]machine, error) {
 		return nil, err
 	}
 	var list []machine
-	if err := json.Unmarshal(out, &list); err != nil {
-		return nil, fmt.Errorf("parse machine list: %w", err)
+	if len(strings.TrimSpace(string(out))) > 0 {
+		if err := json.Unmarshal(out, &list); err != nil {
+			return nil, fmt.Errorf("parse machine list: %w", err)
+		}
 	}
 	byName := make(map[string]machine, len(list))
 	for _, m := range list {
@@ -50,8 +58,10 @@ func (b *Backend) machines(ctx context.Context) (map[string]machine, error) {
 }
 
 // List implements backend.Backend: the machines cracklet created (it keeps a
-// record for each), in record order. A record whose machine is gone is
-// dropped, so `ls` never shows a VM that `container machine rm` removed.
+// record for each), in record order. List is read-only; a record without a
+// machine is skipped, not deleted, because it may belong to a VM another
+// command is creating right now (pruneRecords handles leftovers under the
+// lock). A corrupt record is reported once and the VM listed without metadata.
 func (b *Backend) List(ctx context.Context) ([]vm.Info, error) {
 	names, err := b.recordNames()
 	if err != nil {
@@ -68,13 +78,12 @@ func (b *Backend) List(ctx context.Context) ([]vm.Info, error) {
 	for _, name := range names {
 		m, ok := machines[name]
 		if !ok {
-			if err := b.removeRecord(name); err != nil {
-				return nil, err
-			}
 			continue
 		}
 		r, _, err := b.loadRecord(name)
-		if err != nil {
+		if errors.Is(err, errCorruptRecord) {
+			b.statusf("  [WARN] %v; 'cracklet rm %s' removes the VM\n", err, name)
+		} else if err != nil {
 			return nil, err
 		}
 		infos = append(infos, infoFrom(m, r))
@@ -85,22 +94,39 @@ func (b *Backend) List(ctx context.Context) ([]vm.Info, error) {
 // Create implements backend.Backend. `machine create` boots the machine; the
 // first `machine run` right after it fails in container 1.5 (ENODEV after
 // ~11 s and a reboot), so readiness is judged by the address `machine ls`
-// reports and sshd accepting, not by running a command.
+// reports and sshd accepting, not by running a command. The lock covers the
+// API call only; waiting for sshd runs unlocked so other VMs are not held up.
 func (b *Backend) Create(ctx context.Context, spec vm.Spec, createdAt time.Time) (vm.Info, error) {
 	release, err := b.lock(ctx)
 	if err != nil {
 		return vm.Info{}, err
 	}
-	defer release()
-	machines, err := b.machines(ctx)
+	name, err := b.createLocked(ctx, spec, createdAt)
+	release()
 	if err != nil {
 		return vm.Info{}, err
+	}
+	info, err := b.waitForSSH(ctx, name)
+	if err != nil {
+		return vm.Info{}, b.discard(ctx, name, err)
+	}
+	return info, nil
+}
+
+// createLocked records and creates the machine; it returns the chosen name.
+func (b *Backend) createLocked(ctx context.Context, spec vm.Spec, createdAt time.Time) (string, error) {
+	machines, err := b.machines(ctx)
+	if err != nil {
+		return "", err
+	}
+	if err := b.pruneRecords(machines); err != nil {
+		return "", err
 	}
 	name := spec.Name
 	if name == "" {
 		records, err := b.recordNames()
 		if err != nil {
-			return vm.Info{}, err
+			return "", err
 		}
 		taken := make(map[string]bool, len(machines)+len(records))
 		for n := range machines {
@@ -111,7 +137,7 @@ func (b *Backend) Create(ctx context.Context, spec vm.Spec, createdAt time.Time)
 		}
 		name = freeName(taken)
 	} else if _, exists := machines[name]; exists {
-		return vm.Info{}, fmt.Errorf("VM '%s' already exists", name)
+		return "", fmt.Errorf("VM '%s' already exists", name)
 	}
 	rec := record{Owner: spec.Owner, Slot: spec.Slot, Profile: spec.ProfileName(), Running: true}
 	if spec.Owner != "" {
@@ -119,22 +145,43 @@ func (b *Backend) Create(ctx context.Context, spec vm.Spec, createdAt time.Time)
 		rec.CreatedAt = &created
 	}
 	if err := b.saveRecord(name, rec); err != nil {
-		return vm.Info{}, err
+		return "", err
 	}
 	b.statusf("==> Creating %s (%d vCPUs, %d MiB)\n", name, spec.VCPUs, spec.MemMiB)
-	_, err = b.run(ctx, "machine", "create", ImageRef, "--name", name,
-		"--cpus", strconv.Itoa(spec.VCPUs), "--memory", strconv.Itoa(spec.MemMiB)+"M", "--home-mount", "none")
-	if err != nil {
-		_ = b.removeRecord(name)
-		return vm.Info{}, err
+	if _, err := b.runLong(ctx, "machine", "create", ImageRef, "--name", name,
+		"--cpus", strconv.Itoa(spec.VCPUs), "--memory", strconv.Itoa(spec.MemMiB)+"M", "--home-mount", "none"); err != nil {
+		return "", b.discardLocked(ctx, name, err) // the caller holds the lock
 	}
-	info, err := b.waitForSSH(ctx, name)
-	if err != nil {
-		_, _ = b.run(context.WithoutCancel(ctx), "machine", "rm", name)
-		_ = b.removeRecord(name)
-		return vm.Info{}, err
+	return name, nil
+}
+
+// discard removes a VM whose creation failed; it takes the lock first.
+func (b *Backend) discard(ctx context.Context, name string, err error) error {
+	ctx = context.WithoutCancel(ctx)
+	release, lockErr := b.lock(ctx)
+	if lockErr != nil {
+		return errors.Join(err, lockErr)
 	}
-	return info, nil
+	defer release()
+	return b.discardLocked(ctx, name, err)
+}
+
+// discardLocked removes the machine (if the API created one) and the record
+// of a failed creation and folds a failed cleanup into err, so the user learns
+// about a leftover instead of finding an invisible machine later. It survives
+// Ctrl-C: the cleanup is the one thing that must still happen.
+func (b *Backend) discardLocked(ctx context.Context, name string, err error) error {
+	ctx = context.WithoutCancel(ctx)
+	machines, lsErr := b.machines(ctx)
+	if lsErr != nil {
+		return errors.Join(err, lsErr)
+	}
+	if _, exists := machines[name]; exists {
+		if _, rmErr := b.runLong(ctx, "machine", "rm", name); rmErr != nil {
+			return errors.Join(err, fmt.Errorf("remove the half-created machine %s with 'container machine rm %s': %w", name, name, rmErr))
+		}
+	}
+	return errors.Join(err, b.removeRecord(name))
 }
 
 // Start implements backend.Backend. `machine run` boots a stopped machine.
@@ -143,25 +190,24 @@ func (b *Backend) Start(ctx context.Context, name string) (vm.Info, error) {
 	if err != nil {
 		return vm.Info{}, err
 	}
-	defer release()
 	m, err := b.machine(ctx, name)
-	if err != nil {
-		return vm.Info{}, err
-	}
-	if m.state() != vm.StateRunning {
+	if err == nil && m.state() != vm.StateRunning {
 		b.statusf("==> Booting %s\n", name)
-		if _, err := b.run(ctx, "machine", "run", "--name", name, "--root", "--", "true"); err != nil {
-			return vm.Info{}, err
-		}
+		_, err = b.runLong(ctx, "machine", "run", "--name", name, "--root", "--", "true")
 	}
-	info, err := b.waitForSSH(ctx, name)
+	if err == nil {
+		err = b.setRunning(name, true)
+	}
+	release()
 	if err != nil {
 		return vm.Info{}, err
 	}
-	return info, b.setRunning(name, true)
+	return b.waitForSSH(ctx, name)
 }
 
-// Stop implements backend.Backend.
+// Stop implements backend.Backend. The record is updated first, so a stop
+// that the API completed but cracklet could not record never resurrects the
+// VM on the next restart of the service.
 func (b *Backend) Stop(ctx context.Context, name string) (vm.Info, error) {
 	release, err := b.lock(ctx)
 	if err != nil {
@@ -171,16 +217,21 @@ func (b *Backend) Stop(ctx context.Context, name string) (vm.Info, error) {
 	if _, err := b.machine(ctx, name); err != nil {
 		return vm.Info{}, err
 	}
-	if _, err := b.run(ctx, "machine", "stop", name); err != nil {
+	if err := b.setRunning(name, false); err != nil {
 		return vm.Info{}, err
 	}
-	if err := b.setRunning(name, false); err != nil {
+	if _, err := b.runLong(ctx, "machine", "stop", name); err != nil {
+		if back := b.setRunning(name, true); back != nil {
+			err = errors.Join(err, back)
+		}
 		return vm.Info{}, err
 	}
 	return b.describe(ctx, name)
 }
 
-// Remove implements backend.Backend. With a guard, a VM whose record no
+// Remove implements backend.Backend. Only VMs cracklet created (those with a
+// record) are removed: `cracklet rm foo` must never delete a machine the user
+// made with `container machine create`. With a guard, a VM whose record no
 // longer matches owner and creation time is a different VM under the same
 // name: it is left alone and reported as gone, like the Lima agent does.
 func (b *Backend) Remove(ctx context.Context, name string, guard *backend.RemoveGuard) (bool, error) {
@@ -190,23 +241,23 @@ func (b *Backend) Remove(ctx context.Context, name string, guard *backend.Remove
 	}
 	defer release()
 	rec, ok, err := b.loadRecord(name)
-	if err != nil {
+	if err != nil && !errors.Is(err, errCorruptRecord) {
 		return false, err
+	}
+	if !ok {
+		return false, fmt.Errorf("VM '%s' does not exist", name)
 	}
 	machines, err := b.machines(ctx)
 	if err != nil {
 		return false, err
 	}
 	if _, exists := machines[name]; !exists {
-		if guard == nil && !ok {
-			return false, fmt.Errorf("VM '%s' does not exist", name)
-		}
-		return true, b.removeRecord(name)
+		return guard != nil, b.removeRecord(name)
 	}
 	if guard != nil && (rec.Owner != guard.Owner || !sameTime(rec.CreatedAt, guard.CreatedAt)) {
 		return true, nil
 	}
-	if _, err := b.run(ctx, "machine", "rm", name); err != nil {
+	if _, err := b.runLong(ctx, "machine", "rm", name); err != nil {
 		return false, err
 	}
 	return false, b.removeRecord(name)
@@ -232,15 +283,15 @@ func (b *Backend) Unforward(ctx context.Context, name string, _ []int) (vm.Info,
 
 func (b *Backend) noForwards(ctx context.Context, name string) error {
 	hint := ""
-	if m, err := b.machine(ctx, name); err == nil && m.IP != "" {
-		hint = fmt.Sprintf("; the Mac reaches %s directly at %s:PORT", name, m.IP)
+	if m, err := b.machine(ctx, name); err == nil && m.addr() != "" {
+		hint = fmt.Sprintf("; the Mac reaches %s directly at %s:PORT", name, m.addr())
 	}
 	return fmt.Errorf("port forwards are not supported on the container backend yet%s", hint)
 }
 
-// machine looks one of cracklet's machines up.
+// machine looks one of cracklet's machines up (read-only).
 func (b *Backend) machine(ctx context.Context, name string) (machine, error) {
-	if _, ok, err := b.loadRecord(name); err != nil {
+	if _, ok, err := b.loadRecord(name); err != nil && !errors.Is(err, errCorruptRecord) {
 		return machine{}, err
 	} else if !ok {
 		return machine{}, fmt.Errorf("VM '%s' does not exist", name)
@@ -251,7 +302,6 @@ func (b *Backend) machine(ctx context.Context, name string) (machine, error) {
 	}
 	m, ok := machines[name]
 	if !ok {
-		_ = b.removeRecord(name)
 		return machine{}, fmt.Errorf("VM '%s' does not exist", name)
 	}
 	return m, nil
@@ -263,73 +313,8 @@ func (b *Backend) describe(ctx context.Context, name string) (vm.Info, error) {
 		return vm.Info{}, err
 	}
 	r, _, err := b.loadRecord(name)
-	if err != nil {
+	if err != nil && !errors.Is(err, errCorruptRecord) {
 		return vm.Info{}, err
 	}
 	return infoFrom(m, r), nil
-}
-
-// waitForSSH polls until the machine has an address and sshd accepts.
-func (b *Backend) waitForSSH(ctx context.Context, name string) (vm.Info, error) {
-	deadline := time.Now().Add(b.sshWait)
-	for {
-		m, err := b.machine(ctx, name)
-		if err != nil {
-			return vm.Info{}, err
-		}
-		if m.IP != "" && m.state() == vm.StateRunning {
-			if conn, err := b.dial(ctx, net.JoinHostPort(m.IP, "22")); err == nil {
-				_ = conn.Close()
-				r, _, err := b.loadRecord(name)
-				if err != nil {
-					return vm.Info{}, err
-				}
-				return infoFrom(m, r), nil
-			}
-		}
-		if time.Now().After(deadline) {
-			return vm.Info{}, fmt.Errorf("%s did not answer on SSH within %s (container machine logs %s)", name, b.sshWait, name)
-		}
-		select {
-		case <-ctx.Done():
-			return vm.Info{}, ctx.Err()
-		case <-time.After(b.poll):
-		}
-	}
-}
-
-// restoreMachines boots the VMs that were running before the service went
-// down. Failures are collected so one bad machine does not block the rest.
-func (b *Backend) restoreMachines(ctx context.Context) error {
-	names, err := b.recordNames()
-	if err != nil {
-		return err
-	}
-	machines, err := b.machines(ctx)
-	if err != nil {
-		return err
-	}
-	var started, failed []string
-	for _, name := range names {
-		r, _, err := b.loadRecord(name)
-		if err != nil {
-			return err
-		}
-		m, ok := machines[name]
-		if !r.Running || !ok || m.state() == vm.StateRunning {
-			continue
-		}
-		if _, err := b.run(ctx, "machine", "run", "--name", name, "--root", "--", "true"); err != nil {
-			failed = append(failed, name)
-			continue
-		}
-		started = append(started, name)
-	}
-	if len(started) > 0 {
-		b.statusf("==> Restarted microVMs: %s\n", strings.Join(started, ", "))
-	}
-	for _, name := range failed {
-		b.statusf("  [WARN] %s did not come back; run 'cracklet start %s'\n", name, name)
-	}
-	return nil
 }

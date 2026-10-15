@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/itlabs-gmbh/cracklet/internal/backend"
 	"github.com/itlabs-gmbh/cracklet/internal/shquote"
+	"github.com/itlabs-gmbh/cracklet/internal/vm"
 )
 
 // SSHProxyCommand implements backend.Backend: ssh runs cracklet itself, which
-// resolves the machine's current vmnet address on every connection.
+// resolves the machine's current vmnet address on every connection. ssh
+// expands % tokens in the line, so a % in the path is escaped.
 func (b *Backend) SSHProxyCommand() string {
-	return shquote.Quote(b.exe) + " _dial %h %p"
+	return shquote.Quote(strings.ReplaceAll(b.exe, "%", "%%")) + " _dial %h %p"
 }
 
 // Dial implements backend.Backend. The address comes from `machine ls`; on
@@ -28,17 +31,23 @@ func (b *Backend) Dial(ctx context.Context, name string, port int) (backend.Conn
 	if err != nil {
 		return nil, err
 	}
-	if m.IP == "" {
-		return nil, fmt.Errorf("%s has no address yet (is it running?)", name)
+	if m.state() != vm.StateRunning || m.addr() == "" {
+		return nil, fmt.Errorf("VM '%s' is %s (cracklet start %s)", name, m.state(), name)
 	}
-	return b.dial(ctx, net.JoinHostPort(m.IP, strconv.Itoa(port)))
+	return b.dial(ctx, net.JoinHostPort(m.addr(), strconv.Itoa(port)))
 }
 
-// tcpDial is the production Dialer.
+// tcpDial is the production Dialer. The timeout matters for the ProxyCommand,
+// whose context only ends with a signal.
 func tcpDial(ctx context.Context, addr string) (backend.Conn, error) {
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+	conn, err := (&net.Dialer{Timeout: 10 * dialAttempt}).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	return conn.(*net.TCPConn), nil
+	tcp, ok := conn.(*net.TCPConn)
+	if !ok {
+		_ = conn.Close()
+		return nil, fmt.Errorf("unexpected connection type %T", conn)
+	}
+	return tcp, nil
 }

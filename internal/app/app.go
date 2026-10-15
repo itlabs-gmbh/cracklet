@@ -104,15 +104,17 @@ func WithBackend(b backend.Backend) Option {
 	return func(a *App) { a.newBackend = func(*App) backend.Backend { return b } }
 }
 
-// WithBackendName selects the backend by its stored name (see
-// backend.LoadName); the App builds it from its own runner and writers.
+// WithBackendName selects the backend by its name (see backend.LoadName,
+// which validates it); the App builds it from its own runner and writers.
 func WithBackendName(name string) Option {
 	return func(a *App) {
 		switch name {
 		case backend.NameContainer:
 			a.newBackend = containerBackend
-		default:
+		case backend.NameLima:
 			a.newBackend = limaBackend
+		default:
+			panic("app: unknown backend " + name) // validated by backend.ValidateName before
 		}
 	}
 }

@@ -6,6 +6,24 @@ import (
 	"github.com/itlabs-gmbh/cracklet/internal/backend"
 )
 
+// RememberBackend stores the active backend as the one later commands use.
+// Switching does not migrate VMs: the other backend's VMs are not listed
+// until the choice is switched back, which is said once here.
+func (a *App) RememberBackend() error {
+	previous, err := backend.LoadName(a.paths)
+	if err != nil {
+		return err
+	}
+	if err := backend.SaveName(a.paths, a.backend.Name()); err != nil {
+		return err
+	}
+	if previous != a.backend.Name() {
+		a.printf("==> cracklet now uses the %s backend (VMs of the %s backend stay where they are and are not listed)\n",
+			a.backend.Name(), previous)
+	}
+	return nil
+}
+
 // PrepareOptions and SizeFlags are the backend's; the aliases keep the CLI
 // and tests readable while both backends exist.
 type (

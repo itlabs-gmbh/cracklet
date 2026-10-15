@@ -7,10 +7,12 @@ package container
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -98,9 +100,10 @@ var _ backend.Backend = (*Backend)(nil)
 // Name implements backend.Backend.
 func (b *Backend) Name() string { return backend.NameContainer }
 
-// Capabilities implements backend.Backend: every boot is cold (0.5 s), the
-// root disk is a sparse 512 GiB volume, forwards and the guest firewall come
-// in later phases, and there is no shared runtime VM to resize.
+// Capabilities implements backend.Backend: no snapshots (every boot is cold),
+// no profiles (the root disk is a sparse 512 GiB volume), forwards and the
+// guest firewall come in later phases, and there is no shared runtime VM to
+// resize.
 func (b *Backend) Capabilities() backend.Capabilities {
 	return backend.Capabilities{}
 }
@@ -109,14 +112,21 @@ func (b *Backend) printf(format string, args ...any) { fmt.Fprintf(b.out, format
 
 func (b *Backend) statusf(format string, args ...any) { fmt.Fprintf(b.status, format, args...) }
 
-// run executes a `container` command that must answer promptly and returns
-// its stdout.
+// run executes a `container` query that must answer promptly (ls, status,
+// inspect, --version) and returns its stdout.
 func (b *Backend) run(ctx context.Context, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, cmdTimeout)
 	defer cancel()
+	return b.runLong(ctx, args...)
+}
+
+// runLong executes a `container` command that may take as long as it needs:
+// a first `system start` downloads the kernel, `machine create` unpacks the
+// image, `machine stop` waits for a graceful shutdown. Only ctx ends them.
+func (b *Backend) runLong(ctx context.Context, args ...string) ([]byte, error) {
 	out, err := b.r.Output(ctx, "container", args...)
 	if err != nil {
-		return nil, fmt.Errorf("container %s: %w", args[0], err)
+		return nil, fmt.Errorf("container %s: %w", strings.Join(args[:min(len(args), 2)], " "), err)
 	}
 	return out, nil
 }
@@ -203,7 +213,7 @@ func (b *Backend) Ready(ctx context.Context) error {
 		return nil // another command started it while this one waited
 	}
 	b.statusf("==> Starting the container system service\n")
-	if _, err := b.run(ctx, systemStartArgs...); err != nil {
+	if _, err := b.runLong(ctx, systemStartArgs...); err != nil {
 		return err
 	}
 	if err := b.restoreMachines(ctx); err != nil {
@@ -232,7 +242,7 @@ func (b *Backend) Doctor(ctx context.Context) error {
 		b.printf("  [%s] %s\n", severity(p), p.Message)
 	}
 	if host.HasFatal(problems) {
-		return fmt.Errorf("host is not ready for cracklet")
+		return errors.New("host is not ready for cracklet")
 	}
 	if !facts.HasContainer {
 		return nil
@@ -268,7 +278,7 @@ func (b *Backend) Prepare(ctx context.Context, o backend.PrepareOptions) error {
 	}
 	if err := b.Alive(ctx); err != nil {
 		b.printf("==> Starting the container system service\n")
-		if _, err := b.run(ctx, systemStartArgs...); err != nil {
+		if _, err := b.runLong(ctx, systemStartArgs...); err != nil {
 			return err
 		}
 	}
@@ -283,7 +293,7 @@ func (b *Backend) preflight(ctx context.Context) error {
 		b.printf("  [%s] %s\n", severity(p), p.Message)
 	}
 	if host.HasFatal(problems) {
-		return fmt.Errorf("host is not ready for cracklet")
+		return errors.New("host is not ready for cracklet")
 	}
 	if !facts.HasContainer {
 		b.printf("==> Installing Apple's container CLI\n")
@@ -295,7 +305,11 @@ func (b *Backend) preflight(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if olderThan(version, MinVersion) {
+	older, err := olderThan(version, MinVersion)
+	if err != nil {
+		return err
+	}
+	if older {
 		return fmt.Errorf("container %s is too old, cracklet needs %s or newer (brew upgrade container)", version, MinVersion)
 	}
 	return nil
@@ -316,22 +330,43 @@ func (b *Backend) version(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("cannot parse container version from %q", strings.TrimSpace(string(out)))
 }
 
-// olderThan compares dotted versions numerically, field by field.
-func olderThan(have, want string) bool {
-	h, w := strings.Split(have, "."), strings.Split(want, ".")
+// olderThan compares dotted versions numerically, field by field; a
+// pre-release suffix ("1.6.0-rc1") is ignored, anything else non-numeric is an
+// error rather than a silent zero.
+func olderThan(have, want string) (bool, error) {
+	parse := func(v string) ([]int, error) {
+		base, _, _ := strings.Cut(v, "-")
+		var nums []int
+		for _, f := range strings.Split(base, ".") {
+			n, err := strconv.Atoi(f)
+			if err != nil {
+				return nil, fmt.Errorf("cannot parse container version %q", v)
+			}
+			nums = append(nums, n)
+		}
+		return nums, nil
+	}
+	h, err := parse(have)
+	if err != nil {
+		return false, err
+	}
+	w, err := parse(want)
+	if err != nil {
+		return false, err
+	}
 	for i := 0; i < len(h) || i < len(w); i++ {
 		var hv, wv int
 		if i < len(h) {
-			fmt.Sscanf(h[i], "%d", &hv)
+			hv = h[i]
 		}
 		if i < len(w) {
-			fmt.Sscanf(w[i], "%d", &wv)
+			wv = w[i]
 		}
 		if hv != wv {
-			return hv < wv
+			return hv < wv, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func severity(p host.Problem) string {

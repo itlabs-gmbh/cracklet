@@ -108,6 +108,9 @@ func (f *fakeContainer) handle(name string, args []string) ([]byte, error) {
 		f.sshUp[args[2]] = false
 		return nil, nil
 	case strings.HasPrefix(joined, "container machine rm "):
+		if _, ok := f.machines[args[2]]; !ok {
+			return nil, errors.New("no such machine")
+		}
 		delete(f.machines, args[2])
 		return nil, nil
 	}

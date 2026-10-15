@@ -180,6 +180,13 @@ func (b *Backend) Alive(ctx context.Context) error {
 	return nil
 }
 
+// --enable-kernel-install lets `container system start` fetch Apple's default
+// guest kernel. cracklet does not pin a digest for it, unlike the Firecracker
+// artifacts of the Lima backend: the kernel comes from the same signed Apple
+// release as the CLI that cracklet already trusts to run the VMs, and the CLI
+// verifies the download itself. Pinning our own kernel is a Phase 4 option.
+var systemStartArgs = []string{"system", "start", "--enable-kernel-install"}
+
 // Ready implements backend.Backend: it starts the system service when it is
 // down (as after a reboot of the Mac) and brings back the machines that ran
 // before, once, however many commands run in parallel.
@@ -196,7 +203,7 @@ func (b *Backend) Ready(ctx context.Context) error {
 		return nil // another command started it while this one waited
 	}
 	b.statusf("==> Starting the container system service\n")
-	if _, err := b.run(ctx, "system", "start", "--enable-kernel-install"); err != nil {
+	if _, err := b.run(ctx, systemStartArgs...); err != nil {
 		return err
 	}
 	if err := b.restoreMachines(ctx); err != nil {
@@ -261,7 +268,7 @@ func (b *Backend) Prepare(ctx context.Context, o backend.PrepareOptions) error {
 	}
 	if err := b.Alive(ctx); err != nil {
 		b.printf("==> Starting the container system service\n")
-		if _, err := b.run(ctx, "system", "start", "--enable-kernel-install"); err != nil {
+		if _, err := b.run(ctx, systemStartArgs...); err != nil {
 			return err
 		}
 	}

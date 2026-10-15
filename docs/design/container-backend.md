@@ -272,6 +272,20 @@ changes `cpus`, `memory`, `home-mount` of a stopped machine.
 - Document the direct address only: zero code, but `-p` from `cracklet new`
   would silently differ between backends.
 
+### Security notes from the Phase 3 review
+
+- **Guest kernel**: `container system start --enable-kernel-install` fetches
+  Apple's default guest kernel; cracklet pins no digest for it (the Lima
+  backend pins Firecracker, kernel and rootfs). Accepted for now because the
+  kernel ships with the same signed Apple release as the CLI we already trust
+  to run the VMs. Phase 4 may pin a kernel of our own (`--kernel`).
+- **Guest impersonation**: all guests share one vmnet /24 and the generated
+  `ssh_config` disables host key checking, so a hostile guest that takes a
+  neighbour's address can pose as it towards `cracklet ssh`, grants and the
+  broker tunnel. Phase 4 pins each VM's host key at creation (read it over the
+  first connection, store it with the record, render `UserKnownHostsFile` and
+  `StrictHostKeyChecking yes` per host) together with the firewall work below.
+
 ### Network isolation: the one real regression
 
 Lima guests are firewalled by `agent.sh` (`render_firewall_batch`): internet

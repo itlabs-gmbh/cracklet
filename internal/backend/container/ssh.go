@@ -16,7 +16,13 @@ func (b *Backend) SSHProxyCommand() string {
 	return shquote.Quote(b.exe) + " _dial %h %p"
 }
 
-// Dial implements backend.Backend.
+// Dial implements backend.Backend. The address comes from `machine ls`; on
+// vmnet every guest shares one /24 and nothing stops a guest from taking
+// another guest's address, while the generated ssh_config does not verify
+// host keys. A hostile guest could therefore pose as its neighbour towards the
+// Mac. The Lima backend is not exposed to this (one /30 and a firewall per
+// guest); for this backend, pinning each VM's host key at creation is part of
+// Phase 4 (docs/design/container-backend.md, "Network isolation").
 func (b *Backend) Dial(ctx context.Context, name string, port int) (backend.Conn, error) {
 	m, err := b.machine(ctx, name)
 	if err != nil {

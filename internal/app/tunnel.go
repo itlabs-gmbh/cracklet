@@ -11,7 +11,6 @@ import (
 	"github.com/itlabs-gmbh/cracklet/internal/broker"
 	"github.com/itlabs-gmbh/cracklet/internal/config"
 	"github.com/itlabs-gmbh/cracklet/internal/grant"
-	"github.com/itlabs-gmbh/cracklet/internal/lima"
 	"github.com/itlabs-gmbh/cracklet/internal/runner"
 	"github.com/itlabs-gmbh/cracklet/internal/secret"
 )
@@ -80,7 +79,7 @@ func (a *App) standby(ctx context.Context, name string) func() {
 	quiet := *a
 	quiet.out = io.Discard
 	quiet.r = runner.Silenced(a.r)
-	quiet.lima = lima.NewClient(quiet.r, config.Instance)
+	quiet.backend = quiet.newBackend(&quiet)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

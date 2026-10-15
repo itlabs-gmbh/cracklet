@@ -39,7 +39,7 @@ func (a *App) Tunnel(ctx context.Context, name string) error {
 	if err := vm.ValidateName(name); err != nil {
 		return err
 	}
-	if err := a.requireRunning(ctx); err != nil {
+	if err := a.backend.Ready(ctx); err != nil {
 		return err
 	}
 	if err := a.ensureSSHConfig(); err != nil {
@@ -170,16 +170,13 @@ func sshEnd(err error) string {
 	}
 }
 
-// vmRunning asks the agent whether the VM exists and runs. It polls in the
-// background, so it never starts a stopped Lima VM.
+// vmRunning asks the backend whether the VM exists and runs. It polls in the
+// background, so it never starts a stopped runtime.
 func (a *App) vmRunning(ctx context.Context, name string) (bool, error) {
-	if err := a.checkRunning(ctx); err != nil {
+	if err := a.backend.Alive(ctx); err != nil {
 		return false, err
 	}
-	if err := a.ensureAgent(ctx); err != nil {
-		return false, err
-	}
-	vms, err := a.agentVMs(ctx)
+	vms, err := a.backend.List(ctx)
 	if err != nil {
 		return false, err
 	}

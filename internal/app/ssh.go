@@ -58,7 +58,7 @@ func (a *App) Exec(ctx context.Context, name string, argv []string) error {
 
 // session runs ssh with the broker tunnel attached and maps its exit status.
 func (a *App) session(ctx context.Context, name string, command []string) error {
-	if err := a.requireRunning(ctx); err != nil {
+	if err := a.backend.Ready(ctx); err != nil {
 		return err
 	}
 	if err := a.ensureSSHConfig(); err != nil {

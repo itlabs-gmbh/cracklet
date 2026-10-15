@@ -350,7 +350,7 @@ func TestDefaultEnvdSourceBuildsWhenNotEmbedded(t *testing.T) {
 		t.Skip("daemon is embedded in this test binary")
 	}
 	app, _, out := newTestApp(t, defaultHandler(nil))
-	_, err := app.loadEnvd(context.Background())
+	_, err := limaOf(app).LoadEnvd(context.Background())
 	if err == nil {
 		t.Fatal("fake runner cannot build, want an error")
 	}

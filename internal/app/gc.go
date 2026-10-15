@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/itlabs-gmbh/cracklet/internal/backend"
 	"github.com/itlabs-gmbh/cracklet/internal/vm"
 )
 
@@ -79,10 +80,10 @@ func (a *App) GC(ctx context.Context, opts GCOptions) (GCResult, error) {
 	if err := opts.validate(); err != nil {
 		return GCResult{}, err
 	}
-	if err := a.readyForAgent(ctx); err != nil {
+	if err := a.backend.Ready(ctx); err != nil {
 		return GCResult{}, err
 	}
-	vms, err := a.agentVMs(ctx)
+	vms, err := a.backend.List(ctx)
 	if err != nil {
 		return GCResult{}, err
 	}
@@ -132,20 +133,12 @@ func (a *App) GC(ctx context.Context, opts GCOptions) (GCResult, error) {
 }
 
 // removeListed removes a VM only if it is still the one gc listed: the
-// agent compares owner and creation time under its lock, so a VM removed
-// and recreated under the same name in the meantime survives. gone reports
-// that the VM no longer existed. The host state is left to pruneHostState:
-// removing it here could hit the grants of a VM recreated right after.
+// backend compares owner and creation time, so a VM removed and recreated
+// under the same name in the meantime survives. gone reports that the VM no
+// longer existed. The host state is left to pruneHostState: removing it here
+// could hit the grants of a VM recreated right after.
 func (a *App) removeListed(ctx context.Context, v VMInfo) (gone bool, err error) {
-	created := "-"
-	if v.CreatedAt != nil {
-		created = v.CreatedAt.UTC().Format(time.RFC3339)
-	}
-	out, err := a.agentOutput(ctx, "rm", v.Name, v.Owner, created)
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(string(out)) == "gone", nil
+	return a.backend.Remove(ctx, v.Name, &backend.RemoveGuard{Owner: v.Owner, CreatedAt: v.CreatedAt})
 }
 
 // pruneHostState removes the grants and tokens of VMs the agent does not
@@ -167,7 +160,7 @@ func (a *App) pruneHostState(ctx context.Context, listed map[string]bool, dryRun
 		return orphans, nil
 	}
 	return store.Prune(orphans, func() (map[string]bool, error) {
-		vms, err := a.agentVMs(ctx)
+		vms, err := a.backend.List(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -188,7 +181,7 @@ func (a *App) pruneVanished(ctx context.Context) error {
 	if err != nil || len(names) == 0 {
 		return err // nothing to prune spares the agent call
 	}
-	vms, err := a.agentVMs(ctx)
+	vms, err := a.backend.List(ctx)
 	if err != nil {
 		return err
 	}

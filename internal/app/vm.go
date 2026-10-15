@@ -2,9 +2,7 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/itlabs-gmbh/cracklet/internal/config"
@@ -15,24 +13,8 @@ import (
 // interrupted; it may have to wait for the agent's lock first.
 const cleanupTimeout = 2 * time.Minute
 
-// VMInfo is what the agent reports about a microVM.
-type VMInfo struct {
-	Name     string       `json:"name"`
-	Index    int          `json:"index"`
-	IP       string       `json:"ip"`
-	State    string       `json:"state"`
-	VCPUs    int          `json:"vcpus"`
-	MemMiB   int          `json:"mem_mib"`
-	Profile  string       `json:"profile"`
-	Forwards []vm.Forward `json:"forwards"`
-	// Grants are the host-side grants of the VM (not reported by the agent).
-	Grants []string `json:"grants,omitempty"`
-	// Owner and Slot label VMs managed by a tool; empty for VMs made by hand.
-	Owner string `json:"owner"`
-	Slot  string `json:"slot"`
-	// CreatedAt is nil for VMs created before cracklet recorded it.
-	CreatedAt *time.Time `json:"created_at"`
-}
+// VMInfo is what the backend reports about a microVM, plus its grants.
+type VMInfo = vm.Info
 
 // NewVM creates and boots a microVM.
 func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
@@ -47,31 +29,15 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 	if err := a.checkHostPortsFree(forwards); err != nil {
 		return VMInfo{}, err
 	}
-	release, err := a.holdLimaForMicroVM()
+	release, err := a.backend.ReadyToBoot(ctx)
 	if err != nil {
 		return VMInfo{}, err
 	}
 	defer release()
-	if err := a.readyForAgent(ctx); err != nil {
-		return VMInfo{}, err
-	}
-	name := spec.Name
-	if name == "" {
-		name = "-" // the agent picks the first free vm<N>
-	}
-	disk, err := vm.NormalizeSize(spec.DiskSize())
-	if err != nil {
-		return VMInfo{}, err
-	}
 	if err := a.pruneVanished(ctx); err != nil {
 		return VMInfo{}, fmt.Errorf("clear grants left by removed VMs: %w", err)
 	}
-	args := []string{"new", name, strconv.Itoa(spec.VCPUs), strconv.Itoa(spec.MemMiB), disk, spec.Mode(), spec.ProfileName()}
-	if spec.Owner != "" { // a slot needs an owner, see Spec.Validate
-		// gc measures ages with this clock; the Lima VM's may lag after sleep
-		args = append(args, spec.Owner, orDash(spec.Slot), a.now().UTC().Format(time.RFC3339))
-	}
-	var out []byte
+	var info VMInfo
 	started := false
 	create := func() (err error) {
 		// Ctrl-C while waiting for the lock: another `new` of this name
@@ -80,7 +46,7 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 			return err
 		}
 		started = true
-		out, err = a.agentOutput(ctx, args...)
+		info, err = a.backend.Create(ctx, spec, a.now())
 		return err
 	}
 	// pruneVanished cleared leftovers before, but an earlier VM of this name
@@ -98,12 +64,8 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 		}
 		return VMInfo{}, err
 	}
-	info, err := parseVM(out)
-	if err != nil {
-		return VMInfo{}, err
-	}
 	if spec.Name == "" {
-		// The agent picked the name, so it could not be locked in advance;
+		// The backend picked the name, so it could not be locked in advance;
 		// nobody can have granted the VM before learning its name.
 		if err := a.grantStore().Remove(info.Name); err != nil {
 			return info, fmt.Errorf("%s was created, but clearing grants left by an earlier VM of that name failed: %w", info.Name, err)
@@ -127,31 +89,30 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 
 // StartVM boots a stopped microVM.
 func (a *App) StartVM(ctx context.Context, name string) (VMInfo, error) {
-	release, err := a.holdLimaForMicroVM()
+	if err := vm.ValidateName(name); err != nil {
+		return VMInfo{}, err
+	}
+	release, err := a.backend.ReadyToBoot(ctx)
 	if err != nil {
 		return VMInfo{}, err
 	}
 	defer release()
-	return a.lifecycle(ctx, "start", name)
+	return a.report(a.backend.Start(ctx, name))
 }
 
-// StopVM shuts a microVM down but keeps its disk.
+// StopVM shuts a microVM down but keeps its disk. Stopping is allowed while
+// the runtime is resized: it only makes it emptier.
 func (a *App) StopVM(ctx context.Context, name string) (VMInfo, error) {
-	return a.lifecycle(ctx, "stop", name)
-}
-
-func (a *App) lifecycle(ctx context.Context, action, name string) (VMInfo, error) {
 	if err := vm.ValidateName(name); err != nil {
 		return VMInfo{}, err
 	}
-	if err := a.readyForAgent(ctx); err != nil {
+	if err := a.backend.Ready(ctx); err != nil {
 		return VMInfo{}, err
 	}
-	out, err := a.agentOutput(ctx, action, name)
-	if err != nil {
-		return VMInfo{}, err
-	}
-	info, err := parseVM(out)
+	return a.report(a.backend.Stop(ctx, name))
+}
+
+func (a *App) report(info VMInfo, err error) (VMInfo, error) {
 	if err != nil {
 		return VMInfo{}, err
 	}
@@ -164,7 +125,7 @@ func (a *App) RemoveVM(ctx context.Context, name string) error {
 	if err := vm.ValidateName(name); err != nil {
 		return err
 	}
-	if err := a.readyForAgent(ctx); err != nil {
+	if err := a.backend.Ready(ctx); err != nil {
 		return err
 	}
 	if err := a.removeVM(ctx, name); err != nil {
@@ -174,20 +135,20 @@ func (a *App) RemoveVM(ctx context.Context, name string) error {
 	return nil
 }
 
-// removeVM deletes a VM and its host-side state; the agent must be ready.
+// removeVM removes the VM and its host state (grants, token).
 func (a *App) removeVM(ctx context.Context, name string) error {
-	if _, err := a.agentOutput(ctx, "rm", name); err != nil {
+	if _, err := a.backend.Remove(ctx, name, nil); err != nil {
 		return err
 	}
 	return a.grantStore().Remove(name)
 }
 
-// ListVMs returns all microVMs known to the agent.
+// ListVMs returns all microVMs known to the backend, with their grants.
 func (a *App) ListVMs(ctx context.Context) ([]VMInfo, error) {
-	if err := a.readyForAgent(ctx); err != nil {
+	if err := a.backend.Ready(ctx); err != nil {
 		return nil, err
 	}
-	vms, err := a.agentVMs(ctx)
+	vms, err := a.backend.List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -210,37 +171,8 @@ func (a *App) InspectVM(ctx context.Context, name string) (VMInfo, error) {
 	return a.describe(ctx, name)
 }
 
-// agentVMs lists the VMs as the agent reports them, without grants.
-func (a *App) agentVMs(ctx context.Context) ([]VMInfo, error) {
-	out, err := a.agentOutput(ctx, "ls")
-	if err != nil {
-		return nil, err
-	}
-	var vms []VMInfo
-	if err := json.Unmarshal(out, &vms); err != nil {
-		return nil, fmt.Errorf("parse agent output %q: %w", string(out), err)
-	}
-	return vms, nil
-}
-
-// orDash maps an unset optional agent argument to the agent's "-".
-func orDash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
-}
-
-func parseVM(out []byte) (VMInfo, error) {
-	var info VMInfo
-	if err := json.Unmarshal(out, &info); err != nil {
-		return VMInfo{}, fmt.Errorf("parse agent output %q: %w", string(out), err)
-	}
-	return info, nil
-}
-
 // cleanupInterrupted removes a VM whose creation was cancelled (Ctrl-C). The
-// guest agent keeps running after the connection drops and either finishes or
+// backend keeps working after the connection drops and either finishes or
 // rolls back on its own, so the removal is best-effort and waits for its lock.
 func (a *App) cleanupInterrupted(name string) {
 	if name == "" {
@@ -250,7 +182,7 @@ func (a *App) cleanupInterrupted(name string) {
 	a.printf("creation of %s interrupted, cleaning up\n", name)
 	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 	defer cancel()
-	if _, err := a.agentOutput(ctx, "rm", name); err != nil {
+	if _, err := a.backend.Remove(ctx, name, nil); err != nil {
 		a.printf("  cleanup did not complete (%v); check 'cracklet ls'\n", err)
 	}
 }

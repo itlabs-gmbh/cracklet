@@ -1,4 +1,4 @@
-package app
+package lima
 
 import (
 	"context"
@@ -16,22 +16,23 @@ import (
 // Both sides fail fast instead of waiting, because a blocked flock would not
 // notice Ctrl-C.
 var (
-	errResizing    = errors.New("the Lima VM is being resized by 'cracklet prepare'; retry when it has finished")
+	// ErrResizing is returned by HoldForMicroVM and ReadyToBoot during a resize.
+	ErrResizing    = errors.New("the Lima VM is being resized by 'cracklet prepare'; retry when it has finished")
 	errStartingVMs = errors.New("another cracklet command is creating or starting a microVM; retry the resize when it has finished")
 )
 
-// holdLimaForMicroVM keeps a resize from restarting the Lima VM under a starting microVM.
-func (a *App) holdLimaForMicroVM() (func(), error) {
-	return a.lockLima(syscall.LOCK_SH, errResizing)
+// HoldForMicroVM keeps a resize from restarting the Lima VM under a starting microVM.
+func (b *Backend) HoldForMicroVM() (func(), error) {
+	return b.lockLima(syscall.LOCK_SH, ErrResizing)
 }
 
-// holdLimaForResize keeps microVMs from starting while the Lima VM is resized.
-func (a *App) holdLimaForResize() (func(), error) {
-	return a.lockLima(syscall.LOCK_EX, errStartingVMs)
+// HoldForResize keeps microVMs from starting while the Lima VM is resized.
+func (b *Backend) HoldForResize() (func(), error) {
+	return b.lockLima(syscall.LOCK_EX, errStartingVMs)
 }
 
-func (a *App) lockLima(how int, busy error) (func(), error) {
-	f, err := a.openLock(a.paths.LimaLockPath())
+func (b *Backend) lockLima(how int, busy error) (func(), error) {
+	f, err := b.openLock(b.paths.LimaLockPath())
 	if err != nil {
 		return nil, err
 	}
@@ -43,14 +44,14 @@ func (a *App) lockLima(how int, busy error) (func(), error) {
 	return release, err
 }
 
-// bootLockPoll is how often waitForLimaBoot retries a held boot lock.
-const bootLockPoll = 100 * time.Millisecond
+// BootLockPoll is how often WaitForBoot retries a held boot lock.
+const BootLockPoll = 100 * time.Millisecond
 
-// waitForLimaBoot serializes starting the stopped Lima VM, so commands run in
+// WaitForBoot serializes starting the stopped Lima VM, so commands run in
 // parallel after a reboot of the Mac (a tool starting its pool of microVMs)
 // boot it once. Unlike the Lima lock it waits, polling so Ctrl-C still works.
-func (a *App) waitForLimaBoot(ctx context.Context) (func(), error) {
-	f, err := a.openLock(a.paths.LimaBootLockPath())
+func (b *Backend) WaitForBoot(ctx context.Context) (func(), error) {
+	f, err := b.openLock(b.paths.LimaBootLockPath())
 	if err != nil {
 		return nil, err
 	}
@@ -63,14 +64,14 @@ func (a *App) waitForLimaBoot(ctx context.Context) (func(), error) {
 		case <-ctx.Done():
 			_ = f.Close()
 			return nil, ctx.Err()
-		case <-time.After(bootLockPoll):
+		case <-time.After(BootLockPoll):
 		}
 	}
 }
 
-func (a *App) openLock(path string) (*os.File, error) {
-	if err := os.MkdirAll(a.paths.Home, 0o700); err != nil {
-		return nil, fmt.Errorf("create %s: %w", a.paths.Home, err)
+func (b *Backend) openLock(path string) (*os.File, error) {
+	if err := os.MkdirAll(b.paths.Home, 0o700); err != nil {
+		return nil, fmt.Errorf("create %s: %w", b.paths.Home, err)
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {

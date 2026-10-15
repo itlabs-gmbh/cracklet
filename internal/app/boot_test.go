@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/itlabs-gmbh/cracklet/internal/agent"
+	"github.com/itlabs-gmbh/cracklet/internal/backend/lima"
 	"github.com/itlabs-gmbh/cracklet/internal/config"
 	"github.com/itlabs-gmbh/cracklet/internal/runner"
 )
@@ -112,14 +113,14 @@ func TestRunningLimaWaitsForAnOngoingRestore(t *testing.T) {
 		return base(name, args)
 	})
 	booted := make(chan error, 1)
-	go func() { booted <- app.requireRunning(context.Background()) }()
+	go func() { booted <- limaOf(app).Ready(context.Background()) }()
 	<-restoring // the first command has started Lima and is restoring
 	second := make(chan error, 1)
-	go func() { second <- app.requireRunning(context.Background()) }()
+	go func() { second <- limaOf(app).Ready(context.Background()) }()
 	select {
 	case err := <-second:
 		t.Fatalf("the second command returned before the restore finished: %v", err)
-	case <-time.After(3 * bootLockPoll):
+	case <-time.After(3 * lima.BootLockPoll):
 	}
 	close(finish)
 	for _, ch := range []chan error{booted, second} {
@@ -136,12 +137,12 @@ func TestRunningLimaWaitsForAnOngoingRestore(t *testing.T) {
 
 func TestStoppedLimaIsNotStartedDuringResize(t *testing.T) {
 	app, fake, _ := newTestApp(t, limaAfterReboot(`{"started":[],"failed":[]}`, false))
-	release, err := app.holdLimaForResize()
+	release, err := limaOf(app).HoldForResize()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
-	if _, err := app.ListVMs(context.Background()); !errors.Is(err, errResizing) {
+	if _, err := app.ListVMs(context.Background()); !errors.Is(err, lima.ErrResizing) {
 		t.Fatalf("a resize stops the Lima VM on purpose, got %v", err)
 	}
 	if fake.Called("limactl start --tty=false cracklet") {
@@ -178,7 +179,7 @@ func TestBootNotesStayOffStdout(t *testing.T) {
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
 	paths := config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}
 	app := New(fake, paths, stdout, WithEnvd(fakeEnvd), WithStatus(stderr))
-	if err := app.requireRunning(context.Background()); err != nil {
+	if err := limaOf(app).Ready(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "Restarted microVMs: vm1") {
@@ -207,36 +208,5 @@ func TestBrokenLimaPointsAtPrepare(t *testing.T) {
 	}
 	if fake.Called("limactl start --tty=false cracklet") {
 		t.Errorf("only a stopped Lima VM is started:\n%s", fake.Dump())
-	}
-}
-
-func TestLimaBootLockWaitsAndHonoursCancel(t *testing.T) {
-	a, _, _ := newTestApp(t, defaultHandler(nil))
-	release, err := a.waitForLimaBoot(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	if _, err := a.waitForLimaBoot(ctx); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("a held boot lock must block until ctx ends, got %v", err)
-	}
-	done := make(chan error, 1)
-	go func() {
-		r, err := a.waitForLimaBoot(context.Background())
-		if err == nil {
-			r()
-		}
-		done <- err
-	}()
-	time.Sleep(50 * time.Millisecond)
-	release()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("waiter after release: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("waiter did not get the lock after release")
 	}
 }

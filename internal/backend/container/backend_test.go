@@ -531,12 +531,16 @@ func TestStopDuringBootKeepsTheVM(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	time.Sleep(20 * time.Millisecond)
+	stopped := time.Now()
 	if _, err := b.Stop(ctx, "slow"); err != nil {
 		t.Fatalf("stop during boot: %v", err)
 	}
 	err := <-done
 	if err == nil || !strings.Contains(err.Error(), "is kept") {
 		t.Fatalf("Create must report the stop and keep the VM, got %v", err)
+	}
+	if time.Since(stopped) > time.Second {
+		t.Errorf("Create must notice the stop at once, not wait for the ssh deadline (%s)", time.Since(stopped))
 	}
 	if fake.CalledWithSuffix("machine rm slow") {
 		t.Errorf("stop promises to keep the disk:\n%s", fake.Dump())

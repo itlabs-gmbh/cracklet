@@ -15,9 +15,14 @@ import (
 // an address that is not up yet would otherwise block for the OS timeout.
 const dialAttempt = 2 * time.Second
 
+// errStoppedWhileBooting reports a deliberate `cracklet stop` during a boot;
+// the VM is kept, its disk included.
+var errStoppedWhileBooting = errors.New("stopped while it booted")
+
 // waitForSSH polls until the machine has an address and sshd accepts. A
 // machine that falls back to stopped after it was seen running has crashed
-// and is reported at once.
+// and is reported at once; one whose record says it was stopped on purpose is
+// reported at once as well, whenever that happens.
 func (b *Backend) waitForSSH(ctx context.Context, name string) (vm.Info, error) {
 	deadline := time.Now().Add(b.sshWait)
 	var lastErr error
@@ -26,6 +31,9 @@ func (b *Backend) waitForSSH(ctx context.Context, name string) (vm.Info, error) 
 		m, err := b.machine(ctx, name)
 		if err != nil {
 			return vm.Info{}, err
+		}
+		if r, ok, err := b.loadRecord(name); err == nil && ok && !r.Running {
+			return vm.Info{}, fmt.Errorf("%s %w", name, errStoppedWhileBooting)
 		}
 		switch {
 		case m.state() == vm.StateRunning && m.addr() != "":

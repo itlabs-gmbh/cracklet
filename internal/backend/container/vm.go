@@ -107,6 +107,9 @@ func (b *Backend) Create(ctx context.Context, spec vm.Spec, createdAt time.Time)
 		return vm.Info{}, err
 	}
 	info, err := b.waitForSSH(ctx, name)
+	if errors.Is(err, errStoppedWhileBooting) {
+		return vm.Info{}, fmt.Errorf("%w and is kept; 'cracklet start %s' boots it", err, name)
+	}
 	if err != nil {
 		return vm.Info{}, b.discard(ctx, name, err)
 	}
@@ -186,7 +189,7 @@ func (b *Backend) discard(ctx context.Context, name string, err error) error {
 // so, and stop promises to keep the disk.
 func (b *Backend) discardLocked(ctx context.Context, name string, err error) error {
 	if rec, ok, recErr := b.loadRecord(name); recErr == nil && ok && !rec.Running {
-		return fmt.Errorf("%w; %s was stopped while it booted and is kept, 'cracklet start %s' boots it", err, name, name)
+		return fmt.Errorf("%w; %s was stopped meanwhile and is kept, 'cracklet start %s' boots it", err, name, name)
 	}
 	machines, lsErr := b.machines(ctx)
 	if lsErr != nil {

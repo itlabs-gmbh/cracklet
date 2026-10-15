@@ -1,4 +1,5 @@
-// Package app implements the cracklet workflows on top of Lima and the guest agent.
+// Package app implements the cracklet workflows on top of a backend that
+// creates the microVMs and the guest they expose over ssh.
 package app
 
 import (
@@ -9,26 +10,29 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/itlabs-gmbh/cracklet/internal/backend"
+	"github.com/itlabs-gmbh/cracklet/internal/backend/lima"
 	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/envdbin"
 	"github.com/itlabs-gmbh/cracklet/internal/host"
-	"github.com/itlabs-gmbh/cracklet/internal/lima"
 	"github.com/itlabs-gmbh/cracklet/internal/runner"
 )
 
 // App bundles the collaborators every command needs.
 type App struct {
-	r        runner.Runner
-	lima     *lima.Client
-	paths    config.Paths
-	out      io.Writer
-	status   io.Writer // progress that must not mix into a command's output
-	lookPath host.LookPathFunc
-	platform hostPlatform
-	probe    PortProbe
-	portBusy PortCheck
-	envd     EnvdSource
-	tunnel   Tunnel
+	r       runner.Runner
+	backend backend.Backend
+	// newBackend builds the backend from an App's runner, writers and
+	// options; standby calls it on a silenced copy of the App.
+	newBackend func(*App) backend.Backend
+	paths      config.Paths
+	out        io.Writer
+	status     io.Writer // progress that must not mix into a command's output
+	lookPath   host.LookPathFunc
+	platform   hostPlatform
+	probe      PortProbe
+	portBusy   PortCheck
+	envd       EnvdSource
+	tunnel     Tunnel
 	// tunnelRetry is the pause before `cracklet tunnel` reconnects.
 	tunnelRetry time.Duration
 	// brokerWatch is how often a session sharing another session's broker
@@ -38,9 +42,9 @@ type App struct {
 	now func() time.Time
 }
 
-// EnvdSource yields the linux/arm64 cracklet-envd binary that Prepare ships
-// into the Lima VM.
-type EnvdSource func(ctx context.Context) ([]byte, error)
+// EnvdSource yields the linux/arm64 cracklet-envd binary that the Lima
+// backend ships into its VM.
+type EnvdSource = lima.EnvdSource
 
 // PortProbe reports whether 127.0.0.1:port on the Mac accepts connections,
 // waiting a little for Lima to expose a freshly forwarded port.
@@ -92,36 +96,42 @@ func WithEnvd(src EnvdSource) Option {
 	return func(a *App) { a.envd = src }
 }
 
-// New wires an App.
+// WithBackend replaces the Lima backend New would otherwise wire. The same
+// instance also serves the silenced standby copy of the App, and WithEnvd and
+// WithLookPath no longer reach a backend (they configure the Lima one).
+func WithBackend(b backend.Backend) Option {
+	return func(a *App) { a.newBackend = func(*App) backend.Backend { return b } }
+}
+
+// New wires an App. Without WithBackend it drives the Lima backend.
 func New(r runner.Runner, paths config.Paths, out io.Writer, opts ...Option) *App {
-	a := &App{r: r, lima: lima.NewClient(r, config.Instance), paths: paths, out: out, status: os.Stderr,
+	a := &App{r: r, paths: paths, out: out, status: os.Stderr,
 		lookPath: exec.LookPath, probe: waitForHostPort, portBusy: hostPortBusy, tunnelRetry: defaultTunnelRetry,
 		brokerWatch: defaultBrokerWatch, now: time.Now}
-	a.envd = a.loadEnvd
 	for _, opt := range opts {
 		opt(a)
 	}
+	if a.newBackend == nil {
+		a.newBackend = limaBackend
+	}
+	a.backend = a.newBackend(a)
 	return a
+}
+
+// limaBackend builds the Lima backend from the App's runner, writers and the
+// options that concern it.
+func limaBackend(a *App) backend.Backend {
+	opts := []lima.Option{lima.WithFacts(a.gatherFacts), lima.WithLookPath(a.lookPath)}
+	if a.envd != nil {
+		opts = append(opts, lima.WithEnvd(a.envd))
+	}
+	return lima.New(a.r, a.paths, a.out, a.status, opts...)
 }
 
 func (a *App) gatherFacts(ctx context.Context) host.Facts {
 	return host.Gatherer{OS: a.platform.os, Arch: a.platform.arch, Runner: a.r, LookPath: a.lookPath}.Gather(ctx)
 }
 
-// loadEnvd prefers the daemon embedded by `make envd`; a cracklet installed via
-// `go install ...@latest` has none and cross-compiles it from the module cache.
-func (a *App) loadEnvd(ctx context.Context) ([]byte, error) {
-	if data, ok := envdbin.Embedded(); ok {
-		return data, nil
-	}
-	a.printf("==> cracklet-envd is not embedded in this build, cross-compiling it with the local Go toolchain\n")
-	return envdbin.Builder{Runner: a.r, LookPath: a.lookPath, Version: envdbin.RunningVersion()}.Build(ctx)
-}
-
 func (a *App) printf(format string, args ...any) {
 	fmt.Fprintf(a.out, format, args...)
-}
-
-func (a *App) statusf(format string, args ...any) {
-	fmt.Fprintf(a.status, format, args...)
 }

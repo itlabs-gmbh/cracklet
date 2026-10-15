@@ -7,6 +7,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The code that drives Lima and the guest agent moved behind a backend
+  interface (`internal/backend`); `app` keeps grants, broker, tunnel and gc
+  and no longer knows about limactl. No user-visible change; the guest agent's
+  checksum is now verified once per process instead of on every poll of
+  `cracklet tunnel`. This is the seam for the apple/container backend described
+  in docs/design/container-backend.md.
+
 ### Added
 
 - After a reboot of the Mac, any command that needs the Lima VM starts it

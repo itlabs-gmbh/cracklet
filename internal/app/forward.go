@@ -30,7 +30,7 @@ func (a *App) Forward(ctx context.Context, name string, specs []string) (VMInfo,
 		}
 		forwards = append(forwards, f)
 	}
-	if err := a.readyForAgent(ctx); err != nil {
+	if err := a.backend.Ready(ctx); err != nil {
 		return VMInfo{}, err
 	}
 	if len(forwards) == 0 {
@@ -39,15 +39,7 @@ func (a *App) Forward(ctx context.Context, name string, specs []string) (VMInfo,
 	if err := a.checkHostPortsFree(forwards); err != nil {
 		return VMInfo{}, err
 	}
-	args := []string{"forward", name}
-	for _, f := range forwards {
-		args = append(args, f.Spec())
-	}
-	out, err := a.agentOutput(ctx, args...)
-	if err != nil {
-		return VMInfo{}, err
-	}
-	info, err := parseVM(out)
+	info, err := a.backend.Forward(ctx, name, forwards)
 	if err != nil {
 		return VMInfo{}, err
 	}
@@ -65,21 +57,15 @@ func (a *App) Unforward(ctx context.Context, name string, hostPorts []int) (VMIn
 	if len(hostPorts) == 0 {
 		return VMInfo{}, fmt.Errorf("specify at least one host port")
 	}
-	args := []string{"unforward", name}
 	for _, p := range hostPorts {
 		if p < 1 || p > vm.MaxPort {
 			return VMInfo{}, fmt.Errorf("invalid port %d", p)
 		}
-		args = append(args, strconv.Itoa(p))
 	}
-	if err := a.readyForAgent(ctx); err != nil {
+	if err := a.backend.Ready(ctx); err != nil {
 		return VMInfo{}, err
 	}
-	out, err := a.agentOutput(ctx, args...)
-	if err != nil {
-		return VMInfo{}, err
-	}
-	info, err := parseVM(out)
+	info, err := a.backend.Unforward(ctx, name, hostPorts)
 	if err != nil {
 		return VMInfo{}, err
 	}

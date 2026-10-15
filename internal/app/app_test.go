@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/itlabs-gmbh/cracklet/internal/agent"
+	"github.com/itlabs-gmbh/cracklet/internal/backend/lima"
 	"github.com/itlabs-gmbh/cracklet/internal/config"
 	"github.com/itlabs-gmbh/cracklet/internal/runner"
 	"github.com/itlabs-gmbh/cracklet/internal/vm"
@@ -22,6 +23,11 @@ func newTestApp(t *testing.T, handle runner.FakeHandler) (*App, *runner.Fake, *b
 	out := &bytes.Buffer{}
 	paths := config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}
 	return New(fake, paths, out, WithEnvd(fakeEnvd), WithStatus(out)), fake, out
+}
+
+// limaOf reaches the Lima backend behind an App for tests of its locks and boot path.
+func limaOf(a *App) *lima.Backend {
+	return a.backend.(*lima.Backend)
 }
 
 // fakeEnvd stands in for the cross-compiled guest daemon so tests do not depend

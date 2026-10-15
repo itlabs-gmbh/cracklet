@@ -160,7 +160,7 @@ func (a *App) provision(ctx context.Context, name string, caps cap.Set, set gran
 	if err != nil {
 		return err
 	}
-	if err := a.requireRunning(ctx); err != nil {
+	if err := a.backend.Ready(ctx); err != nil {
 		return err
 	}
 	if err := a.ensureSSHConfig(); err != nil {

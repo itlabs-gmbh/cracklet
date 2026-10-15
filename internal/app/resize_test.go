@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/itlabs-gmbh/cracklet/internal/agent"
+	limabe "github.com/itlabs-gmbh/cracklet/internal/backend/lima"
 	"github.com/itlabs-gmbh/cracklet/internal/config"
 	"github.com/itlabs-gmbh/cracklet/internal/lima"
 	"github.com/itlabs-gmbh/cracklet/internal/runner"
@@ -170,7 +171,7 @@ func TestResizeFor(t *testing.T) {
 		{"broken", lima.Instance{Status: "Broken"}, PrepareOptions{CPUs: 8, Explicit: SizeFlags{CPUs: true}}, lima.Resize{}, "Broken"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := tc.o.resizeFor(tc.inst)
+			got, err := limabe.ResizeFor(tc.o, tc.inst)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("want error containing %q, got %v", tc.wantErr, err)
@@ -245,7 +246,7 @@ func TestPrepareResizeBlocksStartsBetweenCheckAndStop(t *testing.T) {
 func TestPrepareRefusesResizeWhileMicroVMStarts(t *testing.T) {
 	app, fake, _, paths := prepareApp(t, sizedHandler("Running", 4, 8, 40, "[]"), true)
 	writeDummyKeys(t, paths)
-	release, err := app.holdLimaForMicroVM()
+	release, err := limaOf(app).HoldForMicroVM()
 	if err != nil {
 		t.Fatal(err)
 	}

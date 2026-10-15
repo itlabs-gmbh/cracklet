@@ -65,7 +65,7 @@ root disk, IP address and SSH access.`,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) (err error) {
 			out := cmd.OutOrStdout()
-			if wantsJSON(cmd) {
+			if wantsJSON(cmd) || cmd.Annotations[annotationStdoutIsData] != "" {
 				out = cmd.ErrOrStderr()
 			}
 			a, err = build(out)
@@ -84,6 +84,7 @@ root disk, IP address and SSH access.`,
 		newSSHCmd(get),
 		newTunnelCmd(get),
 		newExecCmd(get),
+		newDialCmd(get),
 		newStartCmd(get),
 		newStopCmd(get),
 		newForwardCmd(get),

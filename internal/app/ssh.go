@@ -119,9 +119,9 @@ func (a *App) ensureSSHConfig() error {
 
 func (a *App) writeSSHConfig() error {
 	text, err := sshcfg.Render(sshcfg.Options{
-		Instance:      config.Instance,
-		KeyPath:       a.paths.KeyPath(),
-		LimaSSHConfig: a.paths.LimaSSHConfig(config.Instance),
+		Instance:     config.Instance,
+		KeyPath:      a.paths.KeyPath(),
+		ProxyCommand: a.backend.SSHProxyCommand(),
 	})
 	if err != nil {
 		return err

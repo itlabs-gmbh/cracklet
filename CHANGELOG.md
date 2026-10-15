@@ -7,6 +7,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `cracklet _dial HOST PORT`, a hidden ssh ProxyCommand that relays a session
+  to a port on a microVM through the backend; the generated `ssh_config` now
+  takes its ProxyCommand from the backend. The Lima backend keeps hopping
+  through the Lima VM with `ssh -W`, so nothing changes for it yet.
+
 ### Changed
 
 - The code that drives Lima and the guest agent moved behind a backend

@@ -7,6 +7,8 @@ package backend
 
 import (
 	"context"
+	"errors"
+	"net"
 	"time"
 
 	"github.com/itlabs-gmbh/cracklet/internal/vm"
@@ -37,6 +39,17 @@ type RemoveGuard struct {
 	Owner     string
 	CreatedAt *time.Time
 }
+
+// Conn is a connection to a guest port. CloseWrite lets a relay signal EOF to
+// the guest while it still reads the guest's answer, as a TCP half-close does.
+type Conn interface {
+	net.Conn
+	CloseWrite() error
+}
+
+// ErrNoDial is returned by Dial on backends whose guests the Mac cannot reach
+// directly; their ssh_config uses another ProxyCommand.
+var ErrNoDial = errors.New("direct connections to guests are not supported")
 
 // Capabilities tells app which optional features a backend has, so an
 // unsupported flag fails early with a clear message.
@@ -102,4 +115,12 @@ type Backend interface {
 	Forward(ctx context.Context, name string, forwards []vm.Forward) (vm.Info, error)
 	// Unforward removes forwards by host port.
 	Unforward(ctx context.Context, name string, hostPorts []int) (vm.Info, error)
+
+	// SSHProxyCommand is the ProxyCommand line rendered into ssh_config, with
+	// ssh's %h and %p placeholders (e.g. "cracklet _dial %h %p").
+	SSHProxyCommand() string
+	// Dial opens a TCP connection to port inside the named VM. It backs
+	// `cracklet _dial` and the forward relay; backends without a direct path
+	// return ErrNoDial.
+	Dial(ctx context.Context, name string, port int) (Conn, error)
 }

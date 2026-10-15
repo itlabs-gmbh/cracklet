@@ -448,3 +448,62 @@ func called(calls []string, needle string) bool {
 	}
 	return false
 }
+
+// TestReadyWaitsForARestoreInProgress: a second command must not see a
+// running service and race ahead into machines that are still booting.
+func TestReadyWaitsForARestoreInProgress(t *testing.T) {
+	f := newFake()
+	b, _, _ := newTestBackend(t, f)
+	ctx := context.Background()
+	if _, err := b.Create(ctx, vm.Spec{Name: "up", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.down = true
+	f.machines["up"].Status, f.machines["up"].IP = "stopped", ""
+	restoring := make(chan struct{})
+	proceed := make(chan struct{})
+	f.beforeRun = func() { close(restoring); <-proceed }
+	f.mu.Unlock()
+
+	first := make(chan error, 1)
+	go func() { first <- b.Ready(ctx) }()
+	<-restoring // the first Ready started the service and is mid-restore
+	second := make(chan error, 1)
+	go func() { second <- b.Ready(ctx) }()
+	select {
+	case err := <-second:
+		t.Fatalf("second Ready returned (%v) while the restore was still running", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(proceed)
+	for _, ch := range []chan error{first, second} {
+		if err := <-ch; err != nil {
+			t.Fatal(err)
+		}
+	}
+	m, err := b.machine(ctx, "up")
+	if err != nil || m.state() != vm.StateRunning {
+		t.Errorf("up must be running after both Ready calls: %+v %v", m, err)
+	}
+}
+
+func TestPrepareRestoresMachinesAfterReboot(t *testing.T) {
+	f := newFake()
+	b, fake, _ := newTestBackend(t, f)
+	ctx := context.Background()
+	if _, err := b.Create(ctx, vm.Spec{Name: "up", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.down = true
+	f.machines["up"].Status, f.machines["up"].IP = "stopped", ""
+	f.labels = imageLabels([]byte("ssh-ed25519 AAAA test"))
+	f.mu.Unlock()
+	if err := b.Prepare(ctx, backend.PrepareOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if !fake.CalledWithSuffix("machine run --name up --root -- true") {
+		t.Errorf("prepare as the first command after a reboot must restore the VMs:\n%s", fake.Dump())
+	}
+}

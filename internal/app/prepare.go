@@ -2,13 +2,53 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/itlabs-gmbh/cracklet/internal/backend"
 )
 
+// CheckBackendSwitch refuses to move to the active backend while the stored
+// one still owns VMs or their host state: gc would take the grants and tokens
+// of VMs it can no longer list for leftovers and remove them. Parallel
+// installations use separate CRACKLET_HOMEs.
+func (a *App) CheckBackendSwitch(ctx context.Context) error {
+	previous, err := backend.LoadName(a.paths)
+	if err != nil || previous == a.backend.Name() {
+		return err
+	}
+	names, err := a.grantStore().Names()
+	if err != nil {
+		return err
+	}
+	if len(names) > 0 {
+		return fmt.Errorf("the %s backend still has grants for %s; remove those VMs ('cracklet rm') or run 'cracklet gc' before switching to %s, or use a separate CRACKLET_HOME",
+			previous, strings.Join(names, ", "), a.backend.Name())
+	}
+	old := a.backendNamed(previous)
+	if err := old.Alive(ctx); err != nil {
+		return nil // nothing of it is running, so nothing can be stranded by surprise
+	}
+	vms, err := old.List(ctx)
+	if err != nil {
+		return fmt.Errorf("list the VMs of the %s backend before switching: %w", previous, err)
+	}
+	if len(vms) > 0 {
+		return fmt.Errorf("the %s backend still has VMs (%s); remove them with 'cracklet rm' before switching to %s, or use a separate CRACKLET_HOME",
+			previous, vmNames(vms), a.backend.Name())
+	}
+	return nil
+}
+
+func vmNames(vms []VMInfo) string {
+	names := make([]string, 0, len(vms))
+	for _, v := range vms {
+		names = append(names, v.Name)
+	}
+	return strings.Join(names, ", ")
+}
+
 // RememberBackend stores the active backend as the one later commands use.
-// Switching does not migrate VMs: the other backend's VMs are not listed
-// until the choice is switched back, which is said once here.
 func (a *App) RememberBackend() error {
 	previous, err := backend.LoadName(a.paths)
 	if err != nil {
@@ -18,8 +58,7 @@ func (a *App) RememberBackend() error {
 		return err
 	}
 	if previous != a.backend.Name() {
-		a.printf("==> cracklet now uses the %s backend (VMs of the %s backend stay where they are and are not listed)\n",
-			a.backend.Name(), previous)
+		a.printf("==> cracklet now uses the %s backend\n", a.backend.Name())
 	}
 	return nil
 }

@@ -30,6 +30,9 @@ type fakeContainer struct {
 	nextIP   int
 	failing  map[string]error // joined command prefix -> error
 	sshUp    map[string]bool  // machines whose sshd answers
+	// beforeRun, if set, runs outside the mutex before `machine run` takes
+	// effect, so a test can hold a restore in flight.
+	beforeRun func()
 }
 
 func newFake() *fakeContainer {
@@ -38,9 +41,17 @@ func newFake() *fakeContainer {
 }
 
 func (f *fakeContainer) handle(name string, args []string) ([]byte, error) {
+	joined := name + " " + strings.Join(args, " ")
+	if strings.HasPrefix(joined, "container machine run ") {
+		f.mu.Lock()
+		hook := f.beforeRun
+		f.mu.Unlock()
+		if hook != nil {
+			hook()
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	joined := name + " " + strings.Join(args, " ")
 	for prefix, err := range f.failing {
 		if strings.HasPrefix(joined, prefix) {
 			return nil, err

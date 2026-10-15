@@ -159,15 +159,26 @@ func freeName(taken map[string]bool) string {
 }
 
 // lock serializes the backend's mutating `container` calls across processes:
-// concurrent machine operations failed in the spike. It waits, polling so
-// Ctrl-C still works.
+// concurrent machine operations failed in the spike.
 func (b *Backend) lock(ctx context.Context) (func(), error) {
+	return b.flock(ctx, b.paths.ContainerLockPath())
+}
+
+// bootLock is held while the service is started and its machines restored;
+// every Ready passes through it, so a command that arrives during a restore
+// waits for the VMs instead of finding them stopped.
+func (b *Backend) bootLock(ctx context.Context) (func(), error) {
+	return b.flock(ctx, b.paths.ContainerBootLockPath())
+}
+
+// flock takes an exclusive lock on path, polling so Ctrl-C still works.
+func (b *Backend) flock(ctx context.Context, path string) (func(), error) {
 	if err := os.MkdirAll(b.paths.Home, 0o700); err != nil {
 		return nil, fmt.Errorf("create %s: %w", b.paths.Home, err)
 	}
-	f, err := os.OpenFile(b.paths.ContainerLockPath(), os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", b.paths.ContainerLockPath(), err)
+		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	for {
 		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
@@ -179,7 +190,7 @@ func (b *Backend) lock(ctx context.Context) (func(), error) {
 		}
 		if !errors.Is(err, syscall.EWOULDBLOCK) {
 			_ = f.Close()
-			return nil, fmt.Errorf("lock %s: %w", b.paths.ContainerLockPath(), err)
+			return nil, fmt.Errorf("lock %s: %w", path, err)
 		}
 		select {
 		case <-ctx.Done():

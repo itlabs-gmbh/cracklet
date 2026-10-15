@@ -28,6 +28,11 @@ func newPrepareCmd(get func() *app.App) *cobra.Command {
 			f := cmd.Flags()
 			opts := o
 			opts.Explicit = app.SizeFlags{CPUs: f.Changed("cpus"), Memory: f.Changed("memory"), Disk: f.Changed("disk")}
+			if chosenBackend(cmd) != "" {
+				if err := get().CheckBackendSwitch(cmd.Context()); err != nil {
+					return err
+				}
+			}
 			if err := get().Prepare(cmd.Context(), opts); err != nil {
 				return err
 			}

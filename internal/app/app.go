@@ -134,6 +134,15 @@ func New(r runner.Runner, paths config.Paths, out io.Writer, opts ...Option) *Ap
 	return a
 }
 
+// backendNamed builds another backend on this App's runner and writers, for
+// the switch check in CheckBackendSwitch.
+func (a *App) backendNamed(name string) backend.Backend {
+	if name == backend.NameContainer {
+		return containerBackend(a)
+	}
+	return limaBackend(a)
+}
+
 // containerBackend builds the apple/container backend.
 func containerBackend(a *App) backend.Backend {
 	return container.New(a.r, a.paths, a.out, a.status,

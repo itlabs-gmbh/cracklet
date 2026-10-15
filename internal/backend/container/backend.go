@@ -199,19 +199,23 @@ var systemStartArgs = []string{"system", "start", "--enable-kernel-install"}
 
 // Ready implements backend.Backend: it starts the system service when it is
 // down (as after a reboot of the Mac) and brings back the machines that ran
-// before, once, however many commands run in parallel.
+// before, once, however many commands run in parallel. Every call passes
+// through the boot lock, so a command that arrives while another one still
+// restores the machines waits for them rather than finding them stopped.
 func (b *Backend) Ready(ctx context.Context) error {
-	if err := b.Alive(ctx); err == nil {
-		return nil
-	}
-	release, err := b.lock(ctx)
+	release, err := b.bootLock(ctx)
 	if err != nil {
 		return err
 	}
 	defer release()
 	if err := b.Alive(ctx); err == nil {
-		return nil // another command started it while this one waited
+		return nil
 	}
+	api, err := b.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer api()
 	b.statusf("==> Starting the container system service\n")
 	if _, err := b.runLong(ctx, systemStartArgs...); err != nil {
 		return err
@@ -276,11 +280,10 @@ func (b *Backend) Prepare(ctx context.Context, o backend.PrepareOptions) error {
 	if err := sshkey.Ensure(ctx, b.r, b.paths, b.out); err != nil {
 		return err
 	}
-	if err := b.Alive(ctx); err != nil {
-		b.printf("==> Starting the container system service\n")
-		if _, err := b.runLong(ctx, systemStartArgs...); err != nil {
-			return err
-		}
+	// The same path as every other command: when prepare is the first command
+	// after a reboot, the machines that were running come back here too.
+	if err := b.Ready(ctx); err != nil {
+		return err
 	}
 	return b.ensureImage(ctx)
 }

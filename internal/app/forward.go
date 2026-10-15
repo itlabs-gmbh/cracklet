@@ -30,6 +30,11 @@ func (a *App) Forward(ctx context.Context, name string, specs []string) (VMInfo,
 		}
 		forwards = append(forwards, f)
 	}
+	if len(forwards) > 0 {
+		if err := a.checkForwardsSupported(forwards); err != nil {
+			return VMInfo{}, err
+		}
+	}
 	if err := a.backend.Ready(ctx); err != nil {
 		return VMInfo{}, err
 	}
@@ -73,6 +78,15 @@ func (a *App) Unforward(ctx context.Context, name string, hostPorts []int) (VMIn
 		a.printf("removed forward localhost:%d\n", p)
 	}
 	return info, nil
+}
+
+// checkForwardsSupported fails early on a backend without port forwards, so
+// a `new -p` does not create a VM it then cannot expose.
+func (a *App) checkForwardsSupported(forwards []vm.Forward) error {
+	if len(forwards) > 0 && !a.backend.Capabilities().Forwards {
+		return fmt.Errorf("port forwards are not supported on the %s backend yet; reach the VM at its address from 'cracklet ls' instead", a.backend.Name())
+	}
+	return nil
 }
 
 // checkHostPortsFree refuses host ports that something on the Mac already

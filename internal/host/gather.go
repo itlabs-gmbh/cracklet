@@ -37,6 +37,7 @@ func (g Gatherer) Gather(ctx context.Context) Facts {
 	f := Facts{OS: g.os(), Arch: g.arch()}
 	f.HasBrew = g.has("brew")
 	f.HasLima = g.has("limactl")
+	f.HasContainer = g.has("container")
 	if f.OS != "darwin" {
 		return f
 	}

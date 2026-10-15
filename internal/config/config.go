@@ -113,6 +113,21 @@ func (p Paths) SocketPath(vm string) string { return filepath.Join(p.RunDir(), v
 // AuditLog records every broker decision.
 func (p Paths) AuditLog() string { return filepath.Join(p.Home, "audit.log") }
 
+// BackendPath holds the name of the backend `cracklet prepare --backend` chose.
+func (p Paths) BackendPath() string { return filepath.Join(p.Home, "backend") }
+
+// MachinesDir holds the container backend's per-VM records (owner, slot,
+// creation time), kept apart from VMsDir so gc's host-state pruning never
+// touches them.
+func (p Paths) MachinesDir() string { return filepath.Join(p.Home, "machines") }
+
+// ContainerLockPath serializes the container backend's API calls.
+func (p Paths) ContainerLockPath() string { return filepath.Join(p.Home, "container.lock") }
+
+// ContainerBootLockPath is held while the container system service is started
+// and its machines restored, so parallel commands wait for the VMs to be back.
+func (p Paths) ContainerBootLockPath() string { return filepath.Join(p.Home, "container-boot.lock") }
+
 // LimaSSHConfig is the ssh_config Lima writes for an instance.
 func (p Paths) LimaSSHConfig(instance string) string {
 	return filepath.Join(p.LimaHome, instance, "ssh.config")

@@ -24,6 +24,8 @@ type Facts struct {
 	HVSupport    bool
 	HasBrew      bool
 	HasLima      bool
+	// HasContainer reports Apple's `container` CLI on PATH (container backend).
+	HasContainer bool
 }
 
 // Problem is a single failed preflight check.

@@ -9,6 +9,20 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A second backend on Apple's `container` (macOS 26, any Apple Silicon): one
+  Virtualization.framework VM per microVM, no Lima and no nested
+  virtualization, so JIT-heavy workloads such as Claude Code run at Mac speed
+  and a cold boot takes about half a second. Select it once with
+  `cracklet prepare --backend container` (remembered in `~/.cracklet/backend`);
+  `prepare` installs the CLI through Homebrew if needed, starts the system
+  service and builds the guest image (Ubuntu 24.04 with systemd, sshd and
+  cracklet's key). `ssh`, `exec`, grants, the broker and `gc` work unchanged;
+  `ssh <vm>.cracklet` reaches the guest through `cracklet _dial`. Not yet on
+  this backend: port forwards (the Mac reaches the VM at its address directly),
+  golden snapshots (`--fresh` is a no-op), profiles (the root disk is a sparse
+  512 GiB volume) and the internet-only guest firewall.
+  `cracklet doctor` names the active backend.
+
 - `cracklet _dial HOST PORT`, a hidden ssh ProxyCommand that relays a session
   to a port on a microVM through the backend; the generated `ssh_config` now
   takes its ProxyCommand from the backend. The Lima backend keeps hopping

@@ -78,3 +78,14 @@ func ignoreClosed(err error) error {
 	}
 	return fmt.Errorf("relay from guest: %w", err)
 }
+
+// Relay is the body of `cracklet _relay`, the launchd agent that serves the
+// port forwards of backends whose guests the Mac reaches directly. It runs
+// until ctx ends or the backend has no forwards left to serve.
+func (a *App) Relay(ctx context.Context) error {
+	relay, ok := a.backend.(backend.ForwardRelay)
+	if !ok {
+		return fmt.Errorf("the %s backend serves its port forwards itself; there is no relay to run", a.backend.Name())
+	}
+	return relay.ServeForwards(ctx)
+}

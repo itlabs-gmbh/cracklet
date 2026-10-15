@@ -257,20 +257,43 @@ changes `cpus`, `memory`, `home-mount` of a stopped machine.
 3. `machine run -i` is needed for stdin; `-t` without a real tty is ENODEV.
    Only relevant if we ever use `machine run` for provisioning (we do not).
 
-### Port forwards (phase 2)
+### Port forwards (shipped in phase 4)
 
-`container machine` has no `--publish`. Options:
+`container machine` has no `--publish`, so cracklet relays them itself
+(`internal/backend/container/forward.go`, `relay.go`, `launchd.go`):
 
-- **Relay in cracklet** (preferred): `cracklet forward` records the forward in
-  `~/.cracklet/vms/<vm>/forwards` and `Dial` makes it a plain TCP relay
-  `127.0.0.1:HOST → <ip>:GUEST`. It needs a process that outlives the CLI call:
-  a launchd user agent `com.cracklet.relay` started on demand, reading the
-  forward files, like the broker socket is started on demand today. Forwards
-  then survive stop/start exactly like on Lima (the relay retries while the
-  guest is down).
-- `ssh -L` in a detached ssh: simpler but a second process model to manage.
-- Document the direct address only: zero code, but `-p` from `cracklet new`
-  would silently differ between backends.
+- `cracklet forward` stores the forward in the VM's record
+  (`~/.cracklet/machines/<vm>.json`, `forwards`) under the backend lock. A
+  host port belongs to one VM ("already forwarded to VM 'x'", as on Lima);
+  forwarding it again on the same VM replaces the guest port; `unforward` of
+  an unknown port is a no-op.
+- `cracklet _relay` (hidden) is the relay: it re-reads the records every
+  second, keeps one listener on `127.0.0.1:HOST` per forward, and joins each
+  accepted connection to the guest port through `Dial` (the guest address is
+  cached for 5 s so a burst of browser connections does not spawn one
+  `machine ls` each; a failed dial forgets it). A stopped VM keeps its port;
+  connections are closed until it runs again, under whatever address it then
+  has. A host port that cannot be bound is logged once and retried.
+- The relay is a detached child of the cracklet command (`spawn.go`: own
+  session, stdout/stderr to `~/.cracklet/relay.log`), **not a launchd agent
+  as first planned**: measured on macOS 26.7.1, a launchd-started `cracklet
+  _relay` got "no route to host" for every connection to a vmnet address
+  (the Local Network permission is attributed to the binary itself and
+  denied silently, no prompt), while the same binary spawned from the shell
+  reached the guests, because it inherits the terminal's grant like the
+  `_dial` ProxyCommand does. The relay holds `~/.cracklet/relay.lock` while
+  it runs; `ensureRelay` (called from `forward`, `start` and every command's
+  `Ready`) spawns one when forwards exist and the lock is free. It exits
+  after two minutes without forwards, deciding under the backend lock so a
+  concurrent `forward` cannot slip in between. It dies at logout; the first
+  command after login (or after a reboot, which also restores the VMs)
+  brings it back.
+- `ls` reports a forward `active` when the VM runs and something listens on
+  the host port, `inactive` otherwise.
+
+Rejected: `ssh -L` in a detached ssh (a second process model) and documenting
+the direct address only (`-p` from `cracklet new` would differ between
+backends).
 
 ### Security notes from the Phase 3 review
 
@@ -278,13 +301,23 @@ changes `cpus`, `memory`, `home-mount` of a stopped machine.
   Apple's default guest kernel; cracklet pins no digest for it (the Lima
   backend pins Firecracker, kernel and rootfs). Accepted for now because the
   kernel ships with the same signed Apple release as the CLI we already trust
-  to run the VMs. Phase 4 may pin a kernel of our own (`--kernel`).
-- **Guest impersonation**: all guests share one vmnet /24 and the generated
-  `ssh_config` disables host key checking, so a hostile guest that takes a
-  neighbour's address can pose as it towards `cracklet ssh`, grants and the
-  broker tunnel. Phase 4 pins each VM's host key at creation (read it over the
-  first connection, store it with the record, render `UserKnownHostsFile` and
-  `StrictHostKeyChecking yes` per host) together with the firewall work below.
+  to run the VMs. Pinning a kernel of our own (`--kernel`) remains an option.
+- **Guest impersonation** (closed in phase 4): all guests share one vmnet /24,
+  so a hostile guest that takes a neighbour's address could pose as it
+  towards `cracklet ssh`, grants and the broker tunnel while `ssh_config`
+  skipped host key checking. Now the image drops the host keys apt generated
+  at build time (every VM would share them) and a drop-in on `ssh.service`
+  makes an ed25519 key on first boot; `Create` reads it with
+  `ssh-keyscan -q -t ed25519` right after sshd answers and before any session,
+  stores it in the record (`host_keys`) and regenerates
+  `~/.cracklet/known_hosts` (`<vm>.cracklet TYPE KEY`, rendered from the
+  records under the lock, also on `rm` and record pruning, so a recreated name
+  never trips over its predecessor's key). `ssh_config` carries
+  `StrictHostKeyChecking yes` and `UserKnownHostsFile` through
+  `Backend.KnownHostsFile()` (Lima returns "", its guests share one image-wide
+  key behind a firewall). A VM that presents no key is removed again. The
+  remaining window is the race between the first `ssh-keyscan` and a
+  neighbour, against a machine that booted half a second earlier.
 
 ### Network isolation: the one real regression
 
@@ -300,9 +333,15 @@ makes. Options, in order of preference:
 1. Ask upstream for an egress policy on vmnet networks or a `--network` for
    machines; until then document the difference (`Capabilities.GuestFirewall`
    shows up in `doctor`).
-2. Best-effort nftables inside the guest image (`-d 10/8,172.16/12,192.168/16,
-   100.64/10,169.254/16 reject` on output, except the gateway for DNS). Root in
-   the guest can remove it, so it is a guard rail, not a boundary. Still worth
+2. **Shipped in phase 4**: best-effort nftables inside the guest image
+   (`firewall.go`, `/etc/nftables.conf`, `nftables.service` enabled so the
+   rules are up before networking): an `inet` output chain accepts loopback
+   and established flows, DNS (53) and DHCP (67) to private addresses, and
+   rejects every other private IPv4 destination (10/8, 100.64/10, 169.254/16,
+   172.16/12, 192.168/16, so the Mac at 192.168.64.1 and the LAN) with
+   admin-prohibited; IPv6 keeps neighbour discovery and rejects ULA and
+   link-local. Root in the guest can remove it, so it is a guard rail, not a
+   boundary (`Capabilities.GuestFirewall` is true with that caveat). Worth
    shipping because the common failure is a careless agent, not a hostile one.
 3. A pf anchor on the Mac for `bridge100` traffic: real enforcement, but needs
    root on the Mac and fights with `container`'s own vmnet rules. Not for v1.
@@ -320,7 +359,8 @@ makes. Options, in order of preference:
 3. **Container backend**: Doctor, Prepare (image build), New/Start/Stop/Remove/
    List, Dial; `--disk`/`forward` rejected via Capabilities; website gets a
    "Backends" section with the measured numbers.
-4. **Forwards relay** via launchd agent; in-guest nftables guard rail.
+4. **Forwards relay** via launchd agent; in-guest nftables guard rail; host
+   key pinning (shipped 2026-10-15).
 5. **Flip and delete**: default becomes `container`; a release later remove
    `internal/lima`, `internal/agent`, `internal/envd*`, `cmd/cracklet-envd`,
    the golden-snapshot docs, the M3/nested-virt preflight and the Lima section

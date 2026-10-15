@@ -32,3 +32,19 @@ alias <vm>.cracklet or a bare VM name.`,
 		},
 	}
 }
+
+func newRelayCmd(get func() *app.App) *cobra.Command {
+	return &cobra.Command{
+		Use:    "_relay",
+		Short:  "Serve the port forwards of the container backend (started by cracklet itself)",
+		Hidden: true,
+		Long: `_relay listens on 127.0.0.1:HOST for every forward of every microVM and joins
+each connection to the VM's guest port. cracklet starts it as a detached process
+whenever forwards exist and none runs (log: ~/.cracklet/relay.log); it exits on
+its own once no forwards are left.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return get().Relay(cmd.Context())
+		},
+	}
+}

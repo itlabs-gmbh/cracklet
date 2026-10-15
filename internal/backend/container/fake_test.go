@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -33,11 +36,25 @@ type fakeContainer struct {
 	// beforeRun, if set, runs outside the mutex before `machine run` takes
 	// effect, so a test can hold a restore in flight.
 	beforeRun func()
+	// onBuild sees the build context directory; built keeps its files.
+	onBuild func(dir string)
+	built   map[string]string
+	// hostKeys is the key each machine presents, made on its first boot;
+	// noHostKey makes ssh-keyscan come back empty, as it does for a host
+	// that does not answer.
+	hostKeys  map[string]string
+	nextKey   int
+	noHostKey bool
+	// listening are the loopback ports the relay serves; guestServers maps
+	// a guest ip:port to a real loopback address the dialer connects to.
+	listening    map[int]bool
+	guestServers map[string]string
 }
 
 func newFake() *fakeContainer {
 	return &fakeContainer{version: "1.5.0", machines: map[string]*machine{}, nextIP: 2,
-		failing: map[string]error{}, sshUp: map[string]bool{}}
+		failing: map[string]error{}, sshUp: map[string]bool{}, hostKeys: map[string]string{},
+		listening: map[int]bool{}, guestServers: map[string]string{}}
 }
 
 func (f *fakeContainer) handle(name string, args []string) ([]byte, error) {
@@ -60,6 +77,9 @@ func (f *fakeContainer) handle(name string, args []string) ([]byte, error) {
 	if name == "brew" {
 		return nil, nil // brew install container
 	}
+	if name == "ssh-keyscan" {
+		return f.keyscan(args[len(args)-1]), nil
+	}
 	if name != "container" {
 		return nil, errors.New("unexpected command: " + joined)
 	}
@@ -81,6 +101,17 @@ func (f *fakeContainer) handle(name string, args []string) ([]byte, error) {
 		return json.Marshal([]map[string]any{{"variants": []map[string]any{{"config": map[string]any{"config": map[string]any{"Labels": f.labels}}}}}})
 	case strings.HasPrefix(joined, "container build "):
 		f.labels = map[string]string{labelRev: imageRev, labelKey: "built"}
+		dir := args[len(args)-1]
+		f.built = map[string]string{}
+		if entries, err := os.ReadDir(dir); err == nil {
+			for _, e := range entries {
+				data, _ := os.ReadFile(filepath.Join(dir, e.Name()))
+				f.built[e.Name()] = string(data)
+			}
+		}
+		if f.onBuild != nil {
+			f.onBuild(dir)
+		}
 		return nil, nil
 	case joined == "container machine ls --format json":
 		list := make([]machine, 0, len(f.machines))
@@ -98,6 +129,8 @@ func (f *fakeContainer) handle(name string, args []string) ([]byte, error) {
 		fmt.Sscanf(args[indexOf(args, "--memory")+1], "%dM", &mem)
 		f.machines[n] = &machine{ID: n, IP: fmt.Sprintf("192.168.64.%d", f.nextIP), Status: "running", CPUs: cpus, Memory: mem << 20}
 		f.nextIP++
+		f.nextKey++
+		f.hostKeys[n] = fmt.Sprintf("ssh-ed25519 AAAA-%s-%d", n, f.nextKey)
 		f.sshUp[n] = true
 		return nil, nil
 	case strings.HasPrefix(joined, "container machine run "):
@@ -128,6 +161,20 @@ func (f *fakeContainer) handle(name string, args []string) ([]byte, error) {
 	return nil, errors.New("unexpected command: " + joined)
 }
 
+// keyscan answers like `ssh-keyscan -q`: one line per key of the machine at
+// addr, nothing (and success) when no machine answers there.
+func (f *fakeContainer) keyscan(addr string) []byte {
+	if f.noHostKey {
+		return nil
+	}
+	for n, m := range f.machines {
+		if m.IP == addr && f.sshUp[n] {
+			return []byte(addr + " " + f.hostKeys[n] + "\n")
+		}
+	}
+	return nil
+}
+
 func indexOf(args []string, flag string) int {
 	for i, a := range args {
 		if a == flag {
@@ -142,12 +189,29 @@ func indexOf(args []string, flag string) int {
 func (f *fakeContainer) dialer(ctx context.Context, addr string) (backend.Conn, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for n, m := range f.machines {
-		if strings.HasPrefix(addr, m.IP+":") && m.IP != "" && f.sshUp[n] {
-			c1, c2 := net.Pipe()
-			_ = c2.Close()
-			return pipeConn{c1}, nil
+	if host, port, _ := net.SplitHostPort(addr); host == "127.0.0.1" {
+		p, _ := strconv.Atoi(port)
+		if !f.listening[p] {
+			return nil, errors.New("connection refused")
 		}
+		c1, c2 := net.Pipe()
+		_ = c2.Close()
+		return pipeConn{c1}, nil
+	}
+	for n, m := range f.machines {
+		if !strings.HasPrefix(addr, m.IP+":") || m.IP == "" || !f.sshUp[n] {
+			continue
+		}
+		if real, ok := f.guestServers[addr]; ok {
+			conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", real)
+			if err != nil {
+				return nil, err
+			}
+			return conn.(*net.TCPConn), nil
+		}
+		c1, c2 := net.Pipe()
+		_ = c2.Close()
+		return pipeConn{c1}, nil
 	}
 	return nil, errors.New("connection refused")
 }
@@ -171,7 +235,57 @@ func newTestBackend(t *testing.T, f *fakeContainer, opts ...Option) (*Backend, *
 	if err := os.WriteFile(paths.KeyPath(), []byte("key"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	spawns := &spawnLog{}
 	opts = append([]Option{WithFacts(goodFacts), WithDialer(f.dialer), WithExecutable("/usr/local/bin/cracklet"),
-		WithSSHWait(2*time.Second, 5*time.Millisecond)}, opts...)
-	return New(fake, paths, out, out, opts...), fake, out
+		WithSSHWait(2*time.Second, 5*time.Millisecond), WithRelaySpawner(spawns.spawn)}, opts...)
+	b := New(fake, paths, out, out, opts...)
+	spawnLogs.Lock()
+	spawnLogs.m[b] = spawns
+	spawnLogs.Unlock()
+	return b, fake, out
+}
+
+// spawnLogs maps test backends to their spawn records.
+var spawnLogs = struct {
+	sync.Mutex
+	m map[*Backend]*spawnLog
+}{m: map[*Backend]*spawnLog{}}
+
+func spawnsOf(b *Backend) *spawnLog {
+	spawnLogs.Lock()
+	defer spawnLogs.Unlock()
+	return spawnLogs.m[b]
+}
+
+// spawnLog records relay spawns instead of starting processes.
+type spawnLog struct {
+	mu    sync.Mutex
+	exes  []string
+	fail  error
+	count int
+}
+
+func (s *spawnLog) spawn(exe string, paths config.Paths) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.fail != nil {
+		return s.fail
+	}
+	s.exes = append(s.exes, exe)
+	s.count++
+	return nil
+}
+
+func (s *spawnLog) spawned() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.count
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
+
+// withStatus redirects the backend's status notes (used by relay tests,
+// whose goroutines write while the test reads).
+func withStatus(w io.Writer) Option {
+	return func(b *Backend) { b.status = w }
 }

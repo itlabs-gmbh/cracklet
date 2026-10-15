@@ -49,3 +49,17 @@ func TestDerivedPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestKnownHostsPath(t *testing.T) {
+	p := Paths{Home: "/h"}
+	if got := p.KnownHostsPath(); got != filepath.Join("/h", "known_hosts") {
+		t.Errorf("KnownHostsPath = %q", got)
+	}
+}
+
+func TestRelayPaths(t *testing.T) {
+	p := Paths{Home: "/h"}
+	if p.RelayLockPath() != "/h/relay.lock" || p.RelayLogPath() != "/h/relay.log" {
+		t.Errorf("paths: %q %q", p.RelayLockPath(), p.RelayLogPath())
+	}
+}

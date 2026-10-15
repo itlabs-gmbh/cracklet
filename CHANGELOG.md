@@ -17,11 +17,37 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `prepare` installs the CLI through Homebrew if needed, starts the system
   service and builds the guest image (Ubuntu 24.04 with systemd, sshd and
   cracklet's key). `ssh`, `exec`, grants, the broker and `gc` work unchanged;
-  `ssh <vm>.cracklet` reaches the guest through `cracklet _dial`. Not yet on
-  this backend: port forwards (the Mac reaches the VM at its address directly),
-  golden snapshots (`--fresh` is a no-op), profiles (the root disk is a sparse
-  512 GiB volume) and the internet-only guest firewall.
-  `cracklet doctor` names the active backend.
+  `ssh <vm>.cracklet` reaches the guest through `cracklet _dial`. Not on
+  this backend: golden snapshots (`--fresh` is a no-op) and profiles (the root
+  disk is a sparse 512 GiB volume). `cracklet doctor` names the active backend.
+
+- Port forwards on the container backend. `cracklet forward` (and `new -p`)
+  stores the forward with the VM, and `cracklet _relay`, a hidden command
+  that cracklet starts as a detached process whenever forwards exist and no
+  relay runs, listens on `localhost:HOST` and joins every connection to the
+  VM's guest port. Forwards survive `stop`/`start` and a reboot of the Mac
+  (the first `cracklet` command after login brings the relay back), follow a
+  VM to a new address, and go away with the VM; the relay exits on its own
+  after two minutes without forwards. Its log is `~/.cracklet/relay.log`.
+  The relay is deliberately not a launchd agent: macOS denies a launchd-
+  started binary the local network silently, while a child of your terminal
+  inherits its permission, as the ssh ProxyCommand already does.
+
+- Host key pinning on the container backend. Every VM makes its own ed25519
+  host key on first boot (the guest image no longer ships the keys apt
+  generated at build time); `cracklet new` reads it with `ssh-keyscan` before
+  anything else talks to the VM and keeps it in `~/.cracklet/known_hosts`,
+  which the generated `ssh_config` uses with `StrictHostKeyChecking yes`. All
+  guests share one vmnet subnet, so a guest that took a neighbour's address
+  can no longer pose as it towards `cracklet ssh`, grants or the broker
+  tunnel. VMs created before this change have no pinned key: recreate them.
+
+- An internet-only guard rail in the container guest image: nftables rejects
+  connections from the guest to private networks (the Mac at `192.168.64.1`
+  and the LAN behind it included) except DNS and DHCP to the gateway, so a
+  careless agent fails fast instead of reaching your network. Unlike the
+  Lima backend's host-side rules, root inside the guest can lift it.
+  `cracklet prepare` rebuilds the guest image.
 
 - `cracklet _dial HOST PORT`, a hidden ssh ProxyCommand that relays a session
   to a port on a microVM through the backend; the generated `ssh_config` now

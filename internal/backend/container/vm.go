@@ -86,7 +86,7 @@ func (b *Backend) List(ctx context.Context) ([]vm.Info, error) {
 		} else if err != nil {
 			return nil, err
 		}
-		infos = append(infos, infoFrom(m, r))
+		infos = append(infos, b.info(ctx, m, r))
 	}
 	return infos, nil
 }
@@ -109,6 +109,9 @@ func (b *Backend) Create(ctx context.Context, spec vm.Spec, createdAt time.Time)
 	info, err := b.waitForSSH(ctx, name)
 	if errors.Is(err, errStoppedWhileBooting) {
 		return vm.Info{}, fmt.Errorf("%w and is kept; 'cracklet start %s' boots it", err, name)
+	}
+	if err == nil {
+		err = b.pinHostKeys(ctx, name, info.IP)
 	}
 	if err != nil {
 		return vm.Info{}, b.discard(ctx, name, err)
@@ -221,6 +224,7 @@ func (b *Backend) Start(ctx context.Context, name string) (vm.Info, error) {
 	if err != nil {
 		return vm.Info{}, err
 	}
+	b.kickRelayFor(ctx, name)
 	return b.waitForSSH(ctx, name)
 }
 
@@ -289,25 +293,6 @@ func sameTime(a, b *time.Time) bool {
 	return a.Equal(*b)
 }
 
-// Forward implements backend.Backend; forwards arrive with the relay in a
-// later phase (Capabilities.Forwards is false, so app refuses them earlier).
-func (b *Backend) Forward(ctx context.Context, name string, _ []vm.Forward) (vm.Info, error) {
-	return vm.Info{}, b.noForwards(ctx, name)
-}
-
-// Unforward implements backend.Backend.
-func (b *Backend) Unforward(ctx context.Context, name string, _ []int) (vm.Info, error) {
-	return vm.Info{}, b.noForwards(ctx, name)
-}
-
-func (b *Backend) noForwards(ctx context.Context, name string) error {
-	hint := ""
-	if m, err := b.machine(ctx, name); err == nil && m.addr() != "" {
-		hint = fmt.Sprintf("; the Mac reaches %s directly at %s:PORT", name, m.addr())
-	}
-	return fmt.Errorf("port forwards are not supported on the container backend yet%s", hint)
-}
-
 // machine looks one of cracklet's machines up (read-only).
 func (b *Backend) machine(ctx context.Context, name string) (machine, error) {
 	if _, ok, err := b.loadRecord(name); err != nil && !errors.Is(err, errCorruptRecord) {
@@ -335,5 +320,13 @@ func (b *Backend) describe(ctx context.Context, name string) (vm.Info, error) {
 	if err != nil && !errors.Is(err, errCorruptRecord) {
 		return vm.Info{}, err
 	}
-	return infoFrom(m, r), nil
+	return b.info(ctx, m, r), nil
+}
+
+// info combines what `container` reports with the record, forwards and
+// their observed state included.
+func (b *Backend) info(ctx context.Context, m machine, r record) vm.Info {
+	info := infoFrom(m, r)
+	info.Forwards = b.forwardStates(ctx, m, r)
+	return info
 }

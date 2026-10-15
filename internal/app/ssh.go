@@ -80,7 +80,11 @@ func (a *App) session(ctx context.Context, name string, command []string) error 
 		sig := signalOf(exitErr)
 		return &RemoteExitError{Code: 128 + int(sig), Reason: fmt.Sprintf("ssh terminated by signal %s", sig)}
 	case code == sshConnectionFailed:
-		return fmt.Errorf("could not connect to %s (ssh exit 255); check that it is running with 'cracklet ls' (%w)", name, err)
+		hint := "check that it is running with 'cracklet ls'"
+		if a.backend.KnownHostsFile() != "" {
+			hint += "; if ssh reported a host key problem, the VM predates key pinning or was replaced: recreate it"
+		}
+		return fmt.Errorf("could not connect to %s (ssh exit 255); %s (%w)", name, hint, err)
 	default:
 		return &RemoteExitError{Code: code}
 	}
@@ -104,25 +108,36 @@ func signalOf(err *exec.ExitError) syscall.Signal {
 	return syscall.SIGKILL
 }
 
-// ensureSSHConfig writes ~/.cracklet/ssh_config if it is missing.
+// ensureSSHConfig writes ~/.cracklet/ssh_config when it is missing or no
+// longer what the backend renders (an upgrade that pins host keys, a switch
+// of backends), so a session never runs with the settings of an older
+// version.
 func (a *App) ensureSSHConfig() error {
-	_, err := os.Stat(a.paths.SSHConfigPath())
+	text, err := a.renderSSHConfig()
+	if err != nil {
+		return err
+	}
+	have, err := os.ReadFile(a.paths.SSHConfigPath())
 	switch {
-	case err == nil:
+	case err == nil && string(have) == text:
 		return nil
-	case errors.Is(err, fs.ErrNotExist):
-		return a.writeSSHConfig()
-	default:
+	case err != nil && !errors.Is(err, fs.ErrNotExist):
 		return fmt.Errorf("check ssh config: %w", err)
 	}
+	return a.writeSSHConfig()
+}
+
+func (a *App) renderSSHConfig() (string, error) {
+	return sshcfg.Render(sshcfg.Options{
+		Instance:       config.Instance,
+		KeyPath:        a.paths.KeyPath(),
+		ProxyCommand:   a.backend.SSHProxyCommand(),
+		KnownHostsFile: a.backend.KnownHostsFile(),
+	})
 }
 
 func (a *App) writeSSHConfig() error {
-	text, err := sshcfg.Render(sshcfg.Options{
-		Instance:     config.Instance,
-		KeyPath:      a.paths.KeyPath(),
-		ProxyCommand: a.backend.SSHProxyCommand(),
-	})
+	text, err := a.renderSSHConfig()
 	if err != nil {
 		return err
 	}

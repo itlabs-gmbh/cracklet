@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"strconv"
@@ -44,9 +45,15 @@ type Backend struct {
 	lookPath host.LookPathFunc
 	gather   func(ctx context.Context) host.Facts
 	dial     Dialer
-	exe      string // the cracklet binary, for the ssh ProxyCommand
+	exe      string // the cracklet binary, for the ssh ProxyCommand and the relay
 	sshWait  time.Duration
 	poll     time.Duration
+	// relayPoll and relayIdle pace ServeForwards; addrs is its address
+	// cache; spawn starts it as a detached process.
+	relayPoll time.Duration
+	relayIdle time.Duration
+	addrs     addrCache
+	spawn     Spawner
 }
 
 // Option customises a Backend.
@@ -80,7 +87,8 @@ func WithSSHWait(wait, poll time.Duration) Option {
 // New wires a Backend. out receives command output, status progress notes.
 func New(r runner.Runner, paths config.Paths, out, status io.Writer, opts ...Option) *Backend {
 	b := &Backend{r: r, paths: paths, out: out, status: status, lookPath: exec.LookPath,
-		dial: tcpDial, exe: "cracklet", sshWait: 60 * time.Second, poll: 100 * time.Millisecond}
+		dial: tcpDial, exe: "cracklet", sshWait: 60 * time.Second, poll: 100 * time.Millisecond,
+		relayPoll: defaultRelayPoll, relayIdle: defaultRelayIdle, spawn: spawnRelay}
 	if exe, err := os.Executable(); err == nil {
 		b.exe = exe
 	}
@@ -101,11 +109,12 @@ var _ backend.Backend = (*Backend)(nil)
 func (b *Backend) Name() string { return backend.NameContainer }
 
 // Capabilities implements backend.Backend: no snapshots (every boot is cold),
-// no profiles (the root disk is a sparse 512 GiB volume), forwards and the
-// guest firewall come in later phases, and there is no shared runtime VM to
-// resize.
+// no profiles (the root disk is a sparse 512 GiB volume), no shared runtime
+// VM to resize. Forwards are served by the relay; the guest firewall is the
+// nftables guard rail baked into the image (firewall.go), which root inside
+// the guest can lift, unlike Lima's host-side rules.
 func (b *Backend) Capabilities() backend.Capabilities {
-	return backend.Capabilities{}
+	return backend.Capabilities{Forwards: true, GuestFirewall: true}
 }
 
 func (b *Backend) printf(format string, args ...any) { fmt.Fprintf(b.out, format, args...) }
@@ -209,7 +218,7 @@ func (b *Backend) Ready(ctx context.Context) error {
 	}
 	defer release()
 	if err := b.Alive(ctx); err == nil {
-		return nil
+		return b.keepHostState(ctx)
 	}
 	api, err := b.lock(ctx)
 	if err != nil {
@@ -223,6 +232,22 @@ func (b *Backend) Ready(ctx context.Context) error {
 	if err := b.restoreMachines(ctx); err != nil {
 		b.statusf("  [WARN] the service is running again, but restarting its microVMs failed: %v\n"+
 			"         check 'cracklet ls' and start them with 'cracklet start NAME'\n", err)
+	}
+	return b.keepHostState(ctx)
+}
+
+// keepHostState runs on every command: it brings the relay back when
+// forwards exist without one (after logout, or when it idled out) and
+// restores a deleted known_hosts from the records. Neither fails the command;
+// a problem is reported once per command.
+func (b *Backend) keepHostState(ctx context.Context) error {
+	if _, err := os.Stat(b.paths.KnownHostsPath()); errors.Is(err, fs.ErrNotExist) {
+		if err := b.writeKnownHosts(); err != nil {
+			b.statusf("  [WARN] cannot restore %s: %v\n", b.paths.KnownHostsPath(), err)
+		}
+	}
+	if err := b.ensureRelay(ctx); err != nil {
+		b.statusf("  [WARN] %v; port forwards stay dead until it starts\n", err)
 	}
 	return nil
 }

@@ -26,6 +26,12 @@ type record struct {
 	CreatedAt *time.Time `json:"created_at,omitempty"`
 	Profile   string     `json:"profile,omitempty"`
 	Running   bool       `json:"running"`
+	// HostKeys are the "TYPE KEY" lines ssh-keyscan read from the VM on its
+	// first boot; known_hosts is rendered from them.
+	HostKeys []string `json:"host_keys,omitempty"`
+	// Forwards are served by the relay (relay.go); only host and guest port
+	// are stored, the state is observed when the VM is described.
+	Forwards []vm.Forward `json:"forwards,omitempty"`
 }
 
 // errCorruptRecord marks a record file that exists but cannot be parsed; the
@@ -104,11 +110,13 @@ func (b *Backend) setRunning(name string, running bool) error {
 	return b.saveRecord(name, r)
 }
 
+// removeRecord drops the record and, with it, the VM's line in known_hosts.
+// Callers hold the lock.
 func (b *Backend) removeRecord(name string) error {
 	if err := os.Remove(b.recordPath(name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("remove %s: %w", b.recordPath(name), err)
 	}
-	return nil
+	return b.writeKnownHosts()
 }
 
 // recordNames lists the VMs cracklet created, sorted.

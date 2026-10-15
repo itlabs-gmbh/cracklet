@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -126,5 +127,85 @@ func TestDialStopsWhenContextEnds(t *testing.T) {
 	err = a.Dial(ctx, "vm1", 22, stdin, io.Discard)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("want DeadlineExceeded, got %v", err)
+	}
+}
+
+// pinningBackend is a dialBackend that pins host keys, as the container
+// backend does.
+type pinningBackend struct {
+	*dialBackend
+	knownHosts string
+}
+
+func (p *pinningBackend) Name() string            { return "pinning" }
+func (p *pinningBackend) SSHProxyCommand() string { return "/usr/local/bin/cracklet _dial %h %p" }
+func (p *pinningBackend) KnownHostsFile() string  { return p.knownHosts }
+
+func TestSSHConfigPinsHostKeysOfAPinningBackend(t *testing.T) {
+	a := dialApp(t, nil)
+	a.backend = &pinningBackend{dialBackend: &dialBackend{}, knownHosts: "/home/known_hosts"}
+	if err := a.writeSSHConfig(); err != nil {
+		t.Fatal(err)
+	}
+	text, err := os.ReadFile(a.paths.SSHConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"StrictHostKeyChecking yes", "UserKnownHostsFile /home/known_hosts", "ProxyCommand /usr/local/bin/cracklet _dial %h %p"} {
+		if !strings.Contains(string(text), want) {
+			t.Errorf("missing %q in:\n%s", want, text)
+		}
+	}
+}
+
+// relayBackend serves forwards itself, as the container backend does.
+type relayBackend struct {
+	*dialBackend
+	served bool
+}
+
+func (r *relayBackend) ServeForwards(ctx context.Context) error {
+	r.served = true
+	return nil
+}
+
+func TestRelayRunsTheBackendsRelayOrRefuses(t *testing.T) {
+	r := &relayBackend{dialBackend: &dialBackend{}}
+	a := dialApp(t, nil)
+	a.backend = r
+	if err := a.Relay(context.Background()); err != nil || !r.served {
+		t.Errorf("Relay = %v, served=%v", err, r.served)
+	}
+	a.backend = &pinningBackend{dialBackend: &dialBackend{}}
+	if err := a.Relay(context.Background()); err == nil || !strings.Contains(err.Error(), "relay") {
+		t.Errorf("a backend without a relay must be refused clearly, got %v", err)
+	}
+}
+
+func TestSSHConfigIsRewrittenWhenTheBackendRendersSomethingElse(t *testing.T) {
+	a := dialApp(t, nil)
+	a.backend = &pinningBackend{dialBackend: &dialBackend{}, knownHosts: ""}
+	if err := a.ensureSSHConfig(); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(a.paths.SSHConfigPath())
+	if !strings.Contains(string(before), "StrictHostKeyChecking no") {
+		t.Fatalf("unexpected config:\n%s", before)
+	}
+	// An upgrade pins host keys: the next session must not keep the old file.
+	a.backend = &pinningBackend{dialBackend: &dialBackend{}, knownHosts: "/home/known_hosts"}
+	if err := a.ensureSSHConfig(); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(a.paths.SSHConfigPath())
+	if !strings.Contains(string(after), "StrictHostKeyChecking yes") {
+		t.Errorf("config not upgraded:\n%s", after)
+	}
+	stat, _ := os.Stat(a.paths.SSHConfigPath())
+	if err := a.ensureSSHConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := os.Stat(a.paths.SSHConfigPath()); !again.ModTime().Equal(stat.ModTime()) {
+		t.Error("an up-to-date config must not be rewritten")
 	}
 }

@@ -124,8 +124,8 @@ func (a *App) reportForward(ctx context.Context, info VMInfo, f vm.Forward) {
 		a.printf("localhost:%d -> %s:%d ready\n", f.Host, info.Name, f.Guest)
 		return
 	}
-	a.printf("localhost:%d -> %s:%d set up in the Lima VM, but the Mac side is not reachable yet; "+
-		"Lima usually exposes it within seconds\n", f.Host, info.Name, f.Guest)
+	a.printf("localhost:%d -> %s:%d stored, but the Mac side is not reachable yet; "+
+		"it usually comes up within seconds ('cracklet forward %s' shows its state)\n", f.Host, info.Name, f.Guest, info.Name)
 }
 
 // hostPortBusy reports whether 127.0.0.1:port already accepts connections.

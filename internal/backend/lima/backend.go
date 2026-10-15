@@ -186,12 +186,19 @@ func (b *Backend) Ready(ctx context.Context) error {
 
 // ReadyToBoot implements backend.Backend: the shared Lima lock is taken
 // before the first limactl call, so a start during a resize touches nothing.
+// The agent is verified here rather than lazily in Create, so that an
+// interrupted probe fails before the caller counts the creation as started
+// (and cleans up a VM of that name that already existed).
 func (b *Backend) ReadyToBoot(ctx context.Context) (func(), error) {
 	release, err := b.HoldForMicroVM()
 	if err != nil {
 		return nil, err
 	}
 	if err := b.Ready(ctx); err != nil {
+		release()
+		return nil, err
+	}
+	if err := b.ensureAgent(ctx); err != nil {
 		release()
 		return nil, err
 	}

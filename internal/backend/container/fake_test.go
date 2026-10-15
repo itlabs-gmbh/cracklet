@@ -45,6 +45,10 @@ type fakeContainer struct {
 	hostKeys  map[string]string
 	nextKey   int
 	noHostKey bool
+	// beforeKeyscan runs outside the mutex before ssh-keyscan answers.
+	beforeKeyscan func()
+	// runner is the fake runner that drives this container (set by newTestBackend).
+	runner *runner.Fake
 	// listening are the loopback ports the relay serves; guestServers maps
 	// a guest ip:port to a real loopback address the dialer connects to.
 	listening    map[int]bool
@@ -59,13 +63,16 @@ func newFake() *fakeContainer {
 
 func (f *fakeContainer) handle(name string, args []string) ([]byte, error) {
 	joined := name + " " + strings.Join(args, " ")
-	if strings.HasPrefix(joined, "container machine run ") {
-		f.mu.Lock()
-		hook := f.beforeRun
-		f.mu.Unlock()
-		if hook != nil {
-			hook()
-		}
+	f.mu.Lock()
+	hook := f.beforeRun
+	if name == "ssh-keyscan" {
+		hook = f.beforeKeyscan
+	} else if !strings.HasPrefix(joined, "container machine run ") {
+		hook = nil
+	}
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -227,6 +234,7 @@ func goodFacts(context.Context) host.Facts {
 func newTestBackend(t *testing.T, f *fakeContainer, opts ...Option) (*Backend, *runner.Fake, *bytes.Buffer) {
 	t.Helper()
 	fake := runner.NewFake(f.handle)
+	f.runner = fake
 	out := &bytes.Buffer{}
 	paths := config.Paths{Home: t.TempDir()}
 	if err := os.WriteFile(paths.PubKeyPath(), []byte("ssh-ed25519 AAAA test\n"), 0o600); err != nil {

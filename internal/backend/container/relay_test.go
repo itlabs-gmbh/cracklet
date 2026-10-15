@@ -305,3 +305,27 @@ func TestPipeHalfCloseAndTeardown(t *testing.T) {
 		t.Errorf("after half-close: %q, %v", got, err)
 	}
 }
+
+// TestRelayKeepsAFreshAddressAfterAClosedPort: a VM that runs but whose
+// service is not up yet must not cost one `machine ls` per connection.
+func TestRelayKeepsAFreshAddressAfterAClosedPort(t *testing.T) {
+	f := newFake()
+	b, _ := newRelayBackend(t, f, 5*time.Millisecond, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	createDev(t, b)
+	port := freePort(t)
+	if _, err := b.Forward(ctx, "dev", []vm.Forward{{Host: port, Guest: 80}}); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = b.ServeForwards(ctx) }()
+	waitFor(t, "the listener", func() bool { return listens(port) })
+	fake := f.runner
+	fake.Reset()
+	for i := 0; i < 5; i++ {
+		_, _ = roundTrip(port, "x\n") // guest port 80 is closed
+	}
+	if n := strings.Count(fake.Dump(), "machine ls"); n != 1 {
+		t.Errorf("want one machine ls for five closed-port connections, got %d:\n%s", n, fake.Dump())
+	}
+}

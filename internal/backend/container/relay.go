@@ -236,10 +236,13 @@ func (b *Backend) serveConn(ctx context.Context, client net.Conn, t forwardTarge
 
 // dialGuest connects to the guest port. The VM's address is resolved through
 // `machine ls` at most once per relayAddrTTL, one resolution at a time, and
-// a VM that is not running is remembered for as long, so a burst of
-// connections costs one CLI call, not one each. A failed connection forgets
-// the address, so a VM restarted under a new one is found again at once.
-// Failures are logged when resolved, not per connection.
+// a VM that is not running is remembered for relayNegTTL, so a burst of
+// connections costs one CLI call, not one each. A failed connection to an
+// address resolved more than relayNegTTL ago forgets it, so a VM restarted
+// under a new one is found again within a second, while a service that is
+// not up yet on a fresh address does not cost a CLI call per attempt.
+// Failures are logged when an address is resolved or dropped, not per
+// connection.
 func (b *Backend) dialGuest(ctx context.Context, t forwardTarget) (backend.Conn, error) {
 	ip, err := b.resolve(ctx, t.VM)
 	if err != nil {
@@ -249,8 +252,9 @@ func (b *Backend) dialGuest(ctx context.Context, t forwardTarget) (backend.Conn,
 	defer cancel()
 	conn, err := b.dial(dctx, net.JoinHostPort(ip, strconv.Itoa(t.Guest)))
 	if err != nil {
-		b.addrs.forget(t.VM)
-		b.relayLog("%s:%d: %v", t.VM, t.Guest, err)
+		if b.addrs.forgetStale(t.VM, relayNegTTL) {
+			b.relayLog("%s:%d: %v", t.VM, t.Guest, err)
+		}
 		return nil, err
 	}
 	return conn, nil
@@ -312,10 +316,17 @@ func (c *addrCache) put(name string, a cachedAddr) {
 	c.addrs[name] = a
 }
 
-func (c *addrCache) forget(name string) {
+// forgetStale drops the entry for name if it is older than age and reports
+// whether it did.
+func (c *addrCache) forgetStale(name string, age time.Duration) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	a, ok := c.addrs[name]
+	if !ok || time.Since(a.at) <= age {
+		return false
+	}
 	delete(c.addrs, name)
+	return true
 }
 
 // pipe copies both ways until both sides are done. A direction that ends

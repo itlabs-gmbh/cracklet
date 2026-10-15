@@ -15,13 +15,17 @@ import (
 // has just answered on port 22, so a long wait only hides a problem.
 const keyscanTimeout = "5"
 
+// errReplaced means the name was given to another VM while this one's key
+// was read; the record and the machine under that name are the other VM's.
+var errReplaced = errors.New("replaced by another VM of the same name while its host key was read")
+
 // pinHostKeys reads the host key of a VM that has just booted for the first
 // time and stores it with the record, then rewrites known_hosts. Every guest
 // shares one vmnet /24 and nothing keeps a guest from taking a neighbour's
 // address, so from here on ssh refuses any other key under this name. The
 // key is read before any session (grant, broker) reaches the VM; a neighbour
 // would have to win a race against a machine that booted half a second ago.
-func (b *Backend) pinHostKeys(ctx context.Context, name, ip string) error {
+func (b *Backend) pinHostKeys(ctx context.Context, name, id, ip string) error {
 	out, err := b.r.Output(ctx, "ssh-keyscan", "-q", "-t", "ed25519", "-T", keyscanTimeout, ip)
 	if err != nil {
 		return fmt.Errorf("read the host key of %s: %w", name, err)
@@ -41,6 +45,9 @@ func (b *Backend) pinHostKeys(ctx context.Context, name, ip string) error {
 	}
 	if !ok {
 		return fmt.Errorf("%s was removed while it booted", name)
+	}
+	if rec.ID != id {
+		return fmt.Errorf("%s was %w", name, errReplaced)
 	}
 	rec.HostKeys = keys
 	if err := b.saveRecord(name, rec); err != nil {

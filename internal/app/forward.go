@@ -38,13 +38,21 @@ func (a *App) Forward(ctx context.Context, name string, specs []string) (VMInfo,
 	if err := a.backend.Ready(ctx); err != nil {
 		return VMInfo{}, err
 	}
-	if len(forwards) == 0 {
-		return a.describe(ctx, name)
+	current, err := a.describe(ctx, name)
+	if err != nil || len(forwards) == 0 {
+		return current, err
 	}
-	if err := a.checkHostPortsFree(forwards); err != nil {
+	return a.forward(ctx, current, forwards)
+}
+
+// forward adds forwards to the VM described by current. A host port the VM
+// already owns is busy on the Mac because the backend serves it; forwarding
+// it again replaces the guest port, so only ports new to the VM are checked.
+func (a *App) forward(ctx context.Context, current VMInfo, forwards []vm.Forward) (VMInfo, error) {
+	if err := a.checkHostPortsFree(newForwards(current, forwards)); err != nil {
 		return VMInfo{}, err
 	}
-	info, err := a.backend.Forward(ctx, name, forwards)
+	info, err := a.backend.Forward(ctx, current.Name, forwards)
 	if err != nil {
 		return VMInfo{}, err
 	}
@@ -87,6 +95,21 @@ func (a *App) checkForwardsSupported(forwards []vm.Forward) error {
 		return fmt.Errorf("port forwards are not supported on the %s backend yet; reach the VM at its address from 'cracklet ls' instead", a.backend.Name())
 	}
 	return nil
+}
+
+// newForwards returns the forwards whose host port the VM does not have yet.
+func newForwards(current VMInfo, forwards []vm.Forward) []vm.Forward {
+	owned := make(map[int]bool, len(current.Forwards))
+	for _, f := range current.Forwards {
+		owned[f.Host] = true
+	}
+	fresh := make([]vm.Forward, 0, len(forwards))
+	for _, f := range forwards {
+		if !owned[f.Host] {
+			fresh = append(fresh, f)
+		}
+	}
+	return fresh
 }
 
 // checkHostPortsFree refuses host ports that something on the Mac already

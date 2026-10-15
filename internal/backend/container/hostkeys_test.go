@@ -88,3 +88,42 @@ func TestParseHostKeysKeepsOnlyTheScannedAddress(t *testing.T) {
 		t.Errorf("parseHostKeys = %q", got)
 	}
 }
+
+// TestPinRefusesARecordReplacedDuringTheScan: an auto-named VM removed and
+// recreated under the same name while the first one's key was being read
+// must neither get the old key nor be removed as the old one's leftover.
+func TestPinRefusesARecordReplacedDuringTheScan(t *testing.T) {
+	f := newFake()
+	b, fake, _ := newTestBackend(t, f)
+	f.beforeKeyscan = func() {
+		rec, _, _ := b.loadRecord("dev")
+		rec.ID = "someone-else"
+		_ = b.saveRecord("dev", rec)
+	}
+	_, err := b.Create(context.Background(), vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "replaced") {
+		t.Fatalf("want a replaced error, got %v", err)
+	}
+	if fake.CalledWithSuffix("machine rm dev") {
+		t.Errorf("the other VM must not be removed:\n%s", fake.Dump())
+	}
+	rec, _, _ := b.loadRecord("dev")
+	if rec.ID != "someone-else" || len(rec.HostKeys) != 0 {
+		t.Errorf("the other VM's record must be untouched: %+v", rec)
+	}
+}
+
+func TestEveryRecordGetsAUniqueID(t *testing.T) {
+	b, _, _ := newTestBackend(t, newFake())
+	ctx := context.Background()
+	for _, name := range []string{"a", "b"} {
+		if _, err := b.Create(ctx, vm.Spec{Name: name, VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ra, _, _ := b.loadRecord("a")
+	rb, _, _ := b.loadRecord("b")
+	if ra.ID == "" || ra.ID == rb.ID {
+		t.Errorf("ids = %q, %q", ra.ID, rb.ID)
+	}
+}

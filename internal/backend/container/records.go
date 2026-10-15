@@ -2,6 +2,8 @@ package container
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +23,9 @@ import (
 // restart of the service brings it back). The Lima agent keeps the same facts
 // inside its VM; here they live on the Mac, next to the backend choice.
 type record struct {
+	// ID tells this VM from a later one created under the same name while
+	// an unlocked step (the host key scan) of the first was still running.
+	ID        string     `json:"id,omitempty"`
 	Owner     string     `json:"owner,omitempty"`
 	Slot      string     `json:"slot,omitempty"`
 	CreatedAt *time.Time `json:"created_at,omitempty"`
@@ -154,6 +159,15 @@ func (b *Backend) pruneRecords(machines map[string]machine) error {
 		}
 	}
 	return nil
+}
+
+// newRecordID returns a random identifier for a record.
+func newRecordID() (string, error) {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", fmt.Errorf("generate record id: %w", err)
+	}
+	return hex.EncodeToString(buf[:]), nil
 }
 
 // freeName picks the first vm<N> that neither a record nor a machine uses.

@@ -180,3 +180,31 @@ func holdRelayLock(t *testing.T, b *Backend) func() {
 	}
 	return release
 }
+
+// TestReadyRestoresKnownHostsWhileTheServiceIsDown guards the lock
+// discipline: the restore path already holds the backend lock when
+// known_hosts is rebuilt, the alive path must take it itself.
+func TestReadyRestoresKnownHostsWhileTheServiceIsDown(t *testing.T) {
+	f := newFake()
+	b, _, _ := newTestBackend(t, f)
+	createDev(t, b)
+	if err := os.Remove(b.paths.KnownHostsPath()); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.down = true
+	f.mu.Unlock()
+	done := make(chan error, 1)
+	go func() { done <- b.Ready(context.Background()) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Ready deadlocked on the backend lock")
+	}
+	if got := knownHosts(t, b); !strings.Contains(got, "dev.cracklet") {
+		t.Errorf("known_hosts = %q", got)
+	}
+}

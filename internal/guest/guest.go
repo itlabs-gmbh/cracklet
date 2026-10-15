@@ -1,7 +1,7 @@
 // Package guest turns the capabilities granted to a microVM into the
 // configuration the guest needs: environment variables, files and JSON
 // merges. Everything is rendered on the Mac and applied over SSH with plain
-// POSIX tools, so the guest image needs nothing cracklet-specific.
+// POSIX tools, so the guest image needs nothing skiff-specific.
 package guest
 
 import (
@@ -11,16 +11,16 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/itlabs-gmbh/cracklet/internal/cap"
+	"github.com/itlabs-gmbh/skiff/internal/cap"
 )
 
 const (
 	// EnvFile is read by pam_env for every SSH session, interactive or not.
 	EnvFile = "/etc/environment"
-	// ManifestPath lists what cracklet manages so revoked caps can be cleaned up.
-	ManifestPath = "/etc/cracklet/manifest"
-	markerBegin  = "# >>> cracklet managed, do not edit"
-	markerEnd    = "# <<< cracklet managed"
+	// ManifestPath lists what skiff manages so revoked caps can be cleaned up.
+	ManifestPath = "/etc/skiff/manifest"
+	markerBegin  = "# >>> skiff managed, do not edit"
+	markerEnd    = "# <<< skiff managed"
 )
 
 // Plan is the rendered guest configuration for one VM.
@@ -122,7 +122,7 @@ func Render(caps []cap.Cap, data cap.TemplateData) (Plan, error) {
 			if comment == "" {
 				comment = "#"
 			}
-			if strings.Contains(content, "cracklet:"+c.Name) {
+			if strings.Contains(content, "skiff:"+c.Name) {
 				return Plan{}, fmt.Errorf("cap %s: block %s must not contain its own marker", c.Name, blk.Path)
 			}
 			blockOwner[blk.Path] = c.Name
@@ -181,7 +181,7 @@ func (p Plan) Manifest() []string {
 }
 
 // pathRe allows only characters that need no quoting in the generated
-// scripts. Cap files can come from `cracklet cap add`, so a path is
+// scripts. Cap files can come from `skiff cap add`, so a path is
 // attacker-influenced input that ends up in a root shell.
 var pathRe = regexp.MustCompile(`^/[A-Za-z0-9._/-]+$`)
 

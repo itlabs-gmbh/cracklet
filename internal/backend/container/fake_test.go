@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/host"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/host"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
 // fakeContainer simulates the `container` CLI: a system service that may be
@@ -248,7 +248,7 @@ func newTestBackend(t *testing.T, f *fakeContainer, opts ...Option) (*Backend, *
 		t.Fatal(err)
 	}
 	spawns := &spawnLog{}
-	opts = append([]Option{WithFacts(goodFacts), WithDialer(f.dialer), WithExecutable("/usr/local/bin/cracklet"),
+	opts = append([]Option{WithFacts(goodFacts), WithDialer(f.dialer), WithExecutable("/usr/local/bin/skiff"),
 		WithSSHWait(2*time.Second, 5*time.Millisecond), WithRelaySpawner(spawns.spawn)}, opts...)
 	b := New(fake, paths, out, out, opts...)
 	spawnLogs.Lock()

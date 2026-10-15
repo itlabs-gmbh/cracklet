@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
 // dialBackend is a Backend that only knows how to Dial: every connection goes
@@ -70,7 +70,7 @@ func TestDialRelaysBothWaysAndStripsAlias(t *testing.T) {
 	d := &dialBackend{addr: echoUpper(t)}
 	a := dialApp(t, d)
 	var out bytes.Buffer
-	if err := a.Dial(context.Background(), "vm1.cracklet", 22, strings.NewReader("hello guest"), &out); err != nil {
+	if err := a.Dial(context.Background(), "vm1.skiff", 22, strings.NewReader("hello guest"), &out); err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
 	if out.String() != "HELLO GUEST" {
@@ -138,7 +138,7 @@ type pinningBackend struct {
 }
 
 func (p *pinningBackend) Name() string            { return "pinning" }
-func (p *pinningBackend) SSHProxyCommand() string { return "/usr/local/bin/cracklet _dial %h %p" }
+func (p *pinningBackend) SSHProxyCommand() string { return "/usr/local/bin/skiff _dial %h %p" }
 func (p *pinningBackend) KnownHostsFile() string  { return p.knownHosts }
 
 func TestSSHConfigPinsHostKeysOfAPinningBackend(t *testing.T) {
@@ -151,7 +151,7 @@ func TestSSHConfigPinsHostKeysOfAPinningBackend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"StrictHostKeyChecking yes", "UserKnownHostsFile /home/known_hosts", "ProxyCommand /usr/local/bin/cracklet _dial %h %p"} {
+	for _, want := range []string{"StrictHostKeyChecking yes", "UserKnownHostsFile /home/known_hosts", "ProxyCommand /usr/local/bin/skiff _dial %h %p"} {
 		if !strings.Contains(string(text), want) {
 			t.Errorf("missing %q in:\n%s", want, text)
 		}

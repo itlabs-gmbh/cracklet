@@ -141,7 +141,7 @@ func TestValidateSpecProfile(t *testing.T) {
 }
 
 func TestValidateLabel(t *testing.T) {
-	for _, l := range []string{"paseo-cracklet", "3", "paseo.3", "Task_7", "a"} {
+	for _, l := range []string{"paseo-skiff", "3", "paseo.3", "Task_7", "a"} {
 		if err := ValidateLabel("owner", l); err != nil {
 			t.Errorf("ValidateLabel(%q) unexpected error: %v", l, err)
 		}

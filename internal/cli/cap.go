@@ -10,16 +10,16 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/itlabs-gmbh/cracklet/internal/app"
+	"github.com/itlabs-gmbh/skiff/internal/app"
 )
 
 func newCapCmd(get func() *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cap",
 		Short: "Manage capabilities (what the broker can hand into a microVM)",
-		Long: `Capabilities are TOML files. cracklet ships a few (claude, github); your own
-live in ~/.cracklet/caps/<name>.toml and override embedded ones of the same name.
-A capability says how something is handed into the guest; 'cracklet grant' says whether.`,
+		Long: `Capabilities are TOML files. skiff ships a few (claude, github); your own
+live in ~/.skiff/caps/<name>.toml and override embedded ones of the same name.
+A capability says how something is handed into the guest; 'skiff grant' says whether.`,
 	}
 	var render bool
 	var vmName string
@@ -49,7 +49,7 @@ A capability says how something is handed into the guest; 'cracklet grant' says 
 	var yes bool
 	add := &cobra.Command{
 		Use:   "add URL",
-		Short: "Download a capability file into ~/.cracklet/caps after showing it",
+		Short: "Download a capability file into ~/.skiff/caps after showing it",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return get().CapAdd(cmd.Context(), args[0], yes, cmd.InOrStdin())
@@ -81,15 +81,15 @@ func newSecretCmd(get func() *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "secret",
 		Short: "Store credentials in the macOS Keychain for capabilities to use",
-		Long: `Secrets live in the macOS Keychain under the service "cracklet" and are
-referenced from capability files as keychain:cracklet/<name>. The value is read
+		Long: `Secrets live in the macOS Keychain under the service "skiff" and are
+referenced from capability files as keychain:skiff/<name>. The value is read
 from the terminal without echo, or from stdin when it is not a terminal.`,
 	}
 	cmd.AddCommand(
 		&cobra.Command{
 			Use:     "set NAME",
 			Short:   "Store a secret (prompts for the value)",
-			Example: "  cracklet secret set claude-token\n  echo \"$TOKEN\" | cracklet secret set github-token",
+			Example: "  skiff secret set claude-token\n  echo \"$TOKEN\" | skiff secret set github-token",
 			Args:    cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				value, err := readSecret(cmd, args[0])

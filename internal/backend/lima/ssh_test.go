@@ -5,12 +5,12 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
 )
 
 func TestSSHProxyCommandHopsThroughLima(t *testing.T) {
 	b := newTestBackend(t)
-	want := "ssh -F /tmp/lima/cracklet/ssh.config -W %h:%p lima-cracklet"
+	want := "ssh -F /tmp/lima/skiff/ssh.config -W %h:%p lima-skiff"
 	if got := b.SSHProxyCommand(); got != want {
 		t.Errorf("SSHProxyCommand = %q, want %q", got, want)
 	}

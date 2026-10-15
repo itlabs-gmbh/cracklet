@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/itlabs-gmbh/cracklet/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/config"
 )
 
-// Backend names as stored in ~/.cracklet/backend and given to --backend.
+// Backend names as stored in ~/.skiff/backend and given to --backend.
 const (
 	NameLima      = "lima"
 	NameContainer = "container"
@@ -49,7 +49,7 @@ func LoadName(paths config.Paths) (string, error) {
 }
 
 // SaveName stores the backend choice atomically, so a concurrent LoadName
-// never sees a truncated file. A CRACKLET_HOME has one backend at a time:
+// never sees a truncated file. A SKIFF_HOME has one backend at a time:
 // switching does not migrate VMs, the other backend's VMs simply stop being
 // listed until the choice is switched back (callers warn about that).
 func SaveName(paths config.Paths, name string) error {

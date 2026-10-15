@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 func createDev(t *testing.T, b *Backend) {
@@ -35,7 +35,7 @@ func TestForwardIsRecordedAndStartsTheRelayAgent(t *testing.T) {
 		t.Errorf("record = %+v; the state must not be stored", rec)
 	}
 	// First forward: no relay runs, so one is spawned for this binary.
-	if got := spawnsOf(b).exes; len(got) != 1 || got[0] != "/usr/local/bin/cracklet" {
+	if got := spawnsOf(b).exes; len(got) != 1 || got[0] != "/usr/local/bin/skiff" {
 		t.Errorf("relay spawns = %v", got)
 	}
 	// With the relay listening, the forward is active; while it holds the
@@ -146,7 +146,7 @@ func TestReadyRestoresADeletedKnownHosts(t *testing.T) {
 	if err := b.Ready(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := knownHosts(t, b); !strings.Contains(got, "dev.cracklet ssh-ed25519") {
+	if got := knownHosts(t, b); !strings.Contains(got, "dev.skiff ssh-ed25519") {
 		t.Errorf("known_hosts after Ready = %q", got)
 	}
 }
@@ -204,7 +204,7 @@ func TestReadyRestoresKnownHostsWhileTheServiceIsDown(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Ready deadlocked on the backend lock")
 	}
-	if got := knownHosts(t, b); !strings.Contains(got, "dev.cracklet") {
+	if got := knownHosts(t, b); !strings.Contains(got, "dev.skiff") {
 		t.Errorf("known_hosts = %q", got)
 	}
 }

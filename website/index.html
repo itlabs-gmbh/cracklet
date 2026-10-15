@@ -3,24 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>cracklet – Firecracker microVMs on your Mac</title>
-  <meta name="description" content="cracklet runs real, unmodified Firecracker microVMs on Apple Silicon. A fresh Linux VM is up in about 200 ms and answers SSH in about 3 seconds. Open source.">
+  <title>skiff – Firecracker microVMs on your Mac</title>
+  <meta name="description" content="skiff runs real, unmodified Firecracker microVMs on Apple Silicon. A fresh Linux VM is up in about 200 ms and answers SSH in about 3 seconds. Open source.">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#232323" media="(prefers-color-scheme: dark)">
-  <meta property="og:title" content="cracklet – Firecracker microVMs on your Mac">
+  <meta property="og:title" content="skiff – Firecracker microVMs on your Mac">
   <meta property="og:description" content="Real, unmodified Firecracker on Apple Silicon. A fresh Linux microVM in about 200 ms, SSH in about 3 seconds. Open source.">
   <meta property="og:type" content="website">
-  <meta property="og:site_name" content="cracklet">
+  <meta property="og:site_name" content="skiff">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="container site-header">
-    <a class="brand" href="./" aria-current="page">cracklet</a>
+    <a class="brand" href="./" aria-current="page">skiff</a>
     <nav class="site-nav" aria-label="Main navigation">
       <a href="docs.html">Docs</a>
-      <a href="https://github.com/itlabs-gmbh/cracklet">GitHub</a>
-      <a href="https://github.com/itlabs-gmbh/cracklet/issues">Issues</a>
+      <a href="https://github.com/itlabs-gmbh/skiff">GitHub</a>
+      <a href="https://github.com/itlabs-gmbh/skiff/issues">Issues</a>
     </nav>
   </header>
 
@@ -30,17 +30,17 @@
       <h1>Firecracker microVMs on your Mac</h1>
       <p class="lead">Real, unmodified Firecracker on Apple Silicon. A fresh Linux microVM is up about 200 ms after you hit enter and answers SSH in about 3 seconds. One Go binary, open source.</p>
 
-      <div class="cmd" data-copy="cracklet new dev">
+      <div class="cmd" data-copy="skiff new dev">
         <span class="prompt" aria-hidden="true">$</span>
-        <span class="text">cracklet new dev</span>
-        <button type="button" aria-label="Copy cracklet new dev to the clipboard"></button>
+        <span class="text">skiff new dev</span>
+        <button type="button" aria-label="Copy skiff new dev to the clipboard"></button>
       </div>
 
       <div style="max-width:100%">
-        <p class="hint">Needs an M3 or newer, macOS 15+, Homebrew and Go 1.26+. Check with <code>cracklet doctor</code>.</p>
-        <div class="cmd" data-copy="go install github.com/itlabs-gmbh/cracklet/cmd/cracklet@latest &amp;&amp; cracklet prepare">
+        <p class="hint">Needs an M3 or newer, macOS 15+, Homebrew and Go 1.26+. Check with <code>skiff doctor</code>.</p>
+        <div class="cmd" data-copy="go install github.com/itlabs-gmbh/skiff/cmd/skiff@latest &amp;&amp; skiff prepare">
           <span class="prompt" aria-hidden="true">$</span>
-          <span class="text">go install github.com/itlabs-gmbh/cracklet/cmd/cracklet@latest &amp;&amp; cracklet prepare</span>
+          <span class="text">go install github.com/itlabs-gmbh/skiff/cmd/skiff@latest &amp;&amp; skiff prepare</span>
           <button type="button" aria-label="Copy the install command to the clipboard"></button>
         </div>
       </div>
@@ -49,12 +49,12 @@
     <section>
       <div class="container section section--center">
         <h2>A microVM in one command</h2>
-        <p class="intro">No boot to wait for. <code>cracklet new</code> hands you a running Ubuntu 24.04 with root SSH, its own kernel, disk, IP and hostname.</p>
-        <div class="term">$ cracklet new dev
+        <p class="intro">No boot to wait for. <code>skiff new</code> hands you a running Ubuntu 24.04 with root SSH, its own kernel, disk, IP and hostname.</p>
+        <div class="term">$ skiff new dev
 dev is running at 172.16.1.2
-<span class="dim">  cracklet ssh dev</span>
-<span class="dim">  ssh dev.cracklet</span>
-$ cracklet ssh dev uname -a
+<span class="dim">  skiff ssh dev</span>
+<span class="dim">  ssh dev.skiff</span>
+$ skiff ssh dev uname -a
 <span class="dim">Linux dev 6.1.186 #1 SMP aarch64 GNU/Linux</span></div>
       </div>
     </section>
@@ -67,27 +67,27 @@ $ cracklet ssh dev uname -a
           <div class="card">
             <h3 class="small">Run the agent inside</h3>
             <p>Start a VM, install your agent CLI over SSH and point it at a repo. It can <code>apt install</code>, run tests and open ports without ever touching your home directory or keychain. Credentials it needs come through the broker below, never as copies.</p>
-            <div class="cmd" data-copy="cracklet new task-42 -p 3000">
+            <div class="cmd" data-copy="skiff new task-42 -p 3000">
               <span class="prompt" aria-hidden="true">$</span>
-              <span class="text">cracklet new task-42 -p 3000</span>
-              <button type="button" aria-label="Copy cracklet new task-42 -p 3000 to the clipboard"></button>
+              <span class="text">skiff new task-42 -p 3000</span>
+              <button type="button" aria-label="Copy skiff new task-42 -p 3000 to the clipboard"></button>
             </div>
           </div>
           <div class="card">
             <h3 class="small">Many agents, side by side</h3>
             <p>Each VM has its own kernel, filesystem and IP, and the firewall drops traffic between them. Run several agents on different branches at once; none of them can see the others.</p>
-            <div class="cmd" data-copy="for n in a b c; do cracklet new agent-$n; done">
+            <div class="cmd" data-copy="for n in a b c; do skiff new agent-$n; done">
               <span class="prompt" aria-hidden="true">$</span>
-              <span class="text">for n in a b c; do cracklet new agent-$n; done</span>
+              <span class="text">for n in a b c; do skiff new agent-$n; done</span>
               <button type="button" aria-label="Copy the loop that creates three agent VMs to the clipboard"></button>
             </div>
           </div>
           <div class="card">
             <h3 class="small">Execute untrusted code</h3>
-            <p>Let the agent run the script it generated, a dependency you do not trust or a repo you just cloned. The VM only has internet. If anything goes wrong, <code>cracklet rm</code> and start over.</p>
-            <div class="cmd" data-copy="ssh task-42.cracklet 'cd app &amp;&amp; npm test'">
+            <p>Let the agent run the script it generated, a dependency you do not trust or a repo you just cloned. The VM only has internet. If anything goes wrong, <code>skiff rm</code> and start over.</p>
+            <div class="cmd" data-copy="ssh task-42.skiff 'cd app &amp;&amp; npm test'">
               <span class="prompt" aria-hidden="true">$</span>
-              <span class="text">ssh task-42.cracklet 'cd app &amp;&amp; npm test'</span>
+              <span class="text">ssh task-42.skiff 'cd app &amp;&amp; npm test'</span>
               <button type="button" aria-label="Copy the remote test command to the clipboard"></button>
             </div>
           </div>
@@ -99,19 +99,19 @@ $ cracklet ssh dev uname -a
     <section>
       <div class="container section">
         <h2>Your credentials stay on the Mac</h2>
-        <p class="intro">An agent in a microVM still needs a <code>git push</code>, a Claude login or a browser MCP that only runs on your Mac. Copying tokens into the VM would throw the isolation away. cracklet opens one controlled hole instead: a broker that hands out connections, never secrets.</p>
+        <p class="intro">An agent in a microVM still needs a <code>git push</code>, a Claude login or a browser MCP that only runs on your Mac. Copying tokens into the VM would throw the isolation away. skiff opens one controlled hole instead: a broker that hands out connections, never secrets.</p>
         <div class="grid grid--3" style="margin-top:2.5rem">
           <div class="card">
             <h3 class="small">Grant, don't copy</h3>
-            <p>Store a token once in the macOS Keychain and grant it per VM. The guest only ever holds a placeholder; the broker on your Mac swaps it for the real credential on every request, and only while <code>cracklet ssh</code> is open. Close the terminal, close the hole.</p>
-            <div class="cmd" data-copy="cracklet secret set claude-token">
+            <p>Store a token once in the macOS Keychain and grant it per VM. The guest only ever holds a placeholder; the broker on your Mac swaps it for the real credential on every request, and only while <code>skiff ssh</code> is open. Close the terminal, close the hole.</p>
+            <div class="cmd" data-copy="skiff secret set claude-token">
               <span class="prompt" aria-hidden="true">$</span>
-              <span class="text">cracklet secret set claude-token</span>
-              <button type="button" aria-label="Copy cracklet secret set claude-token to the clipboard"></button>
+              <span class="text">skiff secret set claude-token</span>
+              <button type="button" aria-label="Copy skiff secret set claude-token to the clipboard"></button>
             </div>
-            <div class="cmd" data-copy="cracklet grant ai claude github">
+            <div class="cmd" data-copy="skiff grant ai claude github">
               <span class="prompt" aria-hidden="true">$</span>
-              <span class="text">cracklet grant ai claude github</span>
+              <span class="text">skiff grant ai claude github</span>
               <button type="button" aria-label="Copy the grant command to the clipboard"></button>
             </div>
           </div>
@@ -119,24 +119,24 @@ $ cracklet ssh dev uname -a
             <h3 class="small">Default deny, fully audited</h3>
             <p>Every request is checked against the VM's grants and written to an audit log. GitHub reaches only the repositories your fine-grained token was made for. A denied request is answered with the exact command that would allow it.</p>
             <div class="term term--wrap">$ curl -s :7777/github/acme/app/info/refs
-<span class="dim">{"error":"github is not granted to dev","hint":"cracklet grant dev github"}</span></div>
-            <div class="cmd" data-copy="cracklet revoke ai github">
+<span class="dim">{"error":"github is not granted to dev","hint":"skiff grant dev github"}</span></div>
+            <div class="cmd" data-copy="skiff revoke ai github">
               <span class="prompt" aria-hidden="true">$</span>
-              <span class="text">cracklet revoke ai github</span>
+              <span class="text">skiff revoke ai github</span>
               <button type="button" aria-label="Copy the revoke command to the clipboard"></button>
             </div>
           </div>
           <div class="card">
             <h3 class="small">Any tool, one TOML file</h3>
-            <p>The broker knows three primitives: a header-injecting proxy, a bridge for MCP servers that run on your Mac, and an external program. Claude Code and GitHub ship built in. Codex, Gemini CLI or your own MCP server are a capability file in <code>~/.cracklet/caps</code>, shareable by URL. <a class="link" href="capabilities.html">How it works</a></p>
-            <div class="cmd" data-copy="cracklet cap init codex">
+            <p>The broker knows three primitives: a header-injecting proxy, a bridge for MCP servers that run on your Mac, and an external program. Claude Code and GitHub ship built in. Codex, Gemini CLI or your own MCP server are a capability file in <code>~/.skiff/caps</code>, shareable by URL. <a class="link" href="capabilities.html">How it works</a></p>
+            <div class="cmd" data-copy="skiff cap init codex">
               <span class="prompt" aria-hidden="true">$</span>
-              <span class="text">cracklet cap init codex</span>
-              <button type="button" aria-label="Copy cracklet cap init codex to the clipboard"></button>
+              <span class="text">skiff cap init codex</span>
+              <button type="button" aria-label="Copy skiff cap init codex to the clipboard"></button>
             </div>
-            <div class="cmd" data-copy="cracklet cap add https://example.com/gemini.toml">
+            <div class="cmd" data-copy="skiff cap add https://example.com/gemini.toml">
               <span class="prompt" aria-hidden="true">$</span>
-              <span class="text">cracklet cap add https://example.com/gemini.toml</span>
+              <span class="text">skiff cap add https://example.com/gemini.toml</span>
               <button type="button" aria-label="Copy the cap add example to the clipboard"></button>
             </div>
           </div>
@@ -152,18 +152,18 @@ $ cracklet ssh dev uname -a
           <div class="card">
             <h3>Default</h3>
             <p>2 vCPUs, 1 GiB RAM, 2 GiB disk.</p>
-            <div class="cmd" data-copy="cracklet new">
+            <div class="cmd" data-copy="skiff new">
               <span class="prompt" aria-hidden="true">$</span>
-              <span class="text">cracklet new</span>
-              <button type="button" aria-label="Copy cracklet new to the clipboard"></button>
+              <span class="text">skiff new</span>
+              <button type="button" aria-label="Copy skiff new to the clipboard"></button>
             </div>
           </div>
           <div class="card">
             <h3>Bigger</h3>
             <p>4 vCPUs, 2 GiB RAM, 8 GiB disk. The disk grows on first boot.</p>
-            <div class="cmd" data-copy="cracklet new dev --vcpus 4 --mem 2048 --disk 8G">
+            <div class="cmd" data-copy="skiff new dev --vcpus 4 --mem 2048 --disk 8G">
               <span class="prompt" aria-hidden="true">$</span>
-              <span class="text">cracklet new dev --vcpus 4 --mem 2048 --disk 8G</span>
+              <span class="text">skiff new dev --vcpus 4 --mem 2048 --disk 8G</span>
               <button type="button" aria-label="Copy the sized create command to the clipboard"></button>
             </div>
           </div>
@@ -176,49 +176,49 @@ $ cracklet ssh dev uname -a
         <div class="card">
           <h2>Find your microVMs</h2>
           <p>List every microVM with its state, IP, size, port forwards, grants and the SSH destination to use.</p>
-          <div class="cmd" data-copy="cracklet ls">
+          <div class="cmd" data-copy="skiff ls">
             <span class="prompt" aria-hidden="true">$</span>
-            <span class="text">cracklet ls</span>
-            <button type="button" aria-label="Copy cracklet ls to the clipboard"></button>
+            <span class="text">skiff ls</span>
+            <button type="button" aria-label="Copy skiff ls to the clipboard"></button>
           </div>
           <div class="term">NAME  STATE    IP          VCPUS  MEM    PORTS  GRANTS  SSH
-dev   running  172.16.1.2  2      1024M  -      -       ssh dev.cracklet
-ai    running  172.16.2.2  2      1024M  3000   claude  ssh ai.cracklet</div>
+dev   running  172.16.1.2  2      1024M  -      -       ssh dev.skiff
+ai    running  172.16.2.2  2      1024M  3000   claude  ssh ai.skiff</div>
           <p>Stop keeps the disk, start brings it back, rm deletes it.</p>
-          <div class="cmd" data-copy="cracklet stop dev">
+          <div class="cmd" data-copy="skiff stop dev">
             <span class="prompt" aria-hidden="true">$</span>
-            <span class="text">cracklet stop dev</span>
-            <button type="button" aria-label="Copy cracklet stop dev to the clipboard"></button>
+            <span class="text">skiff stop dev</span>
+            <button type="button" aria-label="Copy skiff stop dev to the clipboard"></button>
           </div>
-          <div class="cmd" data-copy="cracklet rm dev">
+          <div class="cmd" data-copy="skiff rm dev">
             <span class="prompt" aria-hidden="true">$</span>
-            <span class="text">cracklet rm dev</span>
-            <button type="button" aria-label="Copy cracklet rm dev to the clipboard"></button>
+            <span class="text">skiff rm dev</span>
+            <button type="button" aria-label="Copy skiff rm dev to the clipboard"></button>
           </div>
         </div>
         <div class="card">
           <h2>Plain ssh, scp, rsync, your IDE</h2>
-          <p>Add one line to <code>~/.ssh/config</code> and every microVM is reachable as <code>NAME.cracklet</code>. No port forwarding and no sudo needed on macOS.</p>
-          <div class="cmd" data-copy="Include ~/.cracklet/ssh_config">
+          <p>Add one line to <code>~/.ssh/config</code> and every microVM is reachable as <code>NAME.skiff</code>. No port forwarding and no sudo needed on macOS.</p>
+          <div class="cmd" data-copy="Include ~/.skiff/ssh_config">
             <span class="prompt" aria-hidden="true">+</span>
-            <span class="text">Include ~/.cracklet/ssh_config</span>
+            <span class="text">Include ~/.skiff/ssh_config</span>
             <button type="button" aria-label="Copy the ssh config Include line to the clipboard"></button>
           </div>
-          <div class="cmd" data-copy="ssh dev.cracklet">
+          <div class="cmd" data-copy="ssh dev.skiff">
             <span class="prompt" aria-hidden="true">$</span>
-            <span class="text">ssh dev.cracklet</span>
-            <button type="button" aria-label="Copy ssh dev.cracklet to the clipboard"></button>
+            <span class="text">ssh dev.skiff</span>
+            <button type="button" aria-label="Copy ssh dev.skiff to the clipboard"></button>
           </div>
           <p>Forward guest ports to <code>localhost</code> on the Mac. Forwards survive stop and start and go away with the VM.</p>
-          <div class="cmd" data-copy="cracklet new web -p 8080:80 -p 3000">
+          <div class="cmd" data-copy="skiff new web -p 8080:80 -p 3000">
             <span class="prompt" aria-hidden="true">$</span>
-            <span class="text">cracklet new web -p 8080:80 -p 3000</span>
+            <span class="text">skiff new web -p 8080:80 -p 3000</span>
             <button type="button" aria-label="Copy the port forward example to the clipboard"></button>
           </div>
-          <div class="cmd" data-copy="cracklet forward web 5432">
+          <div class="cmd" data-copy="skiff forward web 5432">
             <span class="prompt" aria-hidden="true">$</span>
-            <span class="text">cracklet forward web 5432</span>
-            <button type="button" aria-label="Copy cracklet forward web 5432 to the clipboard"></button>
+            <span class="text">skiff forward web 5432</span>
+            <button type="button" aria-label="Copy skiff forward web 5432 to the clipboard"></button>
           </div>
         </div>
       </div>
@@ -248,7 +248,7 @@ ai    running  172.16.2.2  2      1024M  3000   claude  ssh ai.cracklet</div>
       <div class="container section" style="padding-top:4rem;padding-bottom:4rem">
         <div class="narrow">
           <h2>Open source</h2>
-          <p>cracklet is developed in the open by IT-Labs GmbH. Start with the <a class="link" href="docs.html">documentation</a>; source and issues live on <a class="link" href="https://github.com/itlabs-gmbh/cracklet">github.com/itlabs-gmbh/cracklet</a>.</p>
+          <p>skiff is developed in the open by IT-Labs GmbH. Start with the <a class="link" href="docs.html">documentation</a>; source and issues live on <a class="link" href="https://github.com/itlabs-gmbh/skiff">github.com/itlabs-gmbh/skiff</a>.</p>
         </div>
       </div>
     </section>
@@ -256,11 +256,11 @@ ai    running  172.16.2.2  2      1024M  3000   claude  ssh ai.cracklet</div>
 
   <footer class="site-footer">
     <div class="container">
-      <a href="./" aria-current="page">cracklet</a>
+      <a href="./" aria-current="page">skiff</a>
       <span aria-hidden="true">·</span>
       <a href="docs.html">Docs</a>
       <span aria-hidden="true">·</span>
-      <a href="https://github.com/itlabs-gmbh/cracklet">GitHub</a>
+      <a href="https://github.com/itlabs-gmbh/skiff">GitHub</a>
       <span aria-hidden="true">·</span>
       <a href="impressum.html">Impressum</a>
       <span aria-hidden="true">·</span>

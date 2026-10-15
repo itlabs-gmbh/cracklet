@@ -1,4 +1,4 @@
-// Package config holds the pinned versions, URLs and filesystem layout used by cracklet.
+// Package config holds the pinned versions, URLs and filesystem layout used by skiff.
 package config
 
 import (
@@ -9,7 +9,7 @@ import (
 
 const (
 	// Instance is the name of the Lima VM that hosts all microVMs.
-	Instance = "cracklet"
+	Instance = "skiff"
 
 	// FirecrackerVersion is the upstream release installed inside the Lima VM.
 	FirecrackerVersion = "v1.17.0"
@@ -29,11 +29,11 @@ const (
 	RootfsSHA256 = "78f88484ab3f88b7b4b71937e00b6dda8b3ea17bfeb0ef8797b751d78ebb52dc"
 
 	// AgentPath is where the guest-side agent script lives inside the Lima VM.
-	AgentPath = "/usr/local/lib/cracklet/agent.sh"
+	AgentPath = "/usr/local/lib/skiff/agent.sh"
 	// GuestKeyPath is where the SSH private key is stored inside the Lima VM.
-	GuestKeyPath = "/var/lib/cracklet/id_ed25519"
+	GuestKeyPath = "/var/lib/skiff/id_ed25519"
 	// GuestEnvdPath is where the embedded guest daemon is placed for the agent.
-	GuestEnvdPath = "/var/lib/cracklet/cracklet-envd"
+	GuestEnvdPath = "/var/lib/skiff/skiff-envd"
 
 	DefaultLimaCPUs      = 4
 	DefaultLimaMemoryGiB = 8
@@ -43,32 +43,32 @@ const (
 	DefaultMemMiB = 1024
 
 	// BrokerGuestPort is where the broker tunnel appears inside a microVM
-	// (127.0.0.1:PORT) while `cracklet ssh` is open.
+	// (127.0.0.1:PORT) while `skiff ssh` is open.
 	BrokerGuestPort = 7777
 	// BrokerGuestSocket is a Unix socket in the microVM that relays to the
 	// tunnel port, for clients such as gh that cannot take a base URL.
-	BrokerGuestSocket = "/run/cracklet/broker.sock"
+	BrokerGuestSocket = "/run/skiff/broker.sock"
 )
 
-// Paths describes the host-side directories cracklet works with.
+// Paths describes the host-side directories skiff works with.
 type Paths struct {
-	// Home is the cracklet state directory (default ~/.cracklet).
+	// Home is the skiff state directory (default ~/.skiff).
 	Home string
 	// LimaHome is Lima's state directory (default ~/.lima).
 	LimaHome string
 }
 
-// DefaultPaths resolves Paths from the environment (CRACKLET_HOME, LIMA_HOME) or the user's home.
+// DefaultPaths resolves Paths from the environment (SKIFF_HOME, LIMA_HOME) or the user's home.
 func DefaultPaths() (Paths, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return Paths{}, fmt.Errorf("resolve home directory: %w", err)
 	}
 	p := Paths{
-		Home:     filepath.Join(home, ".cracklet"),
+		Home:     filepath.Join(home, ".skiff"),
 		LimaHome: filepath.Join(home, ".lima"),
 	}
-	if v := os.Getenv("CRACKLET_HOME"); v != "" {
+	if v := os.Getenv("SKIFF_HOME"); v != "" {
 		p.Home = v
 	}
 	if v := os.Getenv("LIMA_HOME"); v != "" {
@@ -83,7 +83,7 @@ func (p Paths) KeyPath() string { return filepath.Join(p.Home, "id_ed25519") }
 // PubKeyPath is the matching public key.
 func (p Paths) PubKeyPath() string { return p.KeyPath() + ".pub" }
 
-// SSHConfigPath is the generated ssh_config with the *.cracklet host alias.
+// SSHConfigPath is the generated ssh_config with the *.skiff host alias.
 func (p Paths) SSHConfigPath() string { return filepath.Join(p.Home, "ssh_config") }
 
 // KnownHostsPath holds the pinned host keys of microVMs on backends that
@@ -93,10 +93,10 @@ func (p Paths) KnownHostsPath() string { return filepath.Join(p.Home, "known_hos
 // LimaTemplatePath is the rendered Lima template used to create the instance.
 func (p Paths) LimaTemplatePath() string { return filepath.Join(p.Home, "lima.yaml") }
 
-// LimaLockPath serializes Lima VM restarts against microVM starts across cracklet processes.
+// LimaLockPath serializes Lima VM restarts against microVM starts across skiff processes.
 func (p Paths) LimaLockPath() string { return filepath.Join(p.Home, "lima.lock") }
 
-// LimaBootLockPath serializes starting the stopped Lima VM across cracklet processes.
+// LimaBootLockPath serializes starting the stopped Lima VM across skiff processes.
 func (p Paths) LimaBootLockPath() string { return filepath.Join(p.Home, "lima-boot.lock") }
 
 // CapsDir holds the user's capability files (one <name>.toml each).
@@ -117,7 +117,7 @@ func (p Paths) SocketPath(vm string) string { return filepath.Join(p.RunDir(), v
 // AuditLog records every broker decision.
 func (p Paths) AuditLog() string { return filepath.Join(p.Home, "audit.log") }
 
-// BackendPath holds the name of the backend `cracklet prepare --backend` chose.
+// BackendPath holds the name of the backend `skiff prepare --backend` chose.
 func (p Paths) BackendPath() string { return filepath.Join(p.Home, "backend") }
 
 // MachinesDir holds the container backend's per-VM records (owner, slot,
@@ -132,7 +132,7 @@ func (p Paths) ContainerLockPath() string { return filepath.Join(p.Home, "contai
 // and its machines restored, so parallel commands wait for the VMs to be back.
 func (p Paths) ContainerBootLockPath() string { return filepath.Join(p.Home, "container-boot.lock") }
 
-// RelayLockPath is held by the running forward relay (`cracklet _relay`), so
+// RelayLockPath is held by the running forward relay (`skiff _relay`), so
 // a command can tell whether one serves this state directory.
 func (p Paths) RelayLockPath() string { return filepath.Join(p.Home, "relay.lock") }
 

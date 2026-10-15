@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
-// KeychainService is the macOS Keychain service name cracklet stores secrets under.
-const KeychainService = "cracklet"
+// KeychainService is the macOS Keychain service name skiff stores secrets under.
+const KeychainService = "skiff"
 
 // defaultTTL bounds how long a resolved value is reused before it is fetched
 // again, so rotated secrets are picked up without a `security` call per request.
@@ -124,7 +124,7 @@ func (r *Resolver) keychain(ctx context.Context, rest string) (string, error) {
 	}
 	out, err := r.Runner.Output(ctx, "security", "find-generic-password", "-s", service, "-a", account, "-w")
 	if err != nil {
-		return "", fmt.Errorf("keychain item %s/%s not found (store it with 'cracklet secret set %s'): %w", service, account, account, err)
+		return "", fmt.Errorf("keychain item %s/%s not found (store it with 'skiff secret set %s'): %w", service, account, account, err)
 	}
 	return string(out), nil
 }

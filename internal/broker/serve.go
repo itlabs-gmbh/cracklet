@@ -61,7 +61,7 @@ const maxSocketPath = 100
 // Listen binds the Unix socket, replacing a stale file from a previous run.
 func Listen(socketPath string) (net.Listener, error) {
 	if len(socketPath) > maxSocketPath {
-		return nil, fmt.Errorf("socket path %s is longer than %d characters; set CRACKLET_HOME to a shorter path", socketPath, maxSocketPath)
+		return nil, fmt.Errorf("socket path %s is longer than %d characters; set SKIFF_HOME to a shorter path", socketPath, maxSocketPath)
 	}
 	dir := filepath.Dir(socketPath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {

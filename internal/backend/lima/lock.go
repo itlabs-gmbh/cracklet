@@ -17,8 +17,8 @@ import (
 // notice Ctrl-C.
 var (
 	// ErrResizing is returned by HoldForMicroVM and ReadyToBoot during a resize.
-	ErrResizing    = errors.New("the Lima VM is being resized by 'cracklet prepare'; retry when it has finished")
-	errStartingVMs = errors.New("another cracklet command is creating or starting a microVM; retry the resize when it has finished")
+	ErrResizing    = errors.New("the Lima VM is being resized by 'skiff prepare'; retry when it has finished")
+	errStartingVMs = errors.New("another skiff command is creating or starting a microVM; retry the resize when it has finished")
 )
 
 // HoldForMicroVM keeps a resize from restarting the Lima VM under a starting microVM.

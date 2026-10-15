@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/itlabs-gmbh/cracklet/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/config"
 )
 
 // Spawner starts the forward relay for a state directory as a process that
@@ -67,7 +67,7 @@ func (b *Backend) relayAlive() (bool, error) {
 	return false, fmt.Errorf("lock %s: %w", b.paths.RelayLockPath(), err)
 }
 
-// spawnRelay is the production Spawner: `cracklet _relay` in its own session
+// spawnRelay is the production Spawner: `skiff _relay` in its own session
 // with the log as its only output, reaped by a goroutine so it never lingers
 // as a zombie of a long-running command (tunnel).
 func spawnRelay(exe string, paths config.Paths) error {
@@ -77,7 +77,7 @@ func spawnRelay(exe string, paths config.Paths) error {
 	}
 	defer log.Close()
 	cmd := exec.Command(exe, "_relay")
-	cmd.Env = append(os.Environ(), "CRACKLET_HOME="+paths.Home)
+	cmd.Env = append(os.Environ(), "SKIFF_HOME="+paths.Home)
 	cmd.Stdin = nil
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -97,7 +97,7 @@ func (b *Backend) kickRelayFor(ctx context.Context, names ...string) {
 			continue
 		}
 		if err := b.ensureRelay(ctx); err != nil {
-			b.statusf("  [WARN] %v; port forwards stay dead until 'cracklet forward' is run again\n", err)
+			b.statusf("  [WARN] %v; port forwards stay dead until 'skiff forward' is run again\n", err)
 		}
 		return
 	}

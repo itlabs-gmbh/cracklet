@@ -5,10 +5,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/itlabs-gmbh/cracklet/internal/app"
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/app"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 func newPrepareCmd(get func() *app.App) *cobra.Command {
@@ -17,7 +17,7 @@ func newPrepareCmd(get func() *app.App) *cobra.Command {
 		Use:   "prepare",
 		Short: "Set up the backend runtime and the guest images (idempotent)",
 		Long: "Set up the backend runtime and the guest images (idempotent).\n\n" +
-			"--backend picks how microVMs run and is remembered in ~/.cracklet/backend:\n" +
+			"--backend picks how microVMs run and is remembered in ~/.skiff/backend:\n" +
 			"  lima       Firecracker inside a Lima VM with nested virtualization (default)\n" +
 			"  container  one Virtualization.framework VM per microVM via Apple's container\n\n" +
 			"--cpus, --memory and --disk size a new Lima VM. Given explicitly on an existing\n" +
@@ -68,7 +68,7 @@ func chosenBackend(cmd *cobra.Command) string {
 func newDoctorCmd(get func() *app.App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
-		Short: "Check whether this Mac can run cracklet",
+		Short: "Check whether this Mac can run skiff",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return get().Doctor(cmd.Context())

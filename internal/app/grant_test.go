@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
-// sshScripts answers the scripts cracklet streams to a guest: the read
+// sshScripts answers the scripts skiff streams to a guest: the read
 // script (every odd `bash -s` call) gets the given state output. The scripts
 // themselves are recovered from the fake runner's captured stdin.
 type sshScripts struct {
@@ -51,7 +51,7 @@ func decodeAll(script string) string {
 	var out strings.Builder
 	lines := strings.Split(script, "\n")
 	for i, line := range lines {
-		if strings.HasSuffix(line, "<<'CRACKLET_B64'") && i+1 < len(lines) {
+		if strings.HasSuffix(line, "<<'SKIFF_B64'") && i+1 < len(lines) {
 			if raw, err := base64.StdEncoding.DecodeString(lines[i+1]); err == nil {
 				out.Write(raw)
 				out.WriteString("\n")
@@ -75,7 +75,7 @@ func newGrantApp(t *testing.T, scripts *sshScripts, agent map[string]string) (*A
 }
 
 func TestGrantProvisionsGuestAndPersists(t *testing.T) {
-	scripts := &sshScripts{state: "/etc/cracklet/manifest\n\n/root/.claude.json\n\n"}
+	scripts := &sshScripts{state: "/etc/skiff/manifest\n\n/root/.claude.json\n\n"}
 	app, fake := newGrantApp(t, scripts, nil)
 	set, err := app.Grant(context.Background(), "agent1", []string{"claude", "github"})
 	if err != nil {
@@ -88,7 +88,7 @@ func TestGrantProvisionsGuestAndPersists(t *testing.T) {
 		t.Fatalf("expected a read and an apply script, got %d:\n%s", scripts.calls, fake.Dump())
 	}
 	apply := scripts.last()
-	for _, want := range []string{"/root/.claude.json", "/etc/environment", "cracklet:github"} {
+	for _, want := range []string{"/root/.claude.json", "/etc/environment", "skiff:github"} {
 		if !strings.Contains(apply, want) {
 			t.Errorf("apply script should contain %q:\n%s", want, apply)
 		}
@@ -145,7 +145,7 @@ func TestGrantValidation(t *testing.T) {
 }
 
 func TestRevokeRemovesAndReprovisions(t *testing.T) {
-	scripts := &sshScripts{state: "/etc/cracklet/manifest\n\n"}
+	scripts := &sshScripts{state: "/etc/skiff/manifest\n\n"}
 	app, _ := newGrantApp(t, scripts, nil)
 	if _, err := app.Grant(context.Background(), "agent1", []string{"claude", "ssh-agent"}); err != nil {
 		t.Fatal(err)
@@ -166,7 +166,7 @@ func TestRevokeRemovesAndReprovisions(t *testing.T) {
 }
 
 func TestRevokeIsAllOrNothing(t *testing.T) {
-	scripts := &sshScripts{state: "/etc/cracklet/manifest\n\n"}
+	scripts := &sshScripts{state: "/etc/skiff/manifest\n\n"}
 	app, _ := newGrantApp(t, scripts, nil)
 	if _, err := app.Grant(context.Background(), "agent1", []string{"claude", "github"}); err != nil {
 		t.Fatal(err)
@@ -190,7 +190,7 @@ func TestRevokeIsAllOrNothing(t *testing.T) {
 }
 
 func TestSSHAttachesTunnelOnlyWithGrants(t *testing.T) {
-	scripts := &sshScripts{state: "/etc/cracklet/manifest\n\n"}
+	scripts := &sshScripts{state: "/etc/skiff/manifest\n\n"}
 	app, fake := newGrantApp(t, scripts, nil)
 	if err := app.SSH(context.Background(), "agent1", nil); err != nil {
 		t.Fatalf("SSH: %v", err)
@@ -213,14 +213,14 @@ func TestSSHAttachesTunnelOnlyWithGrants(t *testing.T) {
 	if !strings.Contains(line, "-o ExitOnForwardFailure=yes -R 127.0.0.1:7777:/tmp/fake-agent1.sock") || !strings.Contains(line, " -A ") {
 		t.Errorf("expected tunnel and agent forwarding: %v", last)
 	}
-	if !strings.HasSuffix(line, "agent1.cracklet -- uname") {
+	if !strings.HasSuffix(line, "agent1.skiff -- uname") {
 		t.Errorf("remote command must stay last: %v", last)
 	}
 }
 
 func TestSSHAgentOnlyNeedsNoBroker(t *testing.T) {
 	calls := 0
-	app, fake := newGrantApp(t, &sshScripts{state: "/etc/cracklet/manifest\n\n"}, nil)
+	app, fake := newGrantApp(t, &sshScripts{state: "/etc/skiff/manifest\n\n"}, nil)
 	app.tunnel = func(ctx context.Context, name string) (string, func(), error) {
 		calls++
 		return "", func() {}, nil
@@ -240,7 +240,7 @@ func TestSSHAgentOnlyNeedsNoBroker(t *testing.T) {
 }
 
 func TestNewWithGrantsAndRemoveCleansState(t *testing.T) {
-	scripts := &sshScripts{state: "/etc/cracklet/manifest\n\n"}
+	scripts := &sshScripts{state: "/etc/skiff/manifest\n\n"}
 	app, _ := newGrantApp(t, scripts, map[string]string{
 		"new": `{"name":"agent1","index":1,"ip":"172.16.1.2","state":"running"}`,
 		"rm":  "",
@@ -265,7 +265,7 @@ func TestNewWithGrantsAndRemoveCleansState(t *testing.T) {
 }
 
 func TestListIncludesGrants(t *testing.T) {
-	app, _ := newGrantApp(t, &sshScripts{state: "/etc/cracklet/manifest\n\n"}, map[string]string{
+	app, _ := newGrantApp(t, &sshScripts{state: "/etc/skiff/manifest\n\n"}, map[string]string{
 		"ls": `[{"name":"agent1","index":1,"ip":"172.16.1.2","state":"running"}]`,
 	})
 	if _, err := app.Grant(context.Background(), "agent1", []string{"claude"}); err != nil {

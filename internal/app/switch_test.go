@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/grant"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/grant"
 )
 
 // TestBackendSwitchRefusedWhileLimaHasVMs: gc would otherwise prune the

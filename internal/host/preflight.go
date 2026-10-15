@@ -65,7 +65,7 @@ func Check(f Facts) []Problem {
 	if f.OS != "darwin" || f.Arch != "arm64" {
 		return []Problem{{
 			Code:    "platform",
-			Message: fmt.Sprintf("cracklet needs macOS on Apple Silicon, found %s/%s", f.OS, f.Arch),
+			Message: fmt.Sprintf("skiff needs macOS on Apple Silicon, found %s/%s", f.OS, f.Arch),
 			Fatal:   true,
 		}}
 	}

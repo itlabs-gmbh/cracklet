@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 const (
@@ -92,7 +92,7 @@ func (a *App) Unforward(ctx context.Context, name string, hostPorts []int) (VMIn
 // a `new -p` does not create a VM it then cannot expose.
 func (a *App) checkForwardsSupported(forwards []vm.Forward) error {
 	if len(forwards) > 0 && !a.backend.Capabilities().Forwards {
-		return fmt.Errorf("port forwards are not supported on the %s backend yet; reach the VM at its address from 'cracklet ls' instead", a.backend.Name())
+		return fmt.Errorf("port forwards are not supported on the %s backend yet; reach the VM at its address from 'skiff ls' instead", a.backend.Name())
 	}
 	return nil
 }
@@ -148,7 +148,7 @@ func (a *App) reportForward(ctx context.Context, info VMInfo, f vm.Forward) {
 		return
 	}
 	a.printf("localhost:%d -> %s:%d stored, but the Mac side is not reachable yet; "+
-		"it usually comes up within seconds ('cracklet forward %s' shows its state)\n", f.Host, info.Name, f.Guest, info.Name)
+		"it usually comes up within seconds ('skiff forward %s' shows its state)\n", f.Host, info.Name, f.Guest, info.Name)
 }
 
 // hostPortBusy reports whether 127.0.0.1:port already accepts connections.

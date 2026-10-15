@@ -1,4 +1,4 @@
-/* cracklet website – design tokens modelled on a neutral shadcn palette,
+/* skiff website – design tokens modelled on a neutral shadcn palette,
    with one ember accent (Firecracker) as the brand colour */
 :root {
   --background: oklch(100% 0 0);

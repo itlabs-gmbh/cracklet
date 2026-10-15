@@ -6,8 +6,8 @@ import "time"
 const (
 	StateRunning  = "running"
 	StateStopped  = "stopped"
-	StateCreating = "creating" // while `cracklet new` still builds it
-	StateBroken   = "broken"   // metadata missing, remove with `cracklet rm`
+	StateCreating = "creating" // while `skiff new` still builds it
+	StateBroken   = "broken"   // metadata missing, remove with `skiff rm`
 )
 
 // Info is what a backend reports about a microVM.
@@ -25,6 +25,6 @@ type Info struct {
 	// Owner and Slot label VMs managed by a tool; empty for VMs made by hand.
 	Owner string `json:"owner"`
 	Slot  string `json:"slot"`
-	// CreatedAt is nil for VMs created before cracklet recorded it.
+	// CreatedAt is nil for VMs created before skiff recorded it.
 	CreatedAt *time.Time `json:"created_at"`
 }

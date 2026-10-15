@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 const (
@@ -36,7 +36,7 @@ const (
 )
 
 // errRelayBusy means another relay serves this state directory.
-var errRelayBusy = errors.New("another relay is already running for this CRACKLET_HOME")
+var errRelayBusy = errors.New("another relay is already running for this SKIFF_HOME")
 
 // WithRelayTiming overrides how often the relay looks at the records and how
 // long it idles before exiting (used by tests).
@@ -51,7 +51,7 @@ type relayListener struct {
 }
 
 // ServeForwards implements backend.ForwardRelay: it is the body of
-// `cracklet _relay`. Every recorded forward gets a listener on
+// `skiff _relay`. Every recorded forward gets a listener on
 // 127.0.0.1:HOST; each accepted connection is joined to the VM's guest port
 // through the backend's dialer, so the relay follows a VM to whatever
 // address it has after a restart and simply closes connections while it is

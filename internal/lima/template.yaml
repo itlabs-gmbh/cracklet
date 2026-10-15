@@ -1,6 +1,6 @@
-# Lima template rendered by cracklet. The instance hosts Firecracker microVMs and
+# Lima template rendered by skiff. The instance hosts Firecracker microVMs and
 # therefore needs nested virtualization (Apple M3+ with macOS 15+).
-# No host directories are mounted: cracklet streams what it needs over limactl shell.
+# No host directories are mounted: skiff streams what it needs over limactl shell.
 minimumLimaVersion: 2.0.0
 
 base:

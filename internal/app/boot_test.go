@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/agent"
-	"github.com/itlabs-gmbh/cracklet/internal/backend/lima"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/agent"
+	"github.com/itlabs-gmbh/skiff/internal/backend/lima"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
 // limaAfterReboot simulates a Lima VM that is stopped until `limactl start`
@@ -31,8 +31,8 @@ func limaAfterReboot(restore string, startedElsewhere bool) runner.FakeHandler {
 			if startedElsewhere && lists > 1 {
 				status = "Running"
 			}
-			return []byte(`{"name":"cracklet","status":"` + status + `"}` + "\n"), nil
-		case joined == "limactl start --tty=false cracklet":
+			return []byte(`{"name":"skiff","status":"` + status + `"}` + "\n"), nil
+		case joined == "limactl start --tty=false skiff":
 			status = "Running"
 			return nil, nil
 		case strings.Contains(joined, "sha256sum"):
@@ -55,17 +55,17 @@ func TestStoppedLimaIsStartedAndMicroVMsRestored(t *testing.T) {
 		t.Fatalf("ListVMs after a reboot: %v", err)
 	}
 	calls := strings.Join(fake.Calls(), "\n")
-	start := strings.Index(calls, "limactl start --tty=false cracklet")
+	start := strings.Index(calls, "limactl start --tty=false skiff")
 	restore := strings.Index(calls, config.AgentPath+" restore")
 	list := strings.Index(calls, config.AgentPath+" ls")
 	if start < 0 || restore < start || list < restore {
 		t.Fatalf("want start, restore, ls in that order, got:\n%s", calls)
 	}
 	for _, want := range []string{
-		`Starting Lima VM "cracklet"`,
+		`Starting Lima VM "skiff"`,
 		"Restarted microVMs: paseo-1, paseo-2",
 		"paseo-3 did not come back",
-		"cracklet start paseo-3",
+		"skiff start paseo-3",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, out.String())
@@ -91,7 +91,7 @@ func TestLimaStartedByAnotherProcessIsNotStartedAgain(t *testing.T) {
 	if _, err := app.ListVMs(context.Background()); err != nil {
 		t.Fatalf("ListVMs: %v", err)
 	}
-	if fake.Called("limactl start --tty=false cracklet") {
+	if fake.Called("limactl start --tty=false skiff") {
 		t.Errorf("the Lima VM was already running again:\n%s", fake.Dump())
 	}
 	if !fake.CalledWithSuffix(config.AgentPath + " restore") {
@@ -145,13 +145,13 @@ func TestStoppedLimaIsNotStartedDuringResize(t *testing.T) {
 	if _, err := app.ListVMs(context.Background()); !errors.Is(err, lima.ErrResizing) {
 		t.Fatalf("a resize stops the Lima VM on purpose, got %v", err)
 	}
-	if fake.Called("limactl start --tty=false cracklet") {
+	if fake.Called("limactl start --tty=false skiff") {
 		t.Errorf("the Lima VM must not be started under a resize:\n%s", fake.Dump())
 	}
 }
 
 func TestLimaStartFailureSurfaces(t *testing.T) {
-	app, fake, _ := newTestApp(t, failingAt(limaAfterReboot(`{"started":[],"failed":[]}`, false), "limactl start --tty=false cracklet"))
+	app, fake, _ := newTestApp(t, failingAt(limaAfterReboot(`{"started":[],"failed":[]}`, false), "limactl start --tty=false skiff"))
 	if _, err := app.ListVMs(context.Background()); err == nil || !strings.Contains(err.Error(), "start lima instance") {
 		t.Fatalf("expected the start failure, got %v", err)
 	}
@@ -173,7 +173,7 @@ func TestRestoreFailureWarnsButCommandRuns(t *testing.T) {
 }
 
 // TestBootNotesStayOffStdout: the notes go to the status writer, so the
-// first `cracklet exec ... | cmd` after a reboot gets clean output.
+// first `skiff exec ... | cmd` after a reboot gets clean output.
 func TestBootNotesStayOffStdout(t *testing.T) {
 	fake := runner.NewFake(limaAfterReboot(`{"started":["vm1"],"failed":[]}`, false))
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
@@ -194,19 +194,19 @@ func TestPollingNeverStartsLima(t *testing.T) {
 	if _, err := app.vmRunning(context.Background(), "vm1"); err == nil || !strings.Contains(err.Error(), "is stopped") {
 		t.Fatalf("expected a stopped Lima VM to be reported, got %v", err)
 	}
-	if fake.Called("limactl start --tty=false cracklet") {
+	if fake.Called("limactl start --tty=false skiff") {
 		t.Errorf("polling started the Lima VM:\n%s", fake.Dump())
 	}
 }
 
 func TestBrokenLimaPointsAtPrepare(t *testing.T) {
 	app, fake, _ := newTestApp(t, func(string, []string) ([]byte, error) {
-		return []byte(`{"name":"cracklet","status":"Broken"}` + "\n"), nil
+		return []byte(`{"name":"skiff","status":"Broken"}` + "\n"), nil
 	})
 	if _, err := app.ListVMs(context.Background()); err == nil || !strings.Contains(err.Error(), "is Broken") {
 		t.Fatalf("expected a Broken hint, got %v", err)
 	}
-	if fake.Called("limactl start --tty=false cracklet") {
+	if fake.Called("limactl start --tty=false skiff") {
 		t.Errorf("only a stopped Lima VM is started:\n%s", fake.Dump())
 	}
 }

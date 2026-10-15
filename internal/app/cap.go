@@ -13,13 +13,13 @@ import (
 	"text/tabwriter"
 	"unicode"
 
-	"github.com/itlabs-gmbh/cracklet/internal/cap"
-	"github.com/itlabs-gmbh/cracklet/internal/grant"
-	"github.com/itlabs-gmbh/cracklet/internal/guest"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/cap"
+	"github.com/itlabs-gmbh/skiff/internal/grant"
+	"github.com/itlabs-gmbh/skiff/internal/guest"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
-// maxCapDownload bounds `cracklet cap add` downloads.
+// maxCapDownload bounds `skiff cap add` downloads.
 const maxCapDownload = 256 << 10
 
 // CapList prints every known capability with its kind and origin.
@@ -50,7 +50,7 @@ func (a *App) CapShow(name string, render bool, vmName string) error {
 	}
 	c, ok := caps[name]
 	if !ok {
-		return fmt.Errorf("unknown capability %q (see 'cracklet cap ls')", name)
+		return fmt.Errorf("unknown capability %q (see 'skiff cap ls')", name)
 	}
 	if !render {
 		return a.printCapSource(c)
@@ -76,7 +76,7 @@ func (a *App) CapShow(name string, render bool, vmName string) error {
 		a.printf("file %s (%s):\n%s", f.Path, f.Mode, indent(f.Content))
 	}
 	for _, blk := range plan.Blocks {
-		a.printf("block %s (section cracklet:%s):\n%s", blk.Path, blk.Owner, indent(blk.Content))
+		a.printf("block %s (section skiff:%s):\n%s", blk.Path, blk.Owner, indent(blk.Content))
 	}
 	for _, m := range plan.Merges {
 		a.printf("json %s %s = %v\n", m.Path, m.Key, m.Value)
@@ -141,7 +141,7 @@ func (a *App) CapInit(name string) error {
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
-	a.printf("wrote %s\n  edit it, then: cracklet cap lint %s\n", path, name)
+	a.printf("wrote %s\n  edit it, then: skiff cap lint %s\n", path, name)
 	return nil
 }
 
@@ -229,7 +229,7 @@ func (a *App) CapAdd(ctx context.Context, url string, yes bool, confirm io.Reade
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
-	a.printf("installed %s\n  grant it with: cracklet grant <vm> %s\n", path, c.Name)
+	a.printf("installed %s\n  grant it with: skiff grant <vm> %s\n", path, c.Name)
 	return nil
 }
 

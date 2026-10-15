@@ -7,14 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/agent"
-	"github.com/itlabs-gmbh/cracklet/internal/backend/lima"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/agent"
+	"github.com/itlabs-gmbh/skiff/internal/backend/lima"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
-const runningList = `{"name":"cracklet","status":"Running","dir":"/tmp/lima/cracklet"}` + "\n"
+const runningList = `{"name":"skiff","status":"Running","dir":"/tmp/lima/skiff"}` + "\n"
 
 // newTestApp wires an App against a fake runner whose behaviour is defined by handle.
 func newTestApp(t *testing.T, handle runner.FakeHandler) (*App, *runner.Fake, *bytes.Buffer) {
@@ -72,11 +72,11 @@ func TestNewRunsAgentWithSpec(t *testing.T) {
 	if info.IP != "172.16.1.2" || info.Name != "vm1" {
 		t.Errorf("unexpected info: %+v", info)
 	}
-	want := "limactl shell cracklet -- sudo " + config.AgentPath + " new vm1 2 1024 2G snapshot base"
+	want := "limactl shell skiff -- sudo " + config.AgentPath + " new vm1 2 1024 2G snapshot base"
 	if !fake.Called(want) {
 		t.Errorf("expected call %q, got:\n%s", want, fake.Dump())
 	}
-	if !strings.Contains(out.String(), "cracklet ssh vm1") {
+	if !strings.Contains(out.String(), "skiff ssh vm1") {
 		t.Errorf("output should hint at ssh usage, got:\n%s", out.String())
 	}
 }
@@ -93,11 +93,11 @@ func TestNewRejectsInvalidSpec(t *testing.T) {
 
 func TestNewRequiresRunningInstance(t *testing.T) {
 	app, _, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
-		return []byte(`{"name":"cracklet","status":"Broken"}` + "\n"), nil
+		return []byte(`{"name":"skiff","status":"Broken"}` + "\n"), nil
 	})
 	_, err := app.NewVM(context.Background(), vm.Spec{Name: "vm1", VCPUs: 2, MemMiB: 1024, Disk: "2G"})
-	if err == nil || !strings.Contains(err.Error(), "cracklet prepare") {
-		t.Fatalf("expected error pointing at 'cracklet prepare', got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "skiff prepare") {
+		t.Fatalf("expected error pointing at 'skiff prepare', got %v", err)
 	}
 }
 
@@ -175,7 +175,7 @@ func TestRemoveCallsAgent(t *testing.T) {
 	if err := app.RemoveVM(context.Background(), "vm1"); err != nil {
 		t.Fatalf("RemoveVM: %v", err)
 	}
-	if !fake.Called("limactl shell cracklet -- sudo " + config.AgentPath + " rm vm1") {
+	if !fake.Called("limactl shell skiff -- sudo " + config.AgentPath + " rm vm1") {
 		t.Errorf("expected rm call, got:\n%s", fake.Dump())
 	}
 }
@@ -194,10 +194,10 @@ func TestSSHArgsSeparateRemoteCommand(t *testing.T) {
 	app, _, _ := newTestApp(t, defaultHandler(nil))
 	args := app.sshArgs("vm1", []string{"uname", "-a"})
 	joined := strings.Join(args, " ")
-	if !strings.HasPrefix(joined, "-F ") || !strings.HasSuffix(joined, " vm1.cracklet -- uname -a") {
+	if !strings.HasPrefix(joined, "-F ") || !strings.HasSuffix(joined, " vm1.skiff -- uname -a") {
 		t.Errorf("unexpected ssh args: %q", joined)
 	}
-	if got := app.sshArgs("vm1", nil); got[len(got)-1] != "vm1.cracklet" {
+	if got := app.sshArgs("vm1", nil); got[len(got)-1] != "vm1.skiff" {
 		t.Errorf("interactive sessions must not end with a separator: %q", got)
 	}
 }

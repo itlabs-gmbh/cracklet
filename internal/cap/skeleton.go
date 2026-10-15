@@ -7,9 +7,9 @@ func Skeleton(name string) (string, error) {
 	if err := ValidateName(name); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf(`# cracklet capability %q
+	return fmt.Sprintf(`# skiff capability %q
 # Exactly one of [proxy], [mcp] or [exec] decides what the broker does.
-# Grant it to a VM with: cracklet grant <vm> %s
+# Grant it to a VM with: skiff grant <vm> %s
 
 name = %q
 description = "describe what this hands into the guest"
@@ -19,7 +19,7 @@ description = "describe what this hands into the guest"
 upstream = "https://api.example.com"
 # allow_headers = ["Content-Type", "Accept"]
 [proxy.headers]
-Authorization = "Bearer {{ secret \"keychain:cracklet/%s-token\" }}"
+Authorization = "Bearer {{ secret \"keychain:skiff/%s-token\" }}"
 
 # --- mcp: run a stdio MCP server on the Mac, exposed as HTTP MCP in the guest
 # [mcp]
@@ -28,7 +28,7 @@ Authorization = "Bearer {{ secret \"keychain:cracklet/%s-token\" }}"
 
 # --- exec: delegate each request to a program on the Mac (stdin -> stdout)
 # [exec]
-# command = "cracklet-cap-%s"
+# command = "skiff-cap-%s"
 
 # --- guest: what the microVM needs; templates see .VM, .BrokerURL, .PseudoToken
 [guest.env]

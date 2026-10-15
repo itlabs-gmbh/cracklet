@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 // Create implements backend.Backend.
@@ -132,7 +132,7 @@ func (b *Backend) restoreMicroVMs(ctx context.Context) error {
 		b.statusf("==> Restarted microVMs: %s\n", strings.Join(r.Started, ", "))
 	}
 	for _, name := range r.Failed {
-		b.statusf("  [WARN] %s did not come back; check 'cracklet inspect %s' and run 'cracklet start %s'\n", name, name, name)
+		b.statusf("  [WARN] %s did not come back; check 'skiff inspect %s' and run 'skiff start %s'\n", name, name, name)
 	}
 	return nil
 }

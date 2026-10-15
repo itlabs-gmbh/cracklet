@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/cap"
+	"github.com/itlabs-gmbh/skiff/internal/cap"
 )
 
 // routedCap is a github-like cap: git under /forge/, the API by Host.
@@ -108,7 +108,7 @@ func TestRouteGrants(t *testing.T) {
 		if resp.StatusCode != tc.status {
 			t.Errorf("%v %s %s%s: status %d, want %d (%s)", tc.grants, tc.method, tc.host, tc.path, resp.StatusCode, tc.status, body)
 		}
-		if tc.status == http.StatusForbidden && !strings.Contains(body, "cracklet grant agent1 forge") {
+		if tc.status == http.StatusForbidden && !strings.Contains(body, "skiff grant agent1 forge") {
 			t.Errorf("%s%s: denial should name the grant, got %s", tc.host, tc.path, body)
 		}
 	}

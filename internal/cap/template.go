@@ -23,7 +23,7 @@ type TemplateData struct {
 	BrokerSocket string
 }
 
-// SecretFunc resolves a secret reference such as keychain:cracklet/claude-token.
+// SecretFunc resolves a secret reference such as keychain:skiff/claude-token.
 type SecretFunc func(ref string) (string, error)
 
 // Render executes a broker-side template (for example a proxy header) with

@@ -13,7 +13,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// defaults are the capabilities cracklet ships. They are data, not code: a
+// defaults are the capabilities skiff ships. They are data, not code: a
 // user file of the same name in the caps directory replaces them.
 //
 //go:embed defaults/*.toml
@@ -76,7 +76,7 @@ func ParseFile(path string) (Cap, error) {
 	return c, nil
 }
 
-// Embedded returns the capabilities shipped with cracklet.
+// Embedded returns the capabilities shipped with skiff.
 func Embedded() (Set, error) {
 	set := Set{}
 	entries, err := fs.ReadDir(defaults, "defaults")

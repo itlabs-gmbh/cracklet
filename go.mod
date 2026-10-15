@@ -1,4 +1,4 @@
-module github.com/itlabs-gmbh/cracklet
+module github.com/itlabs-gmbh/skiff
 
 go 1.26.5
 

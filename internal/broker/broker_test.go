@@ -18,14 +18,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/cap"
-	"github.com/itlabs-gmbh/cracklet/internal/grant"
+	"github.com/itlabs-gmbh/skiff/internal/cap"
+	"github.com/itlabs-gmbh/skiff/internal/grant"
 )
 
-// TestMain doubles as a tiny stdio MCP server when CRACKLET_TEST_MCP is set,
+// TestMain doubles as a tiny stdio MCP server when SKIFF_TEST_MCP is set,
 // so the bridge can be exercised against a real child process.
 func TestMain(m *testing.M) {
-	if os.Getenv("CRACKLET_TEST_MCP") == "1" {
+	if os.Getenv("SKIFF_TEST_MCP") == "1" {
 		fakeMCPServer()
 		return
 	}
@@ -215,9 +215,9 @@ func TestDenyUnknownAndUngranted(t *testing.T) {
 		status int
 		hint   string
 	}{
-		{"/", 404, "cracklet cap ls"},
-		{"/nope/x", 404, "cracklet cap ls"},
-		{"/claude/v1/messages", 403, "cracklet grant agent1 claude"},
+		{"/", 404, "skiff cap ls"},
+		{"/nope/x", 404, "skiff cap ls"},
+		{"/claude/v1/messages", 403, "skiff grant agent1 claude"},
 		{"/github/org/repo.git/info/refs", 200, ""},
 		{"/github/org/other/git-upload-pack", 200, ""},
 		{"/github/org", 200, ""},
@@ -287,7 +287,7 @@ func TestAuditFailureIsReportedOnce(t *testing.T) {
 
 func TestProxyReportsSecretFailure(t *testing.T) {
 	c := cap.Cap{Name: "x", Proxy: &cap.Proxy{Upstream: "http://127.0.0.1:1",
-		Headers: map[string]string{"Authorization": `{{ secret "keychain:cracklet/missing" }}`}}}
+		Headers: map[string]string{"Authorization": `{{ secret "keychain:skiff/missing" }}`}}}
 	b, audit := newBroker(t, cap.Set{"x": c}, []string{"x"})
 	srv := httptest.NewServer(b.Handler())
 	defer srv.Close()
@@ -296,14 +296,14 @@ func TestProxyReportsSecretFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 502 || strings.Contains(string(body), "keychain:cracklet/missing") || !strings.Contains(string(body), "credential unavailable") {
+	if resp.StatusCode != 502 || strings.Contains(string(body), "keychain:skiff/missing") || !strings.Contains(string(body), "credential unavailable") {
 		t.Errorf("guest must get a generic error: status %d body %s", resp.StatusCode, body)
 	}
-	waitFor(t, "detail in audit", func() bool { return strings.Contains(audit.String(), "no secret keychain:cracklet/missing") })
+	waitFor(t, "detail in audit", func() bool { return strings.Contains(audit.String(), "no secret keychain:skiff/missing") })
 }
 
 func TestExecPipesBodyAndMetadata(t *testing.T) {
-	c := cap.Cap{Name: "tool", Exec: &cap.Exec{Command: "sh", Args: []string{"-c", `printf '%s|%s|%s|%s|' "$CRACKLET_VM" "$CRACKLET_CAP" "$CRACKLET_METHOD" "$CRACKLET_PATH"; cat`}}}
+	c := cap.Cap{Name: "tool", Exec: &cap.Exec{Command: "sh", Args: []string{"-c", `printf '%s|%s|%s|%s|' "$SKIFF_VM" "$SKIFF_CAP" "$SKIFF_METHOD" "$SKIFF_PATH"; cat`}}}
 	b, _ := newBroker(t, cap.Set{"tool": c}, []string{"tool"})
 	srv := httptest.NewServer(b.Handler())
 	defer srv.Close()
@@ -339,7 +339,7 @@ func TestExecPipesBodyAndMetadata(t *testing.T) {
 }
 
 func mcpCap() cap.Cap {
-	return cap.Cap{Name: "fake", MCP: &cap.MCP{Command: os.Args[0], Env: map[string]string{"CRACKLET_TEST_MCP": "1", "FAKE_MCP_ENV": "set"}}}
+	return cap.Cap{Name: "fake", MCP: &cap.MCP{Command: os.Args[0], Env: map[string]string{"SKIFF_TEST_MCP": "1", "FAKE_MCP_ENV": "set"}}}
 }
 
 func rpc(t *testing.T, url, msg string) (*http.Response, string) {
@@ -445,7 +445,7 @@ func TestMCPBridgeWriteHonoursContext(t *testing.T) {
 
 func TestListenAndServeOnUnixSocket(t *testing.T) {
 	// macOS limits socket paths to 104 bytes; t.TempDir() is longer than that.
-	dir, err := os.MkdirTemp("/tmp", "cracklet-test-")
+	dir, err := os.MkdirTemp("/tmp", "skiff-test-")
 	if err != nil {
 		t.Fatal(err)
 	}

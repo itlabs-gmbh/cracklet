@@ -14,15 +14,15 @@ import (
 
 const (
 	// ImageRef is the guest image every machine boots from.
-	ImageRef = "cracklet/guest:latest"
+	ImageRef = "skiff/guest:latest"
 	// imageRev is bumped whenever the Dockerfile or nftables.conf changes.
 	imageRev = "3"
-	labelRev = "cracklet.rev"
-	labelKey = "cracklet.key"
+	labelRev = "skiff.rev"
+	labelKey = "skiff.key"
 )
 
 // dockerfile is the guest image: Ubuntu with systemd as PID 1 (the machine
-// init execs /sbin/init), sshd for root with cracklet's key, networkd DHCP so
+// init execs /sbin/init), sshd for root with skiff's key, networkd DHCP so
 // the guest takes the address `machine ls` reports, the nftables guard rail
 // (firewall.go) and the tools the provisioning scripts (internal/guest) rely
 // on. The key and the ruleset are copied from the build context, never
@@ -32,7 +32,7 @@ const (
 // apt generates host keys while the image is built; they are removed again
 // and every VM makes its own on first boot (the drop-in runs before sshd's
 // own config check), so a VM cannot pose as another one towards the Mac once
-// cracklet has pinned its key. Only an ed25519 key is made, which keeps the
+// skiff has pinned its key. Only an ed25519 key is made, which keeps the
 // first boot short and leaves ssh exactly one key to pin.
 const dockerfile = `FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
@@ -43,12 +43,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /run/sshd \
     && systemctl enable ssh systemd-networkd systemd-resolved nftables
 RUN printf '[Match]\nName=e*\n\n[Network]\nDHCP=yes\n' > /etc/systemd/network/10-eth.network \
-    && printf 'PermitRootLogin prohibit-password\nHostKey /etc/ssh/ssh_host_ed25519_key\n' > /etc/ssh/sshd_config.d/10-cracklet.conf \
+    && printf 'PermitRootLogin prohibit-password\nHostKey /etc/ssh/ssh_host_ed25519_key\n' > /etc/ssh/sshd_config.d/10-skiff.conf \
     && install -d -m 0700 /root/.ssh
 RUN rm -f /etc/ssh/ssh_host_*
 COPY --chmod=0600 authorized_keys /root/.ssh/authorized_keys
 COPY --chmod=0644 nftables.conf /etc/nftables.conf
-COPY --chmod=0644 hostkeys.conf /etc/systemd/system/ssh.service.d/10-cracklet-hostkeys.conf
+COPY --chmod=0644 hostkeys.conf /etc/systemd/system/ssh.service.d/10-skiff-hostkeys.conf
 LABEL %s=%s %s=%s
 `
 
@@ -85,7 +85,7 @@ func (b *Backend) ensureImage(ctx context.Context) error {
 	case err != nil && !errors.Is(err, errNoImage):
 		return err
 	}
-	dir, err := os.MkdirTemp("", "cracklet-image-")
+	dir, err := os.MkdirTemp("", "skiff-image-")
 	if err != nil {
 		return fmt.Errorf("create build context: %w", err)
 	}

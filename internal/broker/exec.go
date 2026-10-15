@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/cap"
+	"github.com/itlabs-gmbh/skiff/internal/cap"
 )
 
 // execTimeout bounds one invocation of an exec capability.
@@ -23,7 +23,7 @@ const maxExecBody = 8 << 20
 const maxExecConcurrency = 4
 
 // newExec wraps an external program: the request body goes to stdin, stdout
-// becomes the response body. Request metadata arrives in CRACKLET_* variables.
+// becomes the response body. Request metadata arrives in SKIFF_* variables.
 func (b *Broker) newExec(c cap.Cap) http.Handler {
 	slots := make(chan struct{}, maxExecConcurrency)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -46,12 +46,12 @@ func (b *Broker) newExec(c cap.Cap) http.Handler {
 		defer cancel()
 		cmd := exec.CommandContext(ctx, c.Exec.Command, c.Exec.Args...)
 		cmd.Env = append(childEnv(nil),
-			"CRACKLET_VM="+b.VM,
-			"CRACKLET_CAP="+c.Name,
-			"CRACKLET_METHOD="+r.Method,
-			"CRACKLET_PATH="+r.URL.Path,
-			"CRACKLET_QUERY="+r.URL.RawQuery,
-			"CRACKLET_CONTENT_TYPE="+r.Header.Get("Content-Type"),
+			"SKIFF_VM="+b.VM,
+			"SKIFF_CAP="+c.Name,
+			"SKIFF_METHOD="+r.Method,
+			"SKIFF_PATH="+r.URL.Path,
+			"SKIFF_QUERY="+r.URL.RawQuery,
+			"SKIFF_CONTENT_TYPE="+r.Header.Get("Content-Type"),
 		)
 		cmd.Stdin = bytes.NewReader(body)
 		stdout := &limitedBuffer{limit: maxExecBody}

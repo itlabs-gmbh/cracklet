@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/grant"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/grant"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 var gcNow = time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
@@ -399,7 +399,7 @@ func TestNewVMKeepsAGrantGivenWhileItStarts(t *testing.T) {
 	granted := make(chan struct{})
 	a, _, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
 		if strings.Contains(strings.Join(args, " "), config.AgentPath+" new ") {
-			// `cracklet grant box claude` in another terminal, as soon as box runs
+			// `skiff grant box claude` in another terminal, as soon as box runs
 			go func() {
 				defer close(granted)
 				unlock, err := store.Lock("box")
@@ -438,7 +438,7 @@ func TestNewVMCancelledWhileWaitingLeavesTheOtherVMAlone(t *testing.T) {
 		return defaultHandler(map[string]string{"rm": ""})(name, args)
 	})
 	store := grant.Store{Dir: a.paths.VMsDir()}
-	// another `cracklet new box` is creating box and holds its grant lock
+	// another `skiff new box` is creating box and holds its grant lock
 	unlock, err := store.Lock("box")
 	if err != nil {
 		t.Fatal(err)

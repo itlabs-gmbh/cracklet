@@ -1,6 +1,6 @@
-# cracklet website
+# skiff website
 
-Static website for cracklet (landing page and docs), no build step.
+Static website for skiff (landing page and docs), no build step.
 
 - `index.html` – landing page
 - `docs.html` – quickstart and command reference

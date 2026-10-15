@@ -10,7 +10,7 @@ func TestExecQuotesEveryArgument(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exec: %v", err)
 	}
-	want := ` vm1.cracklet -- 'sh' -c 'echo $HOME | wc -c' 'it'\''s' ''`
+	want := ` vm1.skiff -- 'sh' -c 'echo $HOME | wc -c' 'it'\''s' ''`
 	if !fake.CalledWithSuffix(want) {
 		t.Errorf("argv not quoted exactly, want suffix %q:\n%s", want, fake.Dump())
 	}
@@ -21,7 +21,7 @@ func TestExecWithoutSeparatorKeepsFlagsForRemote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exec: %v", err)
 	}
-	if !fake.CalledWithSuffix(" vm1.cracklet -- 'ls' -la") {
+	if !fake.CalledWithSuffix(" vm1.skiff -- 'ls' -la") {
 		t.Errorf("remote flags must reach the guest:\n%s", fake.Dump())
 	}
 }
@@ -31,8 +31,8 @@ func TestExecKeepsSecondSeparatorAsArgument(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exec: %v", err)
 	}
-	if !fake.CalledWithSuffix(" vm1.cracklet -- 'printf' %s --") {
-		t.Errorf("only the first -- belongs to cracklet:\n%s", fake.Dump())
+	if !fake.CalledWithSuffix(" vm1.skiff -- 'printf' %s --") {
+		t.Errorf("only the first -- belongs to skiff:\n%s", fake.Dump())
 	}
 }
 
@@ -62,7 +62,7 @@ func TestSSHLeavesShellSyntaxToGuest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ssh: %v", err)
 	}
-	if !fake.CalledWithSuffix(" vm1.cracklet -- echo $HOME | wc -c") {
+	if !fake.CalledWithSuffix(" vm1.skiff -- echo $HOME | wc -c") {
 		t.Errorf("ssh must not quote its command:\n%s", fake.Dump())
 	}
 }

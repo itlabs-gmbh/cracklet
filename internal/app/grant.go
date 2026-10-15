@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/itlabs-gmbh/cracklet/internal/cap"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/grant"
-	"github.com/itlabs-gmbh/cracklet/internal/guest"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/cap"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/grant"
+	"github.com/itlabs-gmbh/skiff/internal/guest"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 func (a *App) grantStore() grant.Store {
@@ -124,7 +124,7 @@ func checkGrant(caps cap.Set, g grant.Grant) error {
 		return nil
 	}
 	if _, ok := caps[g.Cap]; !ok {
-		return fmt.Errorf("unknown capability %q (see 'cracklet cap ls')", g.Cap)
+		return fmt.Errorf("unknown capability %q (see 'skiff cap ls')", g.Cap)
 	}
 	return nil
 }

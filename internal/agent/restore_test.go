@@ -125,7 +125,7 @@ func TestAgentRestoreUnitEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install_restore_unit failed: %v\n%s", err, out)
 	}
-	unit, err := os.ReadFile(filepath.Join(root, "systemd", "cracklet-restore.service"))
+	unit, err := os.ReadFile(filepath.Join(root, "systemd", "skiff-restore.service"))
 	if err != nil {
 		t.Fatalf("unit not written: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestAgentRestoreUnitEnabled(t *testing.T) {
 			t.Errorf("unit missing %q:\n%s", want, unit)
 		}
 	}
-	if !strings.Contains(out, "systemctl daemon-reload") || !strings.Contains(out, "systemctl enable --quiet cracklet-restore.service") {
+	if !strings.Contains(out, "systemctl daemon-reload") || !strings.Contains(out, "systemctl enable --quiet skiff-restore.service") {
 		t.Errorf("unit not enabled:\n%s", out)
 	}
 }

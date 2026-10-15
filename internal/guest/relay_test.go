@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/cap"
+	"github.com/itlabs-gmbh/skiff/internal/cap"
 )
 
 func TestRelayInstalledWhileCapsAreGranted(t *testing.T) {
@@ -26,7 +26,7 @@ func TestRelayInstalledWhileCapsAreGranted(t *testing.T) {
 		t.Fatal(err)
 	}
 	socket := decodeHeredoc(t, script, RelaySocketUnit)
-	if !strings.Contains(socket, "ListenStream=/run/cracklet/broker.sock") || !strings.Contains(socket, "SocketMode=0600") ||
+	if !strings.Contains(socket, "ListenStream=/run/skiff/broker.sock") || !strings.Contains(socket, "SocketMode=0600") ||
 		!strings.Contains(socket, "RemoveOnStop=yes") {
 		t.Errorf("socket unit:\n%s", socket)
 	}
@@ -34,7 +34,7 @@ func TestRelayInstalledWhileCapsAreGranted(t *testing.T) {
 	if !strings.Contains(service, "systemd-socket-proxyd 127.0.0.1:7777") {
 		t.Errorf("service unit:\n%s", service)
 	}
-	if !strings.Contains(script, "systemctl --quiet enable --now cracklet-broker.socket") {
+	if !strings.Contains(script, "systemctl --quiet enable --now skiff-broker.socket") {
 		t.Errorf("relay is not started:\n%s", script)
 	}
 	if strings.Contains(script, "systemctl disable") {
@@ -55,7 +55,7 @@ func TestRelayRemovedWithLastGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stop := strings.Index(script, "systemctl disable --now cracklet-broker.socket cracklet-broker.service")
+	stop := strings.Index(script, "systemctl disable --now skiff-broker.socket skiff-broker.service")
 	rm := strings.Index(script, "rm -f '"+RelaySocketUnit+"'")
 	if stop < 0 || rm < 0 || stop > rm {
 		t.Fatalf("relay must be stopped before its units are removed:\n%s", script)
@@ -82,7 +82,7 @@ func TestRelayUnitsAreReserved(t *testing.T) {
 // reservation or the conflict checks between caps.
 func TestNonCanonicalPathsAreRejected(t *testing.T) {
 	for _, p := range []string{
-		"/etc/systemd/system/./cracklet-broker.service",
+		"/etc/systemd/system/./skiff-broker.service",
 		"/etc//gitconfig",
 		"/etc/gitconfig/",
 		"/etc/./gitconfig",
@@ -121,7 +121,7 @@ func TestRevokeCleansLegacyNonCanonicalPaths(t *testing.T) {
 	if !strings.Contains(script, "rm -f '/etc/./old.conf'") {
 		t.Errorf("legacy file not removed:\n%s", script)
 	}
-	if !strings.Contains(script, "sed '/^.* >>> cracklet:forge .*$/,/^.* <<< cracklet:forge$/d' '/etc/./gitconfig'") {
+	if !strings.Contains(script, "sed '/^.* >>> skiff:forge .*$/,/^.* <<< skiff:forge$/d' '/etc/./gitconfig'") {
 		t.Errorf("legacy block not removed:\n%s", script)
 	}
 	// The relaxed check for old entries still refuses traversal.

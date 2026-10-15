@@ -10,10 +10,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
-// listTimeout bounds the quick status probe so a wedged limactl cannot hang cracklet.
+// listTimeout bounds the quick status probe so a wedged limactl cannot hang skiff.
 const listTimeout = 30 * time.Second
 
 var modeRe = regexp.MustCompile(`^[0-7]{3,4}$`)

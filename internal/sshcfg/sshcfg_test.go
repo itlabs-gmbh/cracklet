@@ -7,18 +7,18 @@ import (
 
 func TestRender(t *testing.T) {
 	out, err := Render(Options{
-		Instance:     "cracklet",
-		KeyPath:      "/Users/me/.cracklet/id_ed25519",
-		ProxyCommand: "ssh -F /Users/me/.lima/cracklet/ssh.config -W %h:%p lima-cracklet",
+		Instance:     "skiff",
+		KeyPath:      "/Users/me/.skiff/id_ed25519",
+		ProxyCommand: "ssh -F /Users/me/.lima/skiff/ssh.config -W %h:%p lima-skiff",
 	})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	for _, want := range []string{
-		"Host *.cracklet",
+		"Host *.skiff",
 		"User root",
-		"IdentityFile /Users/me/.cracklet/id_ed25519",
-		"ProxyCommand ssh -F /Users/me/.lima/cracklet/ssh.config -W %h:%p lima-cracklet",
+		"IdentityFile /Users/me/.skiff/id_ed25519",
+		"ProxyCommand ssh -F /Users/me/.lima/skiff/ssh.config -W %h:%p lima-skiff",
 		"StrictHostKeyChecking no",
 	} {
 		if !strings.Contains(out, want) {
@@ -37,11 +37,11 @@ func TestRenderRequiresFields(t *testing.T) {
 }
 
 func TestHostAliasRoundTrip(t *testing.T) {
-	if got := HostAlias("vm1", "cracklet"); got != "vm1.cracklet" {
+	if got := HostAlias("vm1", "skiff"); got != "vm1.skiff" {
 		t.Errorf("HostAlias = %q", got)
 	}
-	for host, want := range map[string]string{"vm1.cracklet": "vm1", "vm1": "vm1", "a.b.cracklet": "a.b"} {
-		if got := VMName(host, "cracklet"); got != want {
+	for host, want := range map[string]string{"vm1.skiff": "vm1", "vm1": "vm1", "a.b.skiff": "a.b"} {
+		if got := VMName(host, "skiff"); got != want {
 			t.Errorf("VMName(%q) = %q, want %q", host, got, want)
 		}
 	}
@@ -49,15 +49,15 @@ func TestHostAliasRoundTrip(t *testing.T) {
 
 func TestRenderPinsHostKeysWhenAKnownHostsFileIsGiven(t *testing.T) {
 	out, err := Render(Options{
-		Instance:       "cracklet",
-		KeyPath:        "/Users/me/.cracklet/id_ed25519",
-		ProxyCommand:   "/usr/local/bin/cracklet _dial %h %p",
-		KnownHostsFile: "/Users/me/.cracklet/known_hosts",
+		Instance:       "skiff",
+		KeyPath:        "/Users/me/.skiff/id_ed25519",
+		ProxyCommand:   "/usr/local/bin/skiff _dial %h %p",
+		KnownHostsFile: "/Users/me/.skiff/known_hosts",
 	})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	for _, want := range []string{"StrictHostKeyChecking yes", "UserKnownHostsFile /Users/me/.cracklet/known_hosts"} {
+	for _, want := range []string{"StrictHostKeyChecking yes", "UserKnownHostsFile /Users/me/.skiff/known_hosts"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}

@@ -13,16 +13,16 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/itlabs-gmbh/cracklet/internal/agent"
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/envdbin"
-	"github.com/itlabs-gmbh/cracklet/internal/host"
-	limactl "github.com/itlabs-gmbh/cracklet/internal/lima"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/agent"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/envdbin"
+	"github.com/itlabs-gmbh/skiff/internal/host"
+	limactl "github.com/itlabs-gmbh/skiff/internal/lima"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
-// EnvdSource yields the linux/arm64 cracklet-envd binary that Prepare ships
+// EnvdSource yields the linux/arm64 skiff-envd binary that Prepare ships
 // into the Lima VM.
 type EnvdSource func(ctx context.Context) ([]byte, error)
 
@@ -94,13 +94,13 @@ func (b *Backend) statusf(format string, args ...any) {
 	fmt.Fprintf(b.status, format, args...)
 }
 
-// loadEnvd prefers the daemon embedded by `make envd`; a cracklet installed via
+// loadEnvd prefers the daemon embedded by `make envd`; a skiff installed via
 // `go install ...@latest` has none and cross-compiles it from the module cache.
 func (b *Backend) loadEnvd(ctx context.Context) ([]byte, error) {
 	if data, ok := envdbin.Embedded(); ok {
 		return data, nil
 	}
-	b.printf("==> cracklet-envd is not embedded in this build, cross-compiling it with the local Go toolchain\n")
+	b.printf("==> skiff-envd is not embedded in this build, cross-compiling it with the local Go toolchain\n")
 	return envdbin.Builder{Runner: b.r, LookPath: b.lookPath, Version: envdbin.RunningVersion()}.Build(ctx)
 }
 
@@ -111,7 +111,7 @@ func (b *Backend) LoadEnvd(ctx context.Context) ([]byte, error) { return b.loadE
 
 // ensureAgent installs or refreshes the guest agent when its checksum differs.
 // It probes once per process: the agent is a file on the Lima disk that only
-// cracklet itself replaces.
+// skiff itself replaces.
 func (b *Backend) ensureAgent(ctx context.Context) error {
 	b.agentMu.Lock()
 	defer b.agentMu.Unlock()
@@ -165,7 +165,7 @@ var errLimaStopped = errors.New("stopped")
 
 // Ready implements backend.Backend. A stopped instance, as after a reboot of
 // the Mac, is started and the microVMs that ran before it stopped come back;
-// anything else needs 'cracklet prepare'.
+// anything else needs 'skiff prepare'.
 func (b *Backend) Ready(ctx context.Context) error {
 	err := b.Alive(ctx)
 	switch {
@@ -212,13 +212,13 @@ func (b *Backend) Alive(ctx context.Context) error {
 	case err != nil:
 		return err
 	case !ok:
-		return fmt.Errorf("Lima instance %q does not exist yet, run 'cracklet prepare' first", config.Instance)
+		return fmt.Errorf("Lima instance %q does not exist yet, run 'skiff prepare' first", config.Instance)
 	case inst.Status == limactl.StatusRunning:
 		return nil
 	case inst.Status == limactl.StatusStopped:
-		return fmt.Errorf("Lima instance %q is %w, run 'cracklet prepare' to start it", config.Instance, errLimaStopped)
+		return fmt.Errorf("Lima instance %q is %w, run 'skiff prepare' to start it", config.Instance, errLimaStopped)
 	}
-	return fmt.Errorf("Lima instance %q is %s, run 'cracklet prepare' to start it", config.Instance, inst.Status)
+	return fmt.Errorf("Lima instance %q is %s, run 'skiff prepare' to start it", config.Instance, inst.Status)
 }
 
 // bootLima starts the stopped Lima VM and waits until its microVMs are back.
@@ -234,13 +234,13 @@ func (b *Backend) bootLima(ctx context.Context) error {
 		return err
 	}
 	defer release()
-	// Another cracklet command may have started it while this one waited.
+	// Another skiff command may have started it while this one waited.
 	inst, ok, err := b.lima.Get(ctx)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("Lima instance %q was removed, run 'cracklet prepare' to create it", config.Instance)
+		return fmt.Errorf("Lima instance %q was removed, run 'skiff prepare' to create it", config.Instance)
 	}
 	if inst.Status != limactl.StatusRunning {
 		b.statusf("==> Starting Lima VM %q\n", config.Instance)
@@ -252,7 +252,7 @@ func (b *Backend) bootLima(ctx context.Context) error {
 	// back yet is reported and can be started by hand.
 	if err := b.restoreMicroVMs(ctx); err != nil {
 		b.statusf("  [WARN] the Lima VM is running again, but restarting its microVMs failed: %v\n"+
-			"         check 'cracklet ls' and start them with 'cracklet start NAME'\n", err)
+			"         check 'skiff ls' and start them with 'skiff start NAME'\n", err)
 	}
 	return nil
 }

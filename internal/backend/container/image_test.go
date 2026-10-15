@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
 )
 
 // TestGuestImageHasPerVMHostKeysAndFirewall: the image must not ship the host
@@ -16,7 +16,7 @@ import (
 func TestGuestImageHasPerVMHostKeysAndFirewall(t *testing.T) {
 	for _, want := range []string{
 		"rm -f /etc/ssh/ssh_host_*",
-		"COPY --chmod=0644 hostkeys.conf /etc/systemd/system/ssh.service.d/10-cracklet-hostkeys.conf",
+		"COPY --chmod=0644 hostkeys.conf /etc/systemd/system/ssh.service.d/10-skiff-hostkeys.conf",
 		"HostKey /etc/ssh/ssh_host_ed25519_key",
 		"nftables",
 		"COPY --chmod=0644 nftables.conf /etc/nftables.conf",

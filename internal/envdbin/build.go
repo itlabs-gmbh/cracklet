@@ -10,24 +10,24 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
-// Module is cracklet's import path; the daemon is built from the same module
+// Module is skiff's import path; the daemon is built from the same module
 // version as the running CLI so host and guest never drift apart.
-const Module = "github.com/itlabs-gmbh/cracklet"
+const Module = "github.com/itlabs-gmbh/skiff"
 
 // daemonPackage is the daemon's package, relative to the module root.
-const daemonPackage = "./cmd/cracklet-envd"
+const daemonPackage = "./cmd/skiff-envd"
 
 // develVersion is what debug.ReadBuildInfo reports for a plain `go build` in a checkout.
 const develVersion = "(devel)"
 
-// Builder cross-compiles cracklet-envd for linux/arm64 with the host Go toolchain.
+// Builder cross-compiles skiff-envd for linux/arm64 with the host Go toolchain.
 type Builder struct {
 	Runner   runner.Runner
 	LookPath func(name string) (string, error)
-	// Version is the module version of the running cracklet (see RunningVersion).
+	// Version is the module version of the running skiff (see RunningVersion).
 	Version string
 	// TempDir hosts the build output; empty means os.TempDir.
 	TempDir string
@@ -45,26 +45,26 @@ func RunningVersion() string {
 
 // Build resolves the module source in the Go module cache and cross-compiles
 // the daemon from it. It fails with actionable hints when the toolchain is
-// missing or the running cracklet is a development build without a version.
+// missing or the running skiff is a development build without a version.
 func (b Builder) Build(ctx context.Context) ([]byte, error) {
 	if _, err := b.LookPath("go"); err != nil {
-		return nil, errors.New("cracklet-envd is not embedded in this cracklet and 'go' was not found; " +
-			"install Go (https://go.dev/dl) or build cracklet from a checkout with 'make build'")
+		return nil, errors.New("skiff-envd is not embedded in this skiff and 'go' was not found; " +
+			"install Go (https://go.dev/dl) or build skiff from a checkout with 'make build'")
 	}
 	if !isPinned(b.Version) {
-		return nil, fmt.Errorf("cracklet-envd is not embedded and this cracklet has no module version (%q); "+
+		return nil, fmt.Errorf("skiff-envd is not embedded and this skiff has no module version (%q); "+
 			"build it from a checkout with 'make build' so the daemon gets embedded", b.Version)
 	}
 	dir, err := b.moduleDir(ctx)
 	if err != nil {
 		return nil, err
 	}
-	work, err := os.MkdirTemp(b.TempDir, "cracklet-envd-")
+	work, err := os.MkdirTemp(b.TempDir, "skiff-envd-")
 	if err != nil {
 		return nil, fmt.Errorf("create build directory: %w", err)
 	}
 	defer os.RemoveAll(work)
-	return b.compile(ctx, dir, filepath.Join(work, "cracklet-envd"))
+	return b.compile(ctx, dir, filepath.Join(work, "skiff-envd"))
 }
 
 // isPinned accepts real module versions (v1.2.3, pseudo-versions) and rejects
@@ -103,14 +103,14 @@ func (b Builder) compile(ctx context.Context, dir, out string) ([]byte, error) {
 	err := b.Runner.Run(ctx, "env", "CGO_ENABLED=0", "GOOS=linux", "GOARCH=arm64",
 		"go", "build", "-C", dir, "-trimpath", "-ldflags=-s -w", "-o", out, daemonPackage)
 	if err != nil {
-		return nil, fmt.Errorf("cross-compile cracklet-envd: %w", err)
+		return nil, fmt.Errorf("cross-compile skiff-envd: %w", err)
 	}
 	data, err := os.ReadFile(out)
 	if err != nil {
-		return nil, fmt.Errorf("read built cracklet-envd: %w", err)
+		return nil, fmt.Errorf("read built skiff-envd: %w", err)
 	}
 	if len(data) < MinSize {
-		return nil, fmt.Errorf("built cracklet-envd is too small (%d bytes)", len(data))
+		return nil, fmt.Errorf("built skiff-envd is too small (%d bytes)", len(data))
 	}
 	return data, nil
 }

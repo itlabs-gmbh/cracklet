@@ -12,7 +12,7 @@ over generalizing it.
 
 ## Why
 
-cracklet today runs Firecracker inside a Lima VM with nested virtualization.
+skiff today runs Firecracker inside a Lima VM with nested virtualization.
 The spike showed that the two costs of that nesting disappear when a microVM is
 a Virtualization.framework VM driven by `container`:
 
@@ -28,14 +28,14 @@ The `CTR_EL0` trap cannot be removed in the Lima setup without a patched KVM
 speed is to drop the KVM layer.
 
 What a container backend gives up: real Firecracker, golden snapshots and the
-`cracklet-envd` identity path (not needed when a cold boot takes 0.5 s), and the
+`skiff-envd` identity path (not needed when a cold boot takes 0.5 s), and the
 Lima-side firewall that today confines guests to "internet only".
 
 ## Non-goals
 
 - Keeping both backends forever. Lima stays only until the container backend
   has shipped phases 1–4; it is then deleted together with `agent.sh`,
-  `cracklet-envd`, the golden snapshots and the nested-virtualization preflight.
+  `skiff-envd`, the golden snapshots and the nested-virtualization preflight.
 - Making the Lima path better in the meantime (no new Lima features).
 - A Go client for the `container-apiserver` XPC API. We drive the `container`
   CLI (JSON output) exactly like we drive `limactl`.
@@ -78,7 +78,7 @@ type Backend interface {
     // the Mac rebooted. It fails with a hint when Prepare has not run.
     Ready(ctx context.Context) error
     // Alive is the non-starting probe used by background polling
-    // (`cracklet tunnel`), which must never undo a deliberate stop.
+    // (`skiff tunnel`), which must never undo a deliberate stop.
     Alive(ctx context.Context) error
 
     New(ctx context.Context, spec vm.Spec) (vm.Info, error)
@@ -94,7 +94,7 @@ type Backend interface {
     Unforward(ctx context.Context, name string, hostPorts []int) (vm.Info, error)
 
     // Dial opens a TCP connection to port inside the named VM. It backs the
-    // ssh ProxyCommand (`cracklet _dial`) and the forward relay. The Lima
+    // ssh ProxyCommand (`skiff _dial`) and the forward relay. The Lima
     // backend keeps its own ProxyCommand (ssh -W through the Lima VM) until it
     // is removed, so only the container backend implements Dial for real.
     Dial(ctx context.Context, name string, port int) (net.Conn, error)
@@ -108,7 +108,7 @@ type Backend interface {
 type Capabilities struct {
     Snapshots     bool // --fresh has a meaning
     Profiles      bool // profiles size the root disk (container: sparse 512 GiB, always)
-    Forwards      bool // cracklet forward works
+    Forwards      bool // skiff forward works
     GuestFirewall bool // guests are confined to internet-only
     Resize        bool // prepare --cpus/--memory/--disk resize a shared VM
 }
@@ -121,9 +121,9 @@ explicit sizing (there is no shared VM to size) and ignores profiles.
 What stays in `app` and why it is backend-neutral:
 
 - grants, caps, secrets, provisioning over `ssh … bash -s`, the broker and its
-  guest relay (`/run/cracklet/broker.sock` via systemd socket units: the
+  guest relay (`/run/skiff/broker.sock` via systemd socket units: the
   container guest runs systemd too);
-- `cracklet tunnel` (needs `Alive` + `List` for its running check);
+- `skiff tunnel` (needs `Alive` + `List` for its running check);
 - `gc` (needs `List` and guarded `Remove`; host-state pruning is app-side);
 - the two host flocks in `limalock.go` are Lima-only (boot and resize) and
   move with the backend; the container backend serializes API calls with its
@@ -131,7 +131,7 @@ What stays in `app` and why it is backend-neutral:
 
 Why `Dial` instead of exposing the guest IP: it decouples `ssh_config` from the
 address plan (vmnet hands out 192.168.64.x and may renumber on reboot), and it
-is the same primitive the forward relay needs. `cracklet _dial %h %p` resolves
+is the same primitive the forward relay needs. `skiff _dial %h %p` resolves
 the name through `machine ls` on every connection, so stale IPs are never a
 user-visible problem. Lima is not migrated to `_dial`: its ProxyCommand goes
 away with the backend.
@@ -153,19 +153,19 @@ away with the backend.
 | `config.Instance`, Lima defaults, `Paths.Lima*`    | `backend/lima`                      |
 
 `app` keeps: key pair, grants, provisioning over ssh (`bash -s`), the broker
-tunnel (`ssh -R 127.0.0.1:7777:<socket>`), `cracklet ssh`, ssh_config, caps,
+tunnel (`ssh -R 127.0.0.1:7777:<socket>`), `skiff ssh`, ssh_config, caps,
 secrets. None of that knows about Lima once `requireRunning` is behind
 `Backend.Ready`.
 
 ### Selecting a backend
 
-- `cracklet prepare --backend lima|container` writes `~/.cracklet/backend`
+- `skiff prepare --backend lima|container` writes `~/.skiff/backend`
   (one line). Default is `lima` until phase 4 ships, then `container`; the
   flag and the Lima backend are removed in phase 5.
-- `CRACKLET_BACKEND` overrides for a single invocation (tests, CI).
-- A `CRACKLET_HOME` has exactly one backend; `prepare --backend` with a
-  different value than the stored one refuses unless `cracklet ls` is empty.
-- `cracklet doctor` prints the backend and its problems.
+- `SKIFF_BACKEND` overrides for a single invocation (tests, CI).
+- A `SKIFF_HOME` has exactly one backend; `prepare --backend` with a
+  different value than the stored one refuses unless `skiff ls` is empty.
+- `skiff doctor` prints the backend and its problems.
 
 ## The container backend
 
@@ -183,7 +183,7 @@ secrets. None of that knows about Lima once `requireRunning` is behind
 
 1. Preflight as above; generate the key pair (shared code).
 2. Start the system service.
-3. Build the guest image `cracklet/guest:<rev>` with `container build` from an
+3. Build the guest image `skiff/guest:<rev>` with `container build` from an
    embedded Dockerfile rendered into a temp context:
 
    ```dockerfile
@@ -198,42 +198,42 @@ secrets. None of that knows about Lima once `requireRunning` is behind
    RUN install -d -m 0700 /root/.ssh && echo '<pubkey>' > /root/.ssh/authorized_keys \
     && chmod 0600 /root/.ssh/authorized_keys \
     && printf 'PermitRootLogin prohibit-password\n' > /etc/ssh/sshd_config.d/10-root.conf
-   LABEL cracklet.rev=<rev> cracklet.key=<sha256 of pubkey>
+   LABEL skiff.rev=<rev> skiff.key=<sha256 of pubkey>
    ```
 
-   Idempotent: skip when `container image inspect cracklet/guest:<rev>` shows
+   Idempotent: skip when `container image inspect skiff/guest:<rev>` shows
    both labels with the expected values. The public key is baked in because a
    fresh machine has no other channel before sshd is up; `machine run -i` could
    stream it later, but that path is the one with the first-boot bug (below).
    Guest customizations that `agent.sh` does today (motd, hostname, trimmed
-   boot) move into this Dockerfile; `cracklet-envd` is not installed.
-4. Write `~/.cracklet/ssh_config` with the `_dial` ProxyCommand.
+   boot) move into this Dockerfile; `skiff-envd` is not installed.
+4. Write `~/.skiff/ssh_config` with the `_dial` ProxyCommand.
 
 ### Lifecycle mapping
 
-| cracklet          | container                                                                                   |
+| skiff          | container                                                                                   |
 |-------------------|---------------------------------------------------------------------------------------------|
-| `new NAME`        | `container machine create cracklet/guest:<rev> --name NAME --cpus N --memory <MiB>M --home-mount none`, then poll `machine ls --format json` for `ipAddress` and TCP 22 (see first-boot bug) |
+| `new NAME`        | `container machine create skiff/guest:<rev> --name NAME --cpus N --memory <MiB>M --home-mount none`, then poll `machine ls --format json` for `ipAddress` and TCP 22 (see first-boot bug) |
 | `new` (auto name) | pick the first free `vm<N>` from `List`, as `agent.sh` does                                 |
 | `start NAME`      | `container machine run --name NAME --root -- true` (boots, 0.5 s), then poll sshd           |
 | `stop NAME`       | `container machine stop NAME`                                                                |
 | `rm NAME`         | `container machine rm NAME` + grant store removal (shared)                                   |
-| `ls`              | `machine ls --format json`, filtered to machines whose `inspect` `image.reference` starts with `cracklet/guest`; `cpus`, `memory`, `ipAddress`, `status` map onto `vm.Info` |
-| `ssh NAME`        | unchanged: `ssh -F ~/.cracklet/ssh_config NAME.cracklet`; ProxyCommand `cracklet _dial` → `Dial(name, 22)` → TCP to `ipAddress:22` |
+| `ls`              | `machine ls --format json`, filtered to machines whose `inspect` `image.reference` starts with `skiff/guest`; `cpus`, `memory`, `ipAddress`, `status` map onto `vm.Info` |
+| `ssh NAME`        | unchanged: `ssh -F ~/.skiff/ssh_config NAME.skiff`; ProxyCommand `skiff _dial` → `Dial(name, 22)` → TCP to `ipAddress:22` |
 | grants/broker     | unchanged: `bash -s` over ssh, `ssh -R` for the broker socket                               |
 | `--fresh`         | accepted and ignored (every boot is cold); `Capabilities.Snapshots=false`                   |
 | `--profile`       | accepted and ignored: the machine root disk is a sparse 512 GiB volume (`/dev/vdb`, 2.2 GiB used after boot), so no profile is ever too small; `ls` shows real usage |
-| `--owner/--slot`, `created_at` | host-side metadata in `~/.cracklet/vms/<vm>/meta.json` (the Lima agent stores it in the guest); the guarded `Remove` compares against it under the per-VM flock |
+| `--owner/--slot`, `created_at` | host-side metadata in `~/.skiff/vms/<vm>/meta.json` (the Lima agent stores it in the guest); the guarded `Remove` compares against it under the per-VM flock |
 | reboot of the Mac | `Ready` runs `container system start` when the apiserver is down and boots the machines marked running in `meta.json` (the Lima backend's `agent restore` equivalent), under the boot lock so parallel commands boot once |
 | `prepare --cpus/--memory/--disk` | rejected (`Capabilities.Resize=false`); `container machine set cpus=/memory=` could later back a per-VM resize instead |
 | `forward`         | phase 1: rejected with the direct address as hint (`192.168.64.x:PORT` is reachable from the Mac); phase 2: relay below |
 
 The VM name is the machine name, unprefixed, so `container machine ls` reads
-naturally; the image reference is what marks a machine as cracklet's. The
+naturally; the image reference is what marks a machine as skiff's. The
 default machine (`--set-default`) is never touched.
 
 Operations against the `container` API are serialized with a host-side flock
-(`~/.cracklet/backend.lock`, same pattern as the grant locks): concurrent
+(`~/.skiff/backend.lock`, same pattern as the grant locks): concurrent
 `machine run` calls on different machines failed repeatedly in the spike.
 `List` is exempt (read-only, used by polling).
 
@@ -259,29 +259,29 @@ changes `cpus`, `memory`, `home-mount` of a stopped machine.
 
 ### Port forwards (shipped in phase 4)
 
-`container machine` has no `--publish`, so cracklet relays them itself
+`container machine` has no `--publish`, so skiff relays them itself
 (`internal/backend/container/forward.go`, `relay.go`, `spawn.go`):
 
-- `cracklet forward` stores the forward in the VM's record
-  (`~/.cracklet/machines/<vm>.json`, `forwards`) under the backend lock. A
+- `skiff forward` stores the forward in the VM's record
+  (`~/.skiff/machines/<vm>.json`, `forwards`) under the backend lock. A
   host port belongs to one VM ("already forwarded to VM 'x'", as on Lima);
   forwarding it again on the same VM replaces the guest port; `unforward` of
   an unknown port is a no-op.
-- `cracklet _relay` (hidden) is the relay: it re-reads the records every
+- `skiff _relay` (hidden) is the relay: it re-reads the records every
   second, keeps one listener on `127.0.0.1:HOST` per forward, and joins each
   accepted connection to the guest port through `Dial` (the guest address is
   cached for 5 s so a burst of browser connections does not spawn one
   `machine ls` each; a failed dial forgets it). A stopped VM keeps its port;
   connections are closed until it runs again, under whatever address it then
   has. A host port that cannot be bound is logged once and retried.
-- The relay is a detached child of the cracklet command (`spawn.go`: own
-  session, stdout/stderr to `~/.cracklet/relay.log`), **not a launchd agent
-  as first planned**: measured on macOS 26.7.1, a launchd-started `cracklet
+- The relay is a detached child of the skiff command (`spawn.go`: own
+  session, stdout/stderr to `~/.skiff/relay.log`), **not a launchd agent
+  as first planned**: measured on macOS 26.7.1, a launchd-started `skiff
   _relay` got "no route to host" for every connection to a vmnet address
   (the Local Network permission is attributed to the binary itself and
   denied silently, no prompt), while the same binary spawned from the shell
   reached the guests, because it inherits the terminal's grant like the
-  `_dial` ProxyCommand does. The relay holds `~/.cracklet/relay.lock` while
+  `_dial` ProxyCommand does. The relay holds `~/.skiff/relay.lock` while
   it runs; `ensureRelay` (called from `forward`, `start` and every command's
   `Ready`) spawns one when forwards exist and the lock is free. It exits
   after two minutes without forwards, deciding under the backend lock so a
@@ -292,25 +292,25 @@ changes `cpus`, `memory`, `home-mount` of a stopped machine.
   the host port, `inactive` otherwise.
 
 Rejected: `ssh -L` in a detached ssh (a second process model) and documenting
-the direct address only (`-p` from `cracklet new` would differ between
+the direct address only (`-p` from `skiff new` would differ between
 backends).
 
 ### Security notes from the Phase 3 review
 
 - **Guest kernel**: `container system start --enable-kernel-install` fetches
-  Apple's default guest kernel; cracklet pins no digest for it (the Lima
+  Apple's default guest kernel; skiff pins no digest for it (the Lima
   backend pins Firecracker, kernel and rootfs). Accepted for now because the
   kernel ships with the same signed Apple release as the CLI we already trust
   to run the VMs. Pinning a kernel of our own (`--kernel`) remains an option.
 - **Guest impersonation** (closed in phase 4): all guests share one vmnet /24,
   so a hostile guest that takes a neighbour's address could pose as it
-  towards `cracklet ssh`, grants and the broker tunnel while `ssh_config`
+  towards `skiff ssh`, grants and the broker tunnel while `ssh_config`
   skipped host key checking. Now the image drops the host keys apt generated
   at build time (every VM would share them) and a drop-in on `ssh.service`
   makes an ed25519 key on first boot; `Create` reads it with
   `ssh-keyscan -q -t ed25519` right after sshd answers and before any session,
   stores it in the record (`host_keys`) and regenerates
-  `~/.cracklet/known_hosts` (`<vm>.cracklet TYPE KEY`, rendered from the
+  `~/.skiff/known_hosts` (`<vm>.skiff TYPE KEY`, rendered from the
   records under the lock, also on `rm` and record pruning, so a recreated name
   never trips over its predecessor's key). `ssh_config` carries
   `StrictHostKeyChecking yes` and `UserKnownHostsFile` through
@@ -325,7 +325,7 @@ backends).
   whatever answers under the VM's current address, so a neighbour that took
   that address receives the VM's forwarded connections. Same exposure as a
   Lima forward to a guest that was replaced; the protocol inside the forward
-  (TLS, ssh) has to authenticate the peer, cracklet cannot.
+  (TLS, ssh) has to authenticate the peer, skiff cannot.
 
 ### Network isolation: the one real regression
 
@@ -362,7 +362,7 @@ makes. Options, in order of preference:
    `lima` accepted. All existing tests pass unchanged except import paths; the
    `runner.Fake` based tests move with the code. `cmd/`, `cli/` and the broker
    do not change.
-2. **`cracklet _dial`** and the container `ssh_config`; Lima keeps its
+2. **`skiff _dial`** and the container `ssh_config`; Lima keeps its
    ProxyCommand (not worth migrating code that is scheduled for deletion).
 3. **Container backend**: Doctor, Prepare (image build), New/Start/Stop/Remove/
    List, Dial; `--disk`/`forward` rejected via Capabilities; website gets a
@@ -371,14 +371,20 @@ makes. Options, in order of preference:
    the plan, see "Port forwards" for why not); in-guest nftables guard rail;
    host key pinning (shipped 2026-10-15).
 5. **Flip and delete**: default becomes `container`; a release later remove
-   `internal/lima`, `internal/agent`, `internal/envd*`, `cmd/cracklet-envd`,
+   `internal/lima`, `internal/agent`, `internal/envd*`, `cmd/skiff-envd`,
    the golden-snapshot docs, the M3/nested-virt preflight and the Lima section
    of the website. Users recreate their VMs (no migration code, as agreed).
-6. **Rename to `skiff`** (decided 2026-10-15): binary, module path
+6. **Rename to `skiff`** (decided 2026-10-15, shipped before phase 5 on
+   2026-10-15 since nothing was in use yet): binary, module path
    `github.com/itlabs-gmbh/skiff`, `~/.skiff`, `SKIFF_HOME`, `ssh <vm>.skiff`,
-   guest image `skiff/guest`, website and README. New tagline: "A fresh Linux VM
-   on your Mac in half a second." The rename ships with phase 5 so users see one
-   break, not two. Before it: check trademark residue of Skiff Mail (Notion).
+   guest image `skiff/guest`, guest-side paths and `SKIFF_*` hook environment,
+   Lima internals included (they go with phase 5 anyway), website and README.
+   The tagline "A fresh Linux VM on your Mac in half a second" comes with
+   phase 5, which rewrites the Firecracker-centric texts. Trademark check:
+   Skiff (Notion) was an email/productivity suite, acquired 2024 and wound
+   down by September 2026; no developer-tool mark found in a web search, no
+   Homebrew formula, only unrelated small open-source projects (SkiffOS, a
+   Rust `skiff-cli`). Not a legal clearance.
 
 ## Testing
 

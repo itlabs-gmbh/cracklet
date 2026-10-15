@@ -15,7 +15,7 @@ const (
 	StatusStopped Status = "Stopped"
 )
 
-// Instance is the subset of `limactl list --format json` cracklet cares about.
+// Instance is the subset of `limactl list --format json` skiff cares about.
 type Instance struct {
 	Name         string `json:"name"`
 	Status       Status `json:"status"`

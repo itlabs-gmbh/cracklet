@@ -8,11 +8,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/broker"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/grant"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
-	"github.com/itlabs-gmbh/cracklet/internal/secret"
+	"github.com/itlabs-gmbh/skiff/internal/broker"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/grant"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/secret"
 )
 
 // Tunnel makes this process the owner of a VM's broker and returns the
@@ -56,7 +56,7 @@ func (a *App) sshExtraArgs(ctx context.Context, name string) ([]string, func(), 
 	socket, stop, err := a.claimTunnel(ctx, name)
 	switch {
 	case errors.Is(err, broker.ErrBusy):
-		// A `cracklet tunnel` or another session owns the broker and its
+		// A `skiff tunnel` or another session owns the broker and its
 		// forward; this session takes over if that owner ends first.
 		return args, a.standby(ctx, name), nil
 	case err != nil:
@@ -127,7 +127,7 @@ func (a *App) startBroker(ctx context.Context, name string) (string, func(), err
 	if err != nil {
 		return "", nil, err
 	}
-	// A cracklet from before ownership locks may still serve this socket.
+	// A skiff from before ownership locks may still serve this socket.
 	if broker.Alive(socket) {
 		release()
 		return "", nil, broker.ErrBusy
@@ -165,7 +165,7 @@ func (a *App) serveBroker(ctx context.Context, name, socket string) (func(), err
 		Secrets: secret.NewResolver(a.r),
 		Audit:   audit,
 		Data:    data,
-		Warn:    func(msg string) { a.printf("cracklet: warning: %s\n", msg) },
+		Warn:    func(msg string) { a.printf("skiff: warning: %s\n", msg) },
 	}
 	ln, err := broker.Listen(socket)
 	if err != nil {

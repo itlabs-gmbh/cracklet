@@ -5,17 +5,17 @@ import (
 	"path"
 	"strings"
 
-	"github.com/itlabs-gmbh/cracklet/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/config"
 )
 
 // The broker relay gives clients that only speak HTTP over a Unix socket
 // (gh with http_unix_socket) a path to the broker: systemd listens on
 // config.BrokerGuestSocket and systemd-socket-proxyd forwards each
 // connection to the tunnel port. The socket exists for as long as any cap is
-// granted; without an open `cracklet ssh` its connections are simply refused.
+// granted; without an open `skiff ssh` its connections are simply refused.
 const (
-	RelaySocketUnit  = "/etc/systemd/system/cracklet-broker.socket"
-	RelayServiceUnit = "/etc/systemd/system/cracklet-broker.service"
+	RelaySocketUnit  = "/etc/systemd/system/skiff-broker.socket"
+	RelayServiceUnit = "/etc/systemd/system/skiff-broker.service"
 )
 
 // asRootOnSystemd guards every systemctl call: the guest runs the scripts as
@@ -24,7 +24,7 @@ const asRootOnSystemd = `[ "$(id -u)" = 0 ] && [ -d /run/systemd/system ]`
 
 func relaySocket() string {
 	return fmt.Sprintf(`[Unit]
-Description=cracklet broker on a Unix socket
+Description=skiff broker on a Unix socket
 
 [Socket]
 ListenStream=%s
@@ -39,9 +39,9 @@ WantedBy=sockets.target
 
 func relayService() string {
 	return fmt.Sprintf(`[Unit]
-Description=cracklet broker relay to the SSH tunnel
-Requires=cracklet-broker.socket
-After=cracklet-broker.socket
+Description=skiff broker relay to the SSH tunnel
+Requires=skiff-broker.socket
+After=skiff-broker.socket
 
 [Service]
 ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:%d

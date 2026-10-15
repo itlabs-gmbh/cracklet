@@ -320,12 +320,21 @@ func TestRelayKeepsAFreshAddressAfterAClosedPort(t *testing.T) {
 	}
 	go func() { _ = b.ServeForwards(ctx) }()
 	waitFor(t, "the listener", func() bool { return listens(port) })
+	// The probe above was the first connection: the relay resolved the
+	// address for it and the guest refused port 80. Wait for that attempt
+	// to finish (the relay closes the client), then count from zero.
 	fake := f.runner
+	if got, err := roundTrip(port, "x\n"); got != "" || (err != nil && !strings.Contains(err.Error(), "reset")) {
+		t.Fatalf("closed guest port: got %q, %v", got, err)
+	}
+	waitFor(t, "the first resolution", func() bool { return strings.Contains(fake.Dump(), "machine ls") })
 	fake.Reset()
 	for i := 0; i < 5; i++ {
-		_, _ = roundTrip(port, "x\n") // guest port 80 is closed
+		if got, err := roundTrip(port, "x\n"); got != "" || (err != nil && !strings.Contains(err.Error(), "reset")) {
+			t.Fatalf("closed guest port: got %q, %v", got, err)
+		}
 	}
-	if n := strings.Count(fake.Dump(), "machine ls"); n != 1 {
-		t.Errorf("want one machine ls for five closed-port connections, got %d:\n%s", n, fake.Dump())
+	if n := strings.Count(fake.Dump(), "machine ls"); n != 0 {
+		t.Errorf("a fresh address must be kept across refused connections, got %d machine ls:\n%s", n, fake.Dump())
 	}
 }

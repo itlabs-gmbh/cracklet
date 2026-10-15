@@ -191,8 +191,9 @@ func indexOf(args []string, flag string) int {
 	return -1
 }
 
-// dialer answers only for machines whose sshd is up; it returns a loopback
-// pipe so callers can Close it.
+// dialer answers only for machines whose sshd is up: port 22 as a loopback
+// pipe callers can Close, a port in guestServers as a real connection, any
+// other port refused like a closed port.
 func (f *fakeContainer) dialer(ctx context.Context, addr string) (backend.Conn, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -216,9 +217,12 @@ func (f *fakeContainer) dialer(ctx context.Context, addr string) (backend.Conn, 
 			}
 			return conn.(*net.TCPConn), nil
 		}
-		c1, c2 := net.Pipe()
-		_ = c2.Close()
-		return pipeConn{c1}, nil
+		if strings.HasSuffix(addr, ":22") {
+			c1, c2 := net.Pipe()
+			_ = c2.Close()
+			return pipeConn{c1}, nil
+		}
+		return nil, errors.New("connection refused")
 	}
 	return nil, errors.New("connection refused")
 }

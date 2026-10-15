@@ -218,7 +218,7 @@ func (b *Backend) Ready(ctx context.Context) error {
 	}
 	defer release()
 	if err := b.Alive(ctx); err == nil {
-		return b.keepHostState(ctx, false)
+		return b.keepHostState(ctx, lockNotHeld)
 	}
 	api, err := b.lock(ctx)
 	if err != nil {
@@ -233,17 +233,27 @@ func (b *Backend) Ready(ctx context.Context) error {
 		b.statusf("  [WARN] the service is running again, but restarting its microVMs failed: %v\n"+
 			"         check 'cracklet ls' and start them with 'cracklet start NAME'\n", err)
 	}
-	return b.keepHostState(ctx, true)
+	return b.keepHostState(ctx, lockHeld)
 }
+
+// lockState says whether the caller already holds the backend lock
+// (container.lock); taking it twice would deadlock, writing without it is
+// unsafe.
+type lockState int
+
+const (
+	lockNotHeld lockState = iota
+	lockHeld
+)
 
 // keepHostState runs on every command: it brings the relay back when
 // forwards exist without one (after logout, or when it idled out) and
 // restores a deleted known_hosts from the records, under the backend lock
-// unless the caller holds it (locked), because every writer of known_hosts
-// must. Neither fails the command; a problem is reported once per command.
-func (b *Backend) keepHostState(ctx context.Context, locked bool) error {
+// unless the caller holds it, because every writer of known_hosts must.
+// Neither fails the command; a problem is reported once per command.
+func (b *Backend) keepHostState(ctx context.Context, lock lockState) error {
 	if _, err := os.Stat(b.paths.KnownHostsPath()); errors.Is(err, fs.ErrNotExist) {
-		if err := b.restoreKnownHosts(ctx, locked); err != nil {
+		if err := b.restoreKnownHosts(ctx, lock); err != nil {
 			b.statusf("  [WARN] cannot restore %s: %v\n", b.paths.KnownHostsPath(), err)
 		}
 	}
@@ -253,8 +263,8 @@ func (b *Backend) keepHostState(ctx context.Context, locked bool) error {
 	return nil
 }
 
-func (b *Backend) restoreKnownHosts(ctx context.Context, locked bool) error {
-	if !locked {
+func (b *Backend) restoreKnownHosts(ctx context.Context, lock lockState) error {
+	if lock == lockNotHeld {
 		release, err := b.lock(ctx)
 		if err != nil {
 			return err

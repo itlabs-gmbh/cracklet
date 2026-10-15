@@ -52,8 +52,8 @@ type Conn interface {
 var ErrNoDial = errors.New("direct connections to guests are not supported")
 
 // ForwardRelay is implemented by backends whose port forwards are served on
-// the Mac by `cracklet _relay` (a launchd agent) rather than inside a runtime
-// VM. ServeForwards listens on every recorded forward until ctx ends or the
+// the Mac by `cracklet _relay` (a detached child process of the command that
+// needed it) rather than inside a runtime VM. ServeForwards listens on every recorded forward until ctx ends or the
 // backend decides the relay has nothing left to do.
 type ForwardRelay interface {
 	ServeForwards(ctx context.Context) error

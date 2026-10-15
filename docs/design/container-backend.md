@@ -260,7 +260,7 @@ changes `cpus`, `memory`, `home-mount` of a stopped machine.
 ### Port forwards (shipped in phase 4)
 
 `container machine` has no `--publish`, so cracklet relays them itself
-(`internal/backend/container/forward.go`, `relay.go`, `launchd.go`):
+(`internal/backend/container/forward.go`, `relay.go`, `spawn.go`):
 
 - `cracklet forward` stores the forward in the VM's record
   (`~/.cracklet/machines/<vm>.json`, `forwards`) under the backend lock. A
@@ -367,8 +367,9 @@ makes. Options, in order of preference:
 3. **Container backend**: Doctor, Prepare (image build), New/Start/Stop/Remove/
    List, Dial; `--disk`/`forward` rejected via Capabilities; website gets a
    "Backends" section with the measured numbers.
-4. **Forwards relay** via launchd agent; in-guest nftables guard rail; host
-   key pinning (shipped 2026-10-15).
+4. **Forwards relay** as a detached process spawned by the CLI (launchd was
+   the plan, see "Port forwards" for why not); in-guest nftables guard rail;
+   host key pinning (shipped 2026-10-15).
 5. **Flip and delete**: default becomes `container`; a release later remove
    `internal/lima`, `internal/agent`, `internal/envd*`, `cmd/cracklet-envd`,
    the golden-snapshot docs, the M3/nested-virt preflight and the Lima section

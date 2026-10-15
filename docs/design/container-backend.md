@@ -317,7 +317,15 @@ backends).
   `Backend.KnownHostsFile()` (Lima returns "", its guests share one image-wide
   key behind a firewall). A VM that presents no key is removed again. The
   remaining window is the race between the first `ssh-keyscan` and a
-  neighbour, against a machine that booted half a second earlier.
+  neighbour, against a machine that booted half a second earlier: trust on
+  first use, accepted because no channel to the guest exists before sshd
+  (baking a key into the image would make every VM share it; `machine run
+  -i` is the path with the first-boot bug).
+- **Forwarded traffic is not pinned**: a port forward is a plain TCP relay to
+  whatever answers under the VM's current address, so a neighbour that took
+  that address receives the VM's forwarded connections. Same exposure as a
+  Lima forward to a guest that was replaced; the protocol inside the forward
+  (TLS, ssh) has to authenticate the peer, cracklet cannot.
 
 ### Network isolation: the one real regression
 

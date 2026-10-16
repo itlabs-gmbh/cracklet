@@ -1,31 +1,33 @@
-# skiff – Firecracker microVMs on your Mac
+# skiff – a fresh Linux VM on your Mac in half a second
 
 [![CI](https://github.com/itlabs-gmbh/skiff/actions/workflows/ci.yml/badge.svg)](https://github.com/itlabs-gmbh/skiff/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/itlabs-gmbh/skiff.svg)](https://pkg.go.dev/github.com/itlabs-gmbh/skiff)
 
-`skiff` gives you the "ssh into a fresh microVM in a second" feeling on Apple
-Silicon. It runs **real, unmodified Firecracker** by placing a single Lima VM
-with nested virtualization between macOS and the microVMs:
+`skiff` gives you throwaway Linux VMs on Apple Silicon, one per task or coding
+agent: `skiff new dev` boots an Ubuntu 24.04 VM with its own kernel, disk, IP
+and root SSH in about two seconds (the boot itself takes half a second), and
+`skiff rm dev` throws it away. Credentials the agent needs stay on the Mac and
+reach the VM through a broker, never as copies.
 
 ```
 macOS (skiff)
- └── Lima VM "skiff"  (Ubuntu 24.04, vz driver, nestedVirtualization: true → /dev/kvm)
-      ├── firecracker v1.17.0 + guest kernel + Ubuntu 24.04 base image
-      ├── microVM vm1  (tap skiff1, 172.16.1.2, systemd unit skiff-vm-vm1)
-      ├── microVM vm2  (tap skiff2, 172.16.2.2, systemd unit skiff-vm-vm2)
-      └── ...
+ ├── VM dev   (Virtualization.framework via Apple's `container`, 192.168.64.x, ssh dev.skiff)
+ ├── VM ai    (…)                                     ──┐ relay: localhost:3000 → ai:3000
+ └── broker   (credentials, MCP servers, audit log)   ◀─┘ ssh -R tunnel per session
 ```
 
-Every microVM gets its own kernel, root disk, IP address and SSH access. The
-host side (`skiff`) is a small Go CLI; the guest side is a bash agent that skiff
-installs into the Lima VM and keeps up to date automatically.
+Each VM is a `container machine`: a Virtualization.framework VM driven by
+Apple's [container](https://github.com/apple/container) CLI. There is no
+nested virtualization and no shared runtime VM, so JIT-heavy workloads such as
+Claude Code run at Mac speed. The host side is one Go binary; the guest is a
+plain Ubuntu image with systemd, sshd and skiff's key.
 
 ## Requirements
 
-- Apple M3 or newer (nested virtualization is a hardware feature of M3+)
-- macOS 15 or newer
-- Homebrew (skiff installs Lima through it if needed)
+- Apple Silicon (any generation)
+- macOS 26 or newer (what Apple's `container` supports)
+- Homebrew (skiff installs `container` through it if needed)
 - Go 1.26+ to build skiff
 
 Check with `skiff doctor`.
@@ -34,46 +36,47 @@ Check with `skiff doctor`.
 
 ```sh
 go install github.com/itlabs-gmbh/skiff/cmd/skiff@latest
-skiff prepare           # one-time setup, a few minutes
+skiff prepare           # one-time setup, about a minute
 ```
 
 Or from a checkout: `make install` (go install ./cmd/skiff → `$(go env GOPATH)/bin/skiff`).
 
 `skiff prepare` is idempotent. It:
 
-1. verifies the host (chip, macOS version, Hypervisor framework, Lima),
+1. verifies the host (Apple Silicon, macOS version, Hypervisor framework, `container`),
 2. generates an SSH key pair in `~/.skiff/`,
-3. creates and boots the Lima VM from an embedded template
-   (`--cpus`, `--memory`, `--disk` size it; defaults 4 / 8 GiB / 40 GiB;
-   see [Resizing the Lima VM](#resizing-the-lima-vm) to change an existing one),
-4. installs Firecracker, downloads the guest kernel and the Ubuntu rootfs
-   (all three verified against SHA-256 digests pinned in `internal/config`),
-   injects your public key and builds a sparse ext4 base image,
+3. starts the `container` system service (first run downloads Apple's guest kernel),
+4. builds the guest image `skiff/guest` (Ubuntu 24.04 with systemd, sshd,
+   your public key and the internet-only firewall), rebuilt only when the
+   image recipe or your key changes,
 5. writes `~/.skiff/ssh_config`.
 
-The Lima VM mounts nothing from the Mac; files travel over `limactl shell`.
+### Backends
 
-### Resizing the Lima VM
+`skiff prepare --backend lima|container` picks how VMs run; the choice is
+remembered in `~/.skiff/backend`. `container` is the default. `lima` runs
+real Firecracker microVMs inside a Lima VM with nested virtualization; it is
+deprecated and scheduled for removal, see [The Lima backend](#the-lima-backend-deprecated).
+A state directory has one backend; switching is refused while the old one
+still has VMs.
 
-All microVMs share the Lima VM's CPUs and memory, so the defaults fit about
-two or three parallel task VMs. Grow it in place, without rebuilding:
+| measurement (2 vCPU / 1 GiB)          | Mac     | Lima    | Firecracker nested | container |
+|---------------------------------------|---------|---------|--------------------|-----------|
+| first touch of fresh RAM, ms/MiB      | 0.18    | 0.39    | 0.39               | 0.18–0.23 |
+| `CTR_EL0` read (JIT icache flushes)   | n/a     | 0.001 µs| 24 µs              | 0.001 µs  |
+| Claude Code CPU in the first 3 s, JIT | 0.64–0.71 s | –   | 1.13–1.22 s        | 0.69–0.87 s |
+| cold boot to sshd                     | –       | –       | 1.5 s (+0.1 s ssh) | 0.5 s     |
 
-```sh
-skiff stop vm1                 # resizing restarts the Lima VM
-skiff prepare --cpus 8 --memory 16
-```
-
-Only the flags you pass are applied, so a later plain `skiff prepare` keeps
-the new size. The restart would kill running microVMs, so prepare refuses
-while any run, and `skiff new`/`start` refuse until the resize is done
-(a host-side lock in `~/.skiff/lima.lock`). The disk can only grow;
-shrinking means recreating the Lima VM.
+Not on the container backend: golden snapshots (`--fresh` is a no-op, every
+boot is cold and fast), image profiles (`--profile` is ignored, the root disk
+is a sparse 512 GiB volume that grows on demand), and `--disk`; VMs need at
+least 1 GiB of memory.
 
 ## Usage
 
 ```sh
 skiff new                    # boots vm1 (2 vCPUs, 1 GiB RAM, 2G disk)
-skiff new dev --vcpus 4 --mem 2048 --disk 8G
+skiff new dev --vcpus 4 --mem 2048
 skiff ls
 skiff ls --json              # also: new --json, inspect --json
 skiff inspect dev            # details of one VM
@@ -86,46 +89,6 @@ skiff rm dev                 # stop and delete
 skiff gc --owner paseo       # remove VMs a tool created and lost track of
 ```
 
-### Golden snapshots
-
-`skiff new` does not boot: it restores a *golden snapshot*, a fully booted VM
-(sshd and the guest daemon `skiff-envd` running) frozen together with its
-memory. The first `skiff new` for a given `--vcpus`/`--mem` combination builds
-that snapshot (about 15 s), every later one restores it in roughly 3 s.
-
-After the restore the clone still carries the snapshot's IP, hostname and
-clock. The agent sends the real identity over vsock (Firecracker's Unix socket
-with the `CONNECT 52` handshake) and `skiff-envd` applies it with netlink and
-syscalls, without spawning a process: right after a restore every page the
-guest touches is a nested page fault, so even `ip addr add` costs hundreds of
-milliseconds there.
-
-`--fresh` forces a cold boot; a `--disk` other than the profile's image size
-implies it. Snapshots are keyed on the profile image, kernel, Firecracker version and the
-agent revision, so they rebuild automatically after `skiff prepare` changes any
-of them. `skiff-envd` is cross-compiled for linux/arm64 and embedded into skiff
-(`make envd`). A skiff installed with `go install ...@latest` has no embedded copy;
-`skiff prepare` then cross-compiles the daemon from the module cache with your Go
-toolchain, at the same module version as the CLI.
-
-### Image profiles
-
-`--profile` picks the guest image. `base` is the plain Ubuntu 24.04 image (curl
-and python3, 2G). `paseo` adds Node 22, `@getpaseo/cli`, Claude Code (native
-installer), git, gh and rsync on an 8G image. Build a profile once, then use it:
-
-```sh
-skiff prepare --profile paseo   # chroot install from apt/npm/claude.ai, a few minutes
-skiff new agent --profile paseo # restores the paseo golden snapshot
-```
-
-A profile image is built at its full size because a golden snapshot can only
-be restored onto a disk of exactly that size; `--disk` defaults to it.
-`paseo.service` (`paseo daemon run --home /root/.paseo`) is installed but not
-enabled, so the snapshot carries no daemon keypair; start it per VM with
-`systemctl enable --now paseo`. Package versions are the newest available when
-the image is built; a new base image or agent revision rebuilds the profile.
-
 ### Owned VMs and `skiff gc`
 
 Tools that create VMs on your behalf label them with an owner and, if they keep a
@@ -133,7 +96,7 @@ pool, a slot. skiff records both together with the creation time in the VM's
 directory, so the labels disappear with the VM:
 
 ```sh
-skiff new paseo-3 --profile paseo --owner paseo --slot 3
+skiff new paseo-3 --owner paseo --slot 3
 skiff ls                             # OWNER shows paseo/3, AGE the time since creation
 skiff gc --owner paseo --keep paseo-1 --keep paseo-2   # a tool reconciling its pool
 skiff gc --older-than 7d --dry-run   # owned VMs older than a week
@@ -157,10 +120,12 @@ skiff unforward web 5432
 ```
 
 Forwards appear as `localhost:PORT` on the Mac, persist across `stop`/`start`
-and are removed with the VM. Host ports must be 1024 or higher because Lima
-exposes them as your user. Under the hood a transient systemd socket on the
-Lima VM activates `systemd-socket-proxyd` towards the microVM, and Lima's
-dynamic port forwarding brings the socket to `127.0.0.1` on the Mac.
+and a reboot, follow the VM to a new address, and are removed with the VM. Host
+ports must be 1024 or higher because the relay runs as your user. Under the
+hood `skiff _relay`, started by skiff whenever forwards exist, listens on the
+host port and joins each connection to the VM's guest port; a stopped VM keeps
+its port and connections are closed until it runs again. `skiff forward web`
+shows each forward as `active` or `inactive`.
 
 To use plain `ssh`, add one line to `~/.ssh/config`:
 
@@ -169,8 +134,9 @@ Include ~/.skiff/ssh_config
 ```
 
 Then `ssh dev.skiff` works from anywhere, including `scp`, `rsync` and your IDE.
-The alias uses the Lima VM as an SSH jump host (`ProxyCommand ssh -W`), so no
-port forwarding or `sudo` is needed on macOS.
+The alias runs `skiff _dial` as ProxyCommand, which connects to the VM's
+current address and verifies the host key pinned at creation, so no port
+forwarding or `sudo` is needed on macOS.
 
 ### Capabilities: credentials and MCPs without copying secrets
 
@@ -260,7 +226,101 @@ allow signing in to the unmodified binary with your own subscription, including
 in sandboxes you run; they do not allow routing other people's requests through
 your account, so keep the broker personal.
 
-## How a microVM is wired
+## How a VM is wired
+
+| Piece            | Value                                                                 |
+|------------------|-----------------------------------------------------------------------|
+| VM               | `container machine create skiff/guest --name NAME --cpus N --memory M` |
+| Kernel           | Apple's default guest kernel, fetched by `container system start`     |
+| Root disk        | sparse 512 GiB volume, grows on demand                                |
+| Network          | vmnet, `192.168.64.x` by DHCP; the address can change across restarts |
+| SSH              | `ssh NAME.skiff` through the ProxyCommand `skiff _dial`, host key pinned at creation in `~/.skiff/known_hosts` |
+| Port forwards    | `skiff _relay`, a detached process that listens on `localhost:HOST` and dials the VM |
+| State            | `~/.skiff/machines/NAME.json` (owner, slot, creation time, host key, forwards) |
+
+### Network isolation
+
+The guest image carries an nftables ruleset that rejects connections from the
+VM to private networks: the Mac at `192.168.64.1`, your LAN, other VMs, and
+link-local and carrier-grade ranges. DNS and DHCP to the gateway stay open, the
+internet is reachable through vmnet's NAT. It is a guard rail inside the guest,
+not a boundary: root in the VM can lift it. The only controlled way back to the
+Mac is the [capability broker](#capabilities-credentials-and-mcps-without-copying-secrets).
+
+Because all VMs share one vmnet subnet, `skiff new` reads each VM's ssh host
+key right after its first boot and pins it; a VM that takes a neighbour's
+address cannot pose as it towards `skiff ssh`, grants or the broker tunnel.
+
+## Troubleshooting
+
+- `skiff doctor` explains what is missing on the host.
+- Boot log of a VM: `container machine logs NAME`
+- Port forwards: `skiff forward NAME` shows their state; the relay logs to `~/.skiff/relay.log`.
+  The relay runs as a child of your terminal (macOS denies a launchd agent the local
+  network), so it ends at logout; the next `skiff` command starts it again.
+- After a reboot of the Mac, the next `skiff` command starts the `container` service and
+  the VMs that were running come back. VMs stopped with `skiff stop` stay stopped.
+- `ssh` reports `Host key verification failed` for a VM created before host keys were
+  pinned, or one replaced under the same name: recreate it.
+- `skiff ssh` and `skiff exec` mirror the remote exit status; exit 255 means the connection failed.
+- `skiff ssh dev a b` joins its words into one shell command line, as ssh does, so
+  quotes and `$` are interpreted by the guest shell. Use `skiff exec dev -- a b` from
+  scripts: it quotes every argument and the guest sees exactly that argv.
+- Ctrl-C during `skiff new NAME` removes the half-created VM again.
+- Reset everything: `skiff rm` each VM, then `rm -rf ~/.skiff` and
+  `container image rm skiff/guest:latest`.
+
+## The Lima backend (deprecated)
+
+`skiff prepare --backend lima` runs real, unmodified Firecracker microVMs
+inside a single Lima VM with nested virtualization. It needs an Apple M3 or
+newer and macOS 15+, and `prepare` installs Firecracker, a pinned guest kernel
+and rootfs (SHA-256 verified) into the Lima VM, which `--cpus`, `--memory` and
+`--disk` size (defaults 4 / 8 GiB / 40 GiB, resizable in place while no microVM
+runs). It is kept until the container backend has settled and will then be
+removed together with the sections below.
+
+#### Golden snapshots
+
+`skiff new` does not boot: it restores a *golden snapshot*, a fully booted VM
+(sshd and the guest daemon `skiff-envd` running) frozen together with its
+memory. The first `skiff new` for a given `--vcpus`/`--mem` combination builds
+that snapshot (about 15 s), every later one restores it in roughly 3 s.
+
+After the restore the clone still carries the snapshot's IP, hostname and
+clock. The agent sends the real identity over vsock (Firecracker's Unix socket
+with the `CONNECT 52` handshake) and `skiff-envd` applies it with netlink and
+syscalls, without spawning a process: right after a restore every page the
+guest touches is a nested page fault, so even `ip addr add` costs hundreds of
+milliseconds there.
+
+`--fresh` forces a cold boot; a `--disk` other than the profile's image size
+implies it. Snapshots are keyed on the profile image, kernel, Firecracker version and the
+agent revision, so they rebuild automatically after `skiff prepare` changes any
+of them. `skiff-envd` is cross-compiled for linux/arm64 and embedded into skiff
+(`make envd`). A skiff installed with `go install ...@latest` has no embedded copy;
+`skiff prepare` then cross-compiles the daemon from the module cache with your Go
+toolchain, at the same module version as the CLI.
+
+#### Image profiles
+
+`--profile` picks the guest image. `base` is the plain Ubuntu 24.04 image (curl
+and python3, 2G). `paseo` adds Node 22, `@getpaseo/cli`, Claude Code (native
+installer), git, gh and rsync on an 8G image. Build a profile once, then use it:
+
+```sh
+skiff prepare --profile paseo   # chroot install from apt/npm/claude.ai, a few minutes
+skiff new agent --profile paseo # restores the paseo golden snapshot
+```
+
+A profile image is built at its full size because a golden snapshot can only
+be restored onto a disk of exactly that size; `--disk` defaults to it.
+`paseo.service` (`paseo daemon run --home /root/.paseo`) is installed but not
+enabled, so the snapshot carries no daemon keypair; start it per VM with
+`systemctl enable --now paseo`. Package versions are the newest available when
+the image is built; a new base image or agent revision rebuilds the profile.
+
+### How a Firecracker microVM is wired
 
 | Piece            | Value                                                                 |
 |------------------|-----------------------------------------------------------------------|
@@ -281,7 +341,7 @@ Each Firecracker process runs in a transient systemd unit with
 Agent commands that change state are serialised with `flock`, and a `skiff new`
 that fails half-way rolls back its disk, tap, hosts entry and unit.
 
-### Network isolation
+#### Network isolation
 
 Two dedicated iptables chains (`SKIFF-FORWARD` for routed traffic,
 `SKIFF-INPUT` for traffic addressed to the Lima VM itself) let microVMs reach
@@ -303,7 +363,7 @@ default INPUT/FORWARD policy, and they are rebuilt through a single
 Mac or LAN, edit `PRIVATE_NETS` and the `REJECT` rules in `setup_host_network`
 in `internal/agent/agent.sh`.
 
-### Entropy after restore
+#### Entropy after restore
 
 Every microVM restored from the golden snapshot starts with the snapshot's
 kernel random state. The host agent sends 32 bytes from the Lima VM's
@@ -311,26 +371,14 @@ kernel random state. The host agent sends 32 bytes from the Lima VM's
 `RNDADDENTROPY` and forces a reseed with `RNDRESEEDCRNG`, so clones diverge
 immediately instead of at the kernel's next scheduled reseed.
 
-## Troubleshooting
+### Troubleshooting Lima
 
-- `skiff doctor` explains what is missing on the host.
 - Console output of a VM: `limactl shell skiff sudo cat /var/lib/skiff/vms/<name>/console.log`
 - Agent logs: `limactl shell skiff sudo journalctl -u skiff-vm-<name>`
-- After a reboot of the Mac, the next `skiff` command starts the stopped Lima VM, and
-  the microVMs that were running come back (also at every boot of the Lima VM, through
-  `skiff-restore.service`). VMs stopped with `skiff stop` stay stopped. If one
-  fails to boot, the command warns; `skiff start <name>` retries it.
 - `skiff ls` shows `broken` for a VM whose metadata is damaged; `skiff rm <name>` cleans it up.
-- `skiff ssh` and `skiff exec` mirror the remote exit status; exit 255 means the connection failed.
-- `skiff ssh dev a b` joins its words into one shell command line, as ssh does, so
-  quotes and `$` are interpreted by the guest shell. Use `skiff exec dev -- a b` from
-  scripts: it quotes every argument and the guest sees exactly that argv.
-- Ctrl-C during `skiff new NAME` removes the half-created VM again (the agent inside
-  the Lima VM finishes or rolls back on its own, then skiff runs `rm`). For an
-  auto-named VM, check `skiff ls` afterwards.
-- Reset everything: `limactl delete -f skiff && rm -rf ~/.skiff`
+- Reset: `limactl delete -f skiff && rm -rf ~/.skiff`
 
-## Why not Firecracker on the Virtualization framework directly?
+### Why not Firecracker on the Virtualization framework directly?
 
 There is a proof of concept that ports Firecracker to Apple's Virtualization
 framework (`drink7036290/firecracker`, branch `macos_avf`). It has been

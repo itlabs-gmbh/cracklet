@@ -8,11 +8,11 @@ import (
 	"github.com/itlabs-gmbh/skiff/internal/config"
 )
 
-func TestSelectionDefaultsToLima(t *testing.T) {
+func TestSelectionDefaultsToContainer(t *testing.T) {
 	paths := config.Paths{Home: t.TempDir() + "/missing"}
 	name, err := LoadName(paths)
-	if err != nil || name != NameLima {
-		t.Fatalf("LoadName = %q, %v; want lima without a stored choice", name, err)
+	if err != nil || name != NameContainer {
+		t.Fatalf("LoadName = %q, %v; want container without a stored choice", name, err)
 	}
 }
 

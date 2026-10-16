@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/itlabs-gmbh/skiff/internal/agent"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
 	"github.com/itlabs-gmbh/skiff/internal/config"
 	"github.com/itlabs-gmbh/skiff/internal/envdbin"
 	"github.com/itlabs-gmbh/skiff/internal/runner"
@@ -108,6 +109,11 @@ func TestPrepareCreatesInstanceAndImages(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Include "+paths.SSHConfigPath()) {
 		t.Errorf("output should explain the ssh Include, got:\n%s", out.String())
+	}
+	// A prepared state directory carries its backend, flag or not, so a
+	// later change of the default cannot silently move it.
+	if name, err := backend.LoadName(paths); err != nil || name != backend.NameLima {
+		t.Errorf("stored backend = %q, %v; want lima", name, err)
 	}
 }
 

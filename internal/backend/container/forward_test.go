@@ -13,7 +13,7 @@ import (
 
 func createDev(t *testing.T, b *Backend) {
 	t.Helper()
-	if _, err := b.Create(context.Background(), vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+	if _, err := b.Create(context.Background(), vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -73,7 +73,7 @@ func TestForwardRefusesAPortAnotherVMOwns(t *testing.T) {
 	b, _, _ := newTestBackend(t, f)
 	ctx := context.Background()
 	createDev(t, b)
-	if _, err := b.Create(ctx, vm.Spec{Name: "web", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+	if _, err := b.Create(ctx, vm.Spec{Name: "web", VCPUs: 1, MemMiB: 512}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := b.Forward(ctx, "dev", []vm.Forward{{Host: 8080, Guest: 80}}); err != nil {

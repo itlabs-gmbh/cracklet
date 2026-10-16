@@ -10,22 +10,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/itlabs-gmbh/skiff/internal/backend/backendtest"
 	"github.com/itlabs-gmbh/skiff/internal/broker"
 	"github.com/itlabs-gmbh/skiff/internal/config"
 	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
-// testPaths returns a short home so Unix sockets fit on macOS.
-func testPaths(t *testing.T) config.Paths {
-	t.Helper()
-	return config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}
-}
-
 func newCapApp(t *testing.T) (*App, *strings.Builder, *runner.Fake) {
 	t.Helper()
 	fake := runner.NewFake(func(name string, args []string) ([]byte, error) { return nil, nil })
 	out := &strings.Builder{}
-	return New(fake, testPaths(t), out, WithEnvd(fakeEnvd), WithTunnel(fakeTunnel)), out, fake
+	return New(fake, testPaths(t), out, WithBackend(backendtest.New()), WithTunnel(fakeTunnel)), out, fake
 }
 
 func TestCapListShowsEmbeddedAndBuiltIn(t *testing.T) {
@@ -188,7 +183,7 @@ func TestStartBrokerServesSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	app := New(fake, config.Paths{Home: dir, LimaHome: "/tmp/lima"}, &strings.Builder{}, WithEnvd(fakeEnvd))
+	app := New(fake, config.Paths{Home: dir}, &strings.Builder{}, WithBackend(backendtest.New()))
 	if err := app.grantStore().Save("agent1", nil); err != nil {
 		t.Fatal(err)
 	}

@@ -24,11 +24,11 @@ const (
 	// to start over.
 	tunnelStable = time.Minute
 	// maxTunnelFailures consecutive failed status checks end the tunnel; a
-	// single one is usually Lima restarting.
+	// single one is usually the runtime restarting.
 	maxTunnelFailures = 5
 )
 
-// tunnelKeepAlive lets ssh notice a dead connection (Lima suspended, VM
+// tunnelKeepAlive lets ssh notice a dead connection (Mac asleep, VM
 // killed) within about 45 seconds instead of waiting for TCP to give up.
 var tunnelKeepAlive = []string{"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"}
 

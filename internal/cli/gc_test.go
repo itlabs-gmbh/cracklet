@@ -2,31 +2,25 @@ package cli
 
 import (
 	"encoding/json"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/itlabs-gmbh/skiff/internal/app"
-	"github.com/itlabs-gmbh/skiff/internal/config"
-	"github.com/itlabs-gmbh/skiff/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/backend/backendtest"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
-// ownedHandler lists one VM made by hand and one owned VM created long ago.
-func ownedHandler(t *testing.T) runner.FakeHandler {
-	t.Helper()
-	return func(name string, args []string) ([]byte, error) {
-		if strings.Contains(strings.Join(args, " "), config.AgentPath+" ls") {
-			return []byte(`[{"name":"vm1","state":"running","ip":"172.16.1.2","vcpus":2,"mem_mib":1024,"created_at":null},
-			 {"name":"paseo-3","state":"running","ip":"172.16.3.2","vcpus":2,"mem_mib":3072,
-			  "owner":"paseo","slot":"3","created_at":"2026-01-01T00:00:00Z"}]`), nil
-		}
-		return fakeHandler(t)(name, args)
-	}
+// ownedBackend has one VM made by hand and one owned VM created long ago.
+func ownedBackend() *backendtest.Fake {
+	fb := seededBackend()
+	created := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	fb.Add(vm.Info{Name: "paseo-3", VCPUs: 2, MemMiB: 3072, Owner: "paseo", Slot: "3", CreatedAt: &created})
+	return fb
 }
 
 func TestGCRemovesOwnedVMs(t *testing.T) {
-	stdout, _, err := runSplit(t, ownedHandler(t), "gc", "--owner", "paseo", "--older-than", "7d")
+	stdout, _, err := runSplit(t, ownedBackend(), "gc", "--owner", "paseo", "--older-than", "7d")
 	if err != nil {
 		t.Fatalf("gc: %v", err)
 	}
@@ -36,8 +30,8 @@ func TestGCRemovesOwnedVMs(t *testing.T) {
 }
 
 func TestGCDryRunJSON(t *testing.T) {
-	fake := runner.NewFake(ownedHandler(t))
-	stdout, stderr, err := runSplitWith(t, fake, "gc", "--owner", "paseo", "--keep", "vm2", "--dry-run", "--json")
+	fb := ownedBackend()
+	stdout, stderr, err := runSplit(t, fb, "gc", "--owner", "paseo", "--keep", "vm2", "--dry-run", "--json")
 	if err != nil {
 		t.Fatalf("gc --json: %v", err)
 	}
@@ -51,25 +45,25 @@ func TestGCDryRunJSON(t *testing.T) {
 	if !strings.Contains(stderr, "would remove paseo-3") {
 		t.Errorf("progress should go to stderr, got %q", stderr)
 	}
-	if fake.CalledWithSuffix(config.AgentPath + " rm paseo-3") {
+	if fb.CalledWithPrefix("rm paseo-3") {
 		t.Error("a dry run must not remove the VM")
 	}
 }
 
 func TestGCKeepSkipsVMs(t *testing.T) {
-	fake := runner.NewFake(ownedHandler(t))
-	stdout, _, err := runSplitWith(t, fake, "gc", "--owner", "paseo", "--keep", "paseo-3")
+	fb := ownedBackend()
+	stdout, _, err := runSplit(t, fb, "gc", "--owner", "paseo", "--keep", "paseo-3")
 	if err != nil {
 		t.Fatalf("gc: %v", err)
 	}
-	if fake.CalledWithSuffix(config.AgentPath+" rm paseo-3") || !strings.Contains(stdout, "nothing to collect") {
-		t.Errorf("kept VM was touched or output is off:\n%s\n%s", stdout, fake.Dump())
+	if fb.CalledWithPrefix("rm paseo-3") || !strings.Contains(stdout, "nothing to collect") {
+		t.Errorf("kept VM was touched or output is off:\n%s\n%s", stdout, fb.Dump())
 	}
 }
 
 func TestGCRejectsBadAge(t *testing.T) {
 	for _, age := range []string{"soon", "-1h", "1.5d", "d"} {
-		if _, _, err := runSplit(t, ownedHandler(t), "gc", "--older-than", age); err == nil {
+		if _, _, err := runSplit(t, ownedBackend(), "gc", "--older-than", age); err == nil {
 			t.Errorf("--older-than %q should be rejected", age)
 		}
 	}
@@ -89,13 +83,15 @@ func TestParseAge(t *testing.T) {
 }
 
 func TestNewPassesOwnerAndSlot(t *testing.T) {
-	_, fake, err := run(t, "new", "paseo-3", "--owner", "paseo", "--slot", "3")
+	_, fb, err := run(t, "new", "paseo-3", "--owner", "paseo", "--slot", "3")
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	stamped := regexp.MustCompile(` new paseo-3 2 1024 2G snapshot base paseo 3 \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$`)
-	if !stamped.MatchString(fake.Dump()) {
-		t.Errorf("owner and slot not forwarded:\n%s", fake.Dump())
+	if !fb.Called("create paseo-3 2 1024 paseo 3") {
+		t.Errorf("owner and slot not forwarded:\n%s", fb.Dump())
+	}
+	if info, _ := fb.VM("paseo-3"); info.CreatedAt == nil {
+		t.Error("an owned VM is stamped with its creation time")
 	}
 	if _, _, err := run(t, "new", "box", "--slot", "3"); err == nil {
 		t.Error("--slot without --owner must be rejected")
@@ -103,7 +99,7 @@ func TestNewPassesOwnerAndSlot(t *testing.T) {
 }
 
 func TestLsAndInspectShowMetadata(t *testing.T) {
-	stdout, _, err := runSplit(t, ownedHandler(t), "ls")
+	stdout, _, err := runSplit(t, ownedBackend(), "ls")
 	if err != nil {
 		t.Fatalf("ls: %v", err)
 	}
@@ -114,7 +110,7 @@ func TestLsAndInspectShowMetadata(t *testing.T) {
 	if !strings.Contains(lines[2], "paseo/3") || !strings.HasSuffix(strings.Fields(lines[2])[8], "d") {
 		t.Errorf("owned VM row lacks owner/slot or age: %q", lines[2])
 	}
-	stdout, _, err = runSplit(t, ownedHandler(t), "inspect", "paseo-3")
+	stdout, _, err = runSplit(t, ownedBackend(), "inspect", "paseo-3")
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}

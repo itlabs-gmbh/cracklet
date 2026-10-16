@@ -22,10 +22,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Install shellcheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - name: Build guest daemon
-        run: make envd
       - name: Lint
         run: make lint
 
@@ -42,8 +38,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Build without embedded daemon (go install path)
-        run: go build ./... && go test ./internal/envdbin/ ./internal/app/
       - name: Test
         run: make test
       - name: Build CLI

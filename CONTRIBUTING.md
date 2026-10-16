@@ -13,39 +13,31 @@ rules are short. If something here is unclear, open an issue and ask.
 
 ## Development setup
 
-You need an Apple Silicon Mac with macOS 26+ to run VMs (the deprecated Lima
-backend needs an M3 or newer and macOS 15+).
+You need an Apple Silicon Mac with macOS 26+ to run VMs.
 Unit tests, `go vet` and `shellcheck` also run on Linux.
 
 ```sh
 git clone https://github.com/itlabs-gmbh/skiff.git
 cd skiff
-make envd     # cross-compile the guest daemon so `make build` embeds it
 make build    # -> bin/skiff
 make test     # unit tests with -race
-make lint     # gofmt, go vet, shellcheck
+make lint     # gofmt, go vet
 make e2e      # boots a real VM, needs `skiff prepare` first
 ```
 
 `make lint` and `make test` must pass before you open a pull request. CI runs
-the same targets, and additionally `go build ./...` without `make envd` so a
-plain `go install ...@latest` keeps working: the daemon directory
-`internal/envdbin/bin/` is embedded with the `all:` prefix and only holds a
-`.gitkeep` in a clean checkout.
+the same targets.
 
-Tools: Go 1.26+, `shellcheck` (`brew install shellcheck`).
+Tools: Go 1.26+.
 
 ## Repository layout
 
 | Path                | Purpose                                              |
 |---------------------|------------------------------------------------------|
 | `cmd/skiff`      | CLI entry point                                      |
-| `cmd/skiff-envd` | guest identity daemon, cross-compiled for linux/arm64 |
 | `internal/cli`      | cobra commands                                       |
 | `internal/app`      | workflows (prepare, new, ssh, forward, ...)          |
-| `internal/backend`  | backend interface; `container` (Apple's `container`) and `lima` (deprecated) |
-| `internal/lima`     | `limactl` wrapper and embedded Lima template (deprecated) |
-| `internal/agent`    | bash agent that runs inside the Lima VM (deprecated)  |
+| `internal/backend`  | backend interface, the `container` backend and an in-memory fake for tests |
 | `internal/host`     | host preflight checks (`skiff doctor`)            |
 | `internal/vm`       | VM spec and port-forward validation                  |
 | `internal/sshcfg`   | `~/.skiff/ssh_config` rendering                   |
@@ -63,10 +55,9 @@ Tools: Go 1.26+, `shellcheck` (`brew install shellcheck`).
   that takes the lock must never be called from under it.
 - **Guest image:** a change to the Dockerfile or the nftables ruleset in
   `internal/backend/container` bumps `imageRev`, so `skiff prepare` rebuilds.
-- **Bash (`internal/agent/agent.sh`, deprecated Lima backend):** must pass
-  `shellcheck -s bash`; state changes hold the agent `flock` and roll back.
 - **Tests:** every change comes with tests. Table-driven tests for pure logic,
-  fakes for `container`/`limactl`/`ssh` (see `internal/runner`).
+  fakes for `container`/`ssh` (see `internal/runner`) and the in-memory
+  backend in `internal/backend/backendtest` for app and cli.
 - **Security:** skiff's network isolation rules are documented in the
   README. A change that loosens them needs a written justification in the PR.
 

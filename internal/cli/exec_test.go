@@ -6,7 +6,7 @@ import (
 )
 
 func TestExecQuotesEveryArgument(t *testing.T) {
-	_, fake, err := run(t, "exec", "vm1", "--", "sh", "-c", "echo $HOME | wc -c", "it's", "")
+	_, _, fake, err := runWith(t, seededBackend(), "exec", "vm1", "--", "sh", "-c", "echo $HOME | wc -c", "it's", "")
 	if err != nil {
 		t.Fatalf("exec: %v", err)
 	}
@@ -17,7 +17,7 @@ func TestExecQuotesEveryArgument(t *testing.T) {
 }
 
 func TestExecWithoutSeparatorKeepsFlagsForRemote(t *testing.T) {
-	_, fake, err := run(t, "exec", "vm1", "ls", "-la")
+	_, _, fake, err := runWith(t, seededBackend(), "exec", "vm1", "ls", "-la")
 	if err != nil {
 		t.Fatalf("exec: %v", err)
 	}
@@ -27,7 +27,7 @@ func TestExecWithoutSeparatorKeepsFlagsForRemote(t *testing.T) {
 }
 
 func TestExecKeepsSecondSeparatorAsArgument(t *testing.T) {
-	_, fake, err := run(t, "exec", "vm1", "--", "printf", "%s", "--")
+	_, _, fake, err := runWith(t, seededBackend(), "exec", "vm1", "--", "printf", "%s", "--")
 	if err != nil {
 		t.Fatalf("exec: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestExecKeepsSecondSeparatorAsArgument(t *testing.T) {
 
 func TestExecRequiresCommand(t *testing.T) {
 	for _, args := range [][]string{{"exec", "vm1"}, {"exec", "vm1", "--"}} {
-		_, fake, err := run(t, args...)
+		_, _, fake, err := runWith(t, seededBackend(), args...)
 		if err == nil || !strings.Contains(err.Error(), "command") {
 			t.Errorf("%v: expected missing-command error, got %v", args, err)
 		}
@@ -58,7 +58,7 @@ func TestExecRejectsInvalidName(t *testing.T) {
 
 // ssh keeps plain-ssh semantics: the words form a shell command line.
 func TestSSHLeavesShellSyntaxToGuest(t *testing.T) {
-	_, fake, err := run(t, "ssh", "vm1", "echo $HOME | wc -c")
+	_, _, fake, err := runWith(t, seededBackend(), "ssh", "vm1", "echo $HOME | wc -c")
 	if err != nil {
 		t.Fatalf("ssh: %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/itlabs-gmbh/skiff/internal/backend/backendtest"
 	"github.com/itlabs-gmbh/skiff/internal/runner"
 	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
@@ -65,18 +66,18 @@ func fakeTunnel(ctx context.Context, name string) (string, func(), error) {
 	return "/tmp/fake-" + name + ".sock", func() {}, nil
 }
 
-func newGrantApp(t *testing.T, scripts *sshScripts, agent map[string]string) (*App, *runner.Fake) {
+func newGrantApp(t *testing.T, scripts *sshScripts, vms ...vm.Info) (*App, *runner.Fake) {
 	t.Helper()
-	fake := runner.NewFake(scripts.handle(defaultHandler(agent)))
+	fake := runner.NewFake(scripts.handle(sshOnly))
 	scripts.fake = fake
-	paths := testPaths(t)
-	app := New(fake, paths, &strings.Builder{}, WithEnvd(fakeEnvd), WithTunnel(fakeTunnel))
+	app := New(fake, testPaths(t), &strings.Builder{}, WithBackend(backendtest.New()), WithTunnel(fakeTunnel))
+	seed(app, vms...)
 	return app, fake
 }
 
 func TestGrantProvisionsGuestAndPersists(t *testing.T) {
 	scripts := &sshScripts{state: "/etc/skiff/manifest\n\n/root/.claude.json\n\n"}
-	app, fake := newGrantApp(t, scripts, nil)
+	app, fake := newGrantApp(t, scripts)
 	set, err := app.Grant(context.Background(), "agent1", []string{"claude", "github"})
 	if err != nil {
 		t.Fatalf("Grant: %v", err)
@@ -113,9 +114,9 @@ func TestGrantIsNotPersistedWhenProvisionFails(t *testing.T) {
 		if name == "ssh" {
 			return nil, errors.New("connection refused")
 		}
-		return defaultHandler(nil)(name, args)
+		return sshOnly(name, args)
 	})
-	app := New(fake, testPaths(t), &strings.Builder{}, WithEnvd(fakeEnvd), WithTunnel(fakeTunnel))
+	app := New(fake, testPaths(t), &strings.Builder{}, WithBackend(backendtest.New()), WithTunnel(fakeTunnel))
 	if _, err := app.Grant(context.Background(), "agent1", []string{"claude"}); err == nil {
 		t.Fatal("expected provision failure")
 	}
@@ -125,7 +126,7 @@ func TestGrantIsNotPersistedWhenProvisionFails(t *testing.T) {
 }
 
 func TestGrantValidation(t *testing.T) {
-	app, _ := newGrantApp(t, &sshScripts{}, nil)
+	app, _ := newGrantApp(t, &sshScripts{})
 	cases := map[string]string{
 		"nope":            "unknown capability",
 		"github:org/repo": "have no scopes",
@@ -146,7 +147,7 @@ func TestGrantValidation(t *testing.T) {
 
 func TestRevokeRemovesAndReprovisions(t *testing.T) {
 	scripts := &sshScripts{state: "/etc/skiff/manifest\n\n"}
-	app, _ := newGrantApp(t, scripts, nil)
+	app, _ := newGrantApp(t, scripts)
 	if _, err := app.Grant(context.Background(), "agent1", []string{"claude", "ssh-agent"}); err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +168,7 @@ func TestRevokeRemovesAndReprovisions(t *testing.T) {
 
 func TestRevokeIsAllOrNothing(t *testing.T) {
 	scripts := &sshScripts{state: "/etc/skiff/manifest\n\n"}
-	app, _ := newGrantApp(t, scripts, nil)
+	app, _ := newGrantApp(t, scripts)
 	if _, err := app.Grant(context.Background(), "agent1", []string{"claude", "github"}); err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +192,7 @@ func TestRevokeIsAllOrNothing(t *testing.T) {
 
 func TestSSHAttachesTunnelOnlyWithGrants(t *testing.T) {
 	scripts := &sshScripts{state: "/etc/skiff/manifest\n\n"}
-	app, fake := newGrantApp(t, scripts, nil)
+	app, fake := newGrantApp(t, scripts)
 	if err := app.SSH(context.Background(), "agent1", nil); err != nil {
 		t.Fatalf("SSH: %v", err)
 	}
@@ -220,7 +221,7 @@ func TestSSHAttachesTunnelOnlyWithGrants(t *testing.T) {
 
 func TestSSHAgentOnlyNeedsNoBroker(t *testing.T) {
 	calls := 0
-	app, fake := newGrantApp(t, &sshScripts{state: "/etc/skiff/manifest\n\n"}, nil)
+	app, fake := newGrantApp(t, &sshScripts{state: "/etc/skiff/manifest\n\n"})
 	app.tunnel = func(ctx context.Context, name string) (string, func(), error) {
 		calls++
 		return "", func() {}, nil
@@ -241,11 +242,8 @@ func TestSSHAgentOnlyNeedsNoBroker(t *testing.T) {
 
 func TestNewWithGrantsAndRemoveCleansState(t *testing.T) {
 	scripts := &sshScripts{state: "/etc/skiff/manifest\n\n"}
-	app, _ := newGrantApp(t, scripts, map[string]string{
-		"new": `{"name":"agent1","index":1,"ip":"172.16.1.2","state":"running"}`,
-		"rm":  "",
-	})
-	info, err := app.NewVM(context.Background(), vm.Spec{Name: "agent1", VCPUs: 2, MemMiB: 1024, Disk: "2G", Grants: []string{"claude"}})
+	app, _ := newGrantApp(t, scripts)
+	info, err := app.NewVM(context.Background(), vm.Spec{Name: "agent1", VCPUs: 2, MemMiB: 1024, Grants: []string{"claude"}})
 	if err != nil {
 		t.Fatalf("NewVM: %v", err)
 	}
@@ -265,9 +263,7 @@ func TestNewWithGrantsAndRemoveCleansState(t *testing.T) {
 }
 
 func TestListIncludesGrants(t *testing.T) {
-	app, _ := newGrantApp(t, &sshScripts{state: "/etc/skiff/manifest\n\n"}, map[string]string{
-		"ls": `[{"name":"agent1","index":1,"ip":"172.16.1.2","state":"running"}]`,
-	})
+	app, _ := newGrantApp(t, &sshScripts{state: "/etc/skiff/manifest\n\n"}, vm.Info{Name: "agent1"})
 	if _, err := app.Grant(context.Background(), "agent1", []string{"claude"}); err != nil {
 		t.Fatal(err)
 	}

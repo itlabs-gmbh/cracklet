@@ -106,16 +106,7 @@ func New(r runner.Runner, paths config.Paths, out, status io.Writer, opts ...Opt
 var _ backend.Backend = (*Backend)(nil)
 
 // Name implements backend.Backend.
-func (b *Backend) Name() string { return backend.NameContainer }
-
-// Capabilities implements backend.Backend: no snapshots (every boot is cold),
-// no profiles (the root disk is a sparse 512 GiB volume), no shared runtime
-// VM to resize. Forwards are served by the relay; the guest firewall is the
-// nftables guard rail baked into the image (firewall.go), which root inside
-// the guest can lift, unlike Lima's host-side rules.
-func (b *Backend) Capabilities() backend.Capabilities {
-	return backend.Capabilities{Forwards: true, GuestFirewall: true}
-}
+func (b *Backend) Name() string { return "container" }
 
 func (b *Backend) printf(format string, args ...any) { fmt.Fprintf(b.out, format, args...) }
 
@@ -144,7 +135,7 @@ func (b *Backend) runLong(ctx context.Context, args ...string) ([]byte, error) {
 
 // checkHost adds the backend's own requirements to the shared host checks:
 // macOS 26 (the only release `container` supports) and the CLI itself. The
-// shared nested-virtualization checks (M3, macOS 15) do not apply here.
+// host package keeps the shared facts and problem types.
 func checkHost(f host.Facts) []host.Problem {
 	if f.OS != "darwin" || f.Arch != "arm64" {
 		return []host.Problem{{Code: "platform", Fatal: true,
@@ -200,8 +191,7 @@ func (b *Backend) Alive(ctx context.Context) error {
 }
 
 // --enable-kernel-install lets `container system start` fetch Apple's default
-// guest kernel. skiff does not pin a digest for it, unlike the Firecracker
-// artifacts of the Lima backend: the kernel comes from the same signed Apple
+// guest kernel. skiff does not pin a digest for it: the kernel comes from the same signed Apple
 // release as the CLI that skiff already trusts to run the VMs, and the CLI
 // verifies the download itself. Pinning our own kernel is a Phase 4 option.
 var systemStartArgs = []string{"system", "start", "--enable-kernel-install"}
@@ -274,15 +264,6 @@ func (b *Backend) restoreKnownHosts(ctx context.Context, lock lockState) error {
 	return b.writeKnownHosts()
 }
 
-// ReadyToBoot implements backend.Backend. There is no shared runtime VM that a
-// resize could restart underneath a boot, so there is nothing to hold.
-func (b *Backend) ReadyToBoot(ctx context.Context) (func(), error) {
-	if err := b.Ready(ctx); err != nil {
-		return nil, err
-	}
-	return func() {}, nil
-}
-
 // Doctor implements backend.Backend.
 func (b *Backend) Doctor(ctx context.Context) error {
 	facts := b.gather(ctx)
@@ -314,13 +295,7 @@ func (b *Backend) Doctor(ctx context.Context) error {
 
 // Prepare implements backend.Backend: host check, CLI, system service, guest
 // image. Idempotent; the image is rebuilt only when its labels do not match.
-func (b *Backend) Prepare(ctx context.Context, o backend.PrepareOptions) error {
-	if o.Explicit != (backend.SizeFlags{}) {
-		return fmt.Errorf("--cpus, --memory and --disk size the shared Lima VM; the container backend has none (size VMs with 'skiff new --vcpus/--mem')")
-	}
-	if len(o.Profiles) > 0 {
-		b.printf("  note: profiles size the root disk of Firecracker images; container machines get a sparse disk and ignore --profile\n")
-	}
+func (b *Backend) Prepare(ctx context.Context) error {
 	if err := b.preflight(ctx); err != nil {
 		return err
 	}

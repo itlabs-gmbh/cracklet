@@ -1,5 +1,5 @@
 // Package sshcfg renders the ssh_config that lets `ssh <vm>.skiff` reach a
-// microVM through the backend's ProxyCommand.
+// VM through the backend's ProxyCommand.
 package sshcfg
 
 import (
@@ -18,10 +18,8 @@ type Options struct {
 	// ProxyCommand is the backend's way to the guest, with ssh's %h and %p
 	// placeholders for host and port.
 	ProxyCommand string
-	// KnownHostsFile, when set, holds the pinned host key of every microVM
-	// and turns strict host key checking on. Empty means the backend cannot
-	// pin keys (the Lima guests share one image-wide key behind a firewall)
-	// and ssh accepts whatever key it sees.
+	// KnownHostsFile holds the pinned host key of every VM; ssh refuses any
+	// other key under a VM's name.
 	KnownHostsFile string
 }
 
@@ -31,20 +29,15 @@ Host *.{{.Instance}}
   User root
   IdentityFile {{.KeyPath}}
   ProxyCommand {{.ProxyCommand}}
-{{- if .KnownHostsFile}}
   StrictHostKeyChecking yes
   UserKnownHostsFile {{.KnownHostsFile}}
-{{- else}}
-  StrictHostKeyChecking no
-  UserKnownHostsFile /dev/null
-{{- end}}
   LogLevel ERROR
 `))
 
 // Render produces the ssh_config text.
 func Render(o Options) (string, error) {
-	if o.Instance == "" || o.KeyPath == "" || o.ProxyCommand == "" {
-		return "", fmt.Errorf("instance, key path and proxy command are required")
+	if o.Instance == "" || o.KeyPath == "" || o.ProxyCommand == "" || o.KnownHostsFile == "" {
+		return "", fmt.Errorf("instance, key path, proxy command and known_hosts file are required")
 	}
 	if strings.ContainsAny(o.ProxyCommand+o.KeyPath+o.KnownHostsFile, "\n\r") {
 		return "", fmt.Errorf("ssh_config values must not contain line breaks")
@@ -60,7 +53,7 @@ func Render(o Options) (string, error) {
 	return buf.String(), nil
 }
 
-// HostAlias returns the ssh host name for a microVM.
+// HostAlias returns the ssh host name for a VM.
 func HostAlias(name, instance string) string {
 	return name + "." + instance
 }

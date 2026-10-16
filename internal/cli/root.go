@@ -13,34 +13,23 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/itlabs-gmbh/skiff/internal/app"
-	"github.com/itlabs-gmbh/skiff/internal/backend"
 	"github.com/itlabs-gmbh/skiff/internal/config"
 	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
-// appBuilder constructs the App once the output writer is known. backendName
-// is the choice `prepare --backend` made on this run, or "" to use the
-// stored one.
-type appBuilder func(out io.Writer, backendName string) (*app.App, error)
+// appBuilder constructs the App once the output writer is known.
+type appBuilder func(out io.Writer) (*app.App, error)
 
-func defaultBuilder(out io.Writer, backendName string) (*app.App, error) {
+func defaultBuilder(out io.Writer) (*app.App, error) {
 	paths, err := config.DefaultPaths()
 	if err != nil {
 		return nil, err
 	}
-	name := backendName
-	if name == "" {
-		if name, err = backend.LoadName(paths); err != nil {
-			return nil, err
-		}
-	} else if err := backend.ValidateName(name); err != nil {
-		return nil, err
-	}
-	return app.New(runner.NewExec(), paths, out, app.WithBackendName(name)), nil
+	return app.New(runner.NewExec(), paths, out), nil
 }
 
 // Main runs the CLI and returns the process exit code. Ctrl-C or SIGTERM
-// cancels the context so running limactl/ssh children are interrupted too.
+// cancels the context so running container/ssh children are interrupted too.
 func Main() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -79,7 +68,7 @@ stay on the Mac and are brokered into the VM per grant.`,
 			if wantsJSON(cmd) || cmd.Annotations[annotationStdoutIsData] != "" {
 				out = cmd.ErrOrStderr()
 			}
-			a, err = build(out, chosenBackend(cmd))
+			a, err = build(out)
 			return err
 		},
 	}

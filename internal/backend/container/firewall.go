@@ -1,10 +1,8 @@
 package container
 
 // nftablesConf is the guard rail inside every guest: the internet through
-// vmnet's NAT and nothing else. The Lima backend enforces the same policy on
-// the host side of its guests (agent.sh, render_firewall_batch); vmnet offers
-// no egress policy, so here the rules live in the guest, where root can lift
-// them. That is enough for the common failure, a careless agent, and the
+// vmnet's NAT and nothing else. vmnet offers no egress policy, so the rules
+// live in the guest, where root can lift them. That is enough for the common failure, a careless agent, and the
 // broker threat model does not rest on it (the guest only ever sees a
 // loopback tunnel). DNS and DHCP to private addresses stay open (the vmnet
 // gateway serves both, and its address is not known when the image is

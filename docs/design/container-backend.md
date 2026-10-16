@@ -370,8 +370,8 @@ makes. Options, in order of preference:
 4. **Forwards relay** as a detached process spawned by the CLI (launchd was
    the plan, see "Port forwards" for why not); in-guest nftables guard rail;
    host key pinning (shipped 2026-10-15).
-5. **Flip and delete** (flip, README, website and CLI texts done 2026-10-16;
-   deletion pending): default becomes `container`; a release later remove
+5. **Flip and delete** (done 2026-10-16: flip in PR #30, deletion in the
+   "remove Lima" PR): default becomes `container`; a release later remove
    `internal/lima`, `internal/agent`, `internal/envd*`, `cmd/skiff-envd`,
    the golden-snapshot docs, the M3/nested-virt preflight and the Lima section
    of the website. Users recreate their VMs (no migration code, as agreed).

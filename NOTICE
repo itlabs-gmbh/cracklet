@@ -7,7 +7,6 @@ skiff downloads and runs the following third-party components at
 `skiff prepare` time. They are not part of this repository and keep their
 own licenses:
 
-- Firecracker (Apache-2.0) — https://github.com/firecracker-microvm/firecracker
-- Linux guest kernel from the Firecracker CI artifacts (GPL-2.0)
-- Ubuntu 24.04 cloud image (various licenses, see https://ubuntu.com/legal)
-- Lima (Apache-2.0) — https://github.com/lima-vm/lima
+- Apple's container CLI (Apache-2.0) — https://github.com/apple/container
+- Apple's default Linux guest kernel, fetched by `container system start` (GPL-2.0)
+- Ubuntu 24.04 container image (various licenses, see https://ubuntu.com/legal)

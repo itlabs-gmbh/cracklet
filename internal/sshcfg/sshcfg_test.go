@@ -7,9 +7,10 @@ import (
 
 func TestRender(t *testing.T) {
 	out, err := Render(Options{
-		Instance:     "skiff",
-		KeyPath:      "/Users/me/.skiff/id_ed25519",
-		ProxyCommand: "ssh -F /Users/me/.lima/skiff/ssh.config -W %h:%p lima-skiff",
+		Instance:       "skiff",
+		KeyPath:        "/Users/me/.skiff/id_ed25519",
+		ProxyCommand:   "/usr/local/bin/skiff _dial %h %p",
+		KnownHostsFile: "/Users/me/.skiff/known_hosts",
 	})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
@@ -18,8 +19,9 @@ func TestRender(t *testing.T) {
 		"Host *.skiff",
 		"User root",
 		"IdentityFile /Users/me/.skiff/id_ed25519",
-		"ProxyCommand ssh -F /Users/me/.lima/skiff/ssh.config -W %h:%p lima-skiff",
-		"StrictHostKeyChecking no",
+		"ProxyCommand /usr/local/bin/skiff _dial %h %p",
+		"StrictHostKeyChecking yes",
+		"UserKnownHostsFile /Users/me/.skiff/known_hosts",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -31,8 +33,11 @@ func TestRenderRequiresFields(t *testing.T) {
 	if _, err := Render(Options{}); err == nil {
 		t.Error("expected error for empty options")
 	}
-	if _, err := Render(Options{Instance: "x", KeyPath: "/k", ProxyCommand: "evil\nHost *"}); err == nil {
+	if _, err := Render(Options{Instance: "x", KeyPath: "/k", ProxyCommand: "evil\nHost *", KnownHostsFile: "/kh"}); err == nil {
 		t.Error("a line break in a value must be rejected: it would inject config")
+	}
+	if _, err := Render(Options{Instance: "x", KeyPath: "/k", ProxyCommand: "p"}); err == nil {
+		t.Error("without a known_hosts file nothing pins host keys; it is required")
 	}
 }
 
@@ -47,7 +52,7 @@ func TestHostAliasRoundTrip(t *testing.T) {
 	}
 }
 
-func TestRenderPinsHostKeysWhenAKnownHostsFileIsGiven(t *testing.T) {
+func TestRenderPinsHostKeys(t *testing.T) {
 	out, err := Render(Options{
 		Instance:       "skiff",
 		KeyPath:        "/Users/me/.skiff/id_ed25519",

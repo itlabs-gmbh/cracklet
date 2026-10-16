@@ -7,6 +7,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+
+- **The Lima/Firecracker backend.** `prepare --backend`, `--cpus/--memory/
+  --disk/--profile` on `prepare`, `--disk/--profile/--fresh` on `new`, golden
+  snapshots, image profiles, the guest agent, the `skiff-envd` daemon and the
+  M3/macOS 15 preflight are gone; Apple's `container` is the only runtime.
+  `~/.skiff/backend` is ignored. Delete an old Lima instance with
+  `limactl delete cracklet` (or `skiff`).
+
 ### Changed
 
 - **The container backend is the default.** A new `~/.skiff` uses Apple's

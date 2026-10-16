@@ -1,5 +1,5 @@
 // Package app implements the skiff workflows on top of a backend that
-// creates the microVMs and the guest they expose over ssh.
+// creates the VMs and the guest they expose over ssh.
 package app
 
 import (
@@ -12,7 +12,6 @@ import (
 
 	"github.com/itlabs-gmbh/skiff/internal/backend"
 	"github.com/itlabs-gmbh/skiff/internal/backend/container"
-	"github.com/itlabs-gmbh/skiff/internal/backend/lima"
 	"github.com/itlabs-gmbh/skiff/internal/config"
 	"github.com/itlabs-gmbh/skiff/internal/host"
 	"github.com/itlabs-gmbh/skiff/internal/runner"
@@ -32,7 +31,6 @@ type App struct {
 	platform   hostPlatform
 	probe      PortProbe
 	portBusy   PortCheck
-	envd       EnvdSource
 	tunnel     Tunnel
 	// tunnelRetry is the pause before `skiff tunnel` reconnects.
 	tunnelRetry time.Duration
@@ -43,12 +41,8 @@ type App struct {
 	now func() time.Time
 }
 
-// EnvdSource yields the linux/arm64 skiff-envd binary that the Lima
-// backend ships into its VM.
-type EnvdSource = lima.EnvdSource
-
 // PortProbe reports whether 127.0.0.1:port on the Mac accepts connections,
-// waiting a little for Lima to expose a freshly forwarded port.
+// waiting a little for the relay to serve a freshly forwarded port.
 type PortProbe func(ctx context.Context, port int) bool
 
 // PortCheck reports immediately whether something already listens on
@@ -76,7 +70,7 @@ func WithLookPath(fn host.LookPathFunc) Option {
 	return func(a *App) { a.lookPath = fn }
 }
 
-// WithStatus overrides where progress notes such as starting the Lima VM go
+// WithStatus overrides where progress notes such as starting the runtime go
 // (stderr by default, so piped output of ssh and exec stays clean).
 func WithStatus(w io.Writer) Option {
 	return func(a *App) { a.status = w }
@@ -92,34 +86,14 @@ func WithPortCheck(c PortCheck) Option {
 	return func(a *App) { a.portBusy = c }
 }
 
-// WithEnvd overrides where the guest daemon binary comes from (used by tests).
-func WithEnvd(src EnvdSource) Option {
-	return func(a *App) { a.envd = src }
-}
-
-// WithBackend replaces the Lima backend New would otherwise wire. The same
-// instance also serves the silenced standby copy of the App, and WithEnvd and
-// WithLookPath no longer reach a backend (they configure the Lima one).
+// WithBackend replaces the container backend New would otherwise wire (used
+// by tests). The same instance also serves the silenced standby copy of the
+// App, and WithLookPath no longer reaches a backend.
 func WithBackend(b backend.Backend) Option {
 	return func(a *App) { a.newBackend = func(*App) backend.Backend { return b } }
 }
 
-// WithBackendName selects the backend by its name (see backend.LoadName,
-// which validates it); the App builds it from its own runner and writers.
-func WithBackendName(name string) Option {
-	return func(a *App) {
-		switch name {
-		case backend.NameContainer:
-			a.newBackend = containerBackend
-		case backend.NameLima:
-			a.newBackend = limaBackend
-		default:
-			panic("app: unknown backend " + name) // validated by backend.ValidateName before
-		}
-	}
-}
-
-// New wires an App. Without WithBackend or WithBackendName it drives the Lima backend.
+// New wires an App on the container backend unless WithBackend replaces it.
 func New(r runner.Runner, paths config.Paths, out io.Writer, opts ...Option) *App {
 	a := &App{r: r, paths: paths, out: out, status: os.Stderr,
 		lookPath: exec.LookPath, probe: waitForHostPort, portBusy: hostPortBusy, tunnelRetry: defaultTunnelRetry,
@@ -128,35 +102,16 @@ func New(r runner.Runner, paths config.Paths, out io.Writer, opts ...Option) *Ap
 		opt(a)
 	}
 	if a.newBackend == nil {
-		a.newBackend = limaBackend
+		a.newBackend = containerBackend
 	}
 	a.backend = a.newBackend(a)
 	return a
-}
-
-// backendNamed builds another backend on this App's runner and writers, for
-// the switch check in CheckBackendSwitch.
-func (a *App) backendNamed(name string) backend.Backend {
-	if name == backend.NameContainer {
-		return containerBackend(a)
-	}
-	return limaBackend(a)
 }
 
 // containerBackend builds the apple/container backend.
 func containerBackend(a *App) backend.Backend {
 	return container.New(a.r, a.paths, a.out, a.status,
 		container.WithFacts(a.gatherFacts), container.WithLookPath(a.lookPath))
-}
-
-// limaBackend builds the Lima backend from the App's runner, writers and the
-// options that concern it.
-func limaBackend(a *App) backend.Backend {
-	opts := []lima.Option{lima.WithFacts(a.gatherFacts), lima.WithLookPath(a.lookPath)}
-	if a.envd != nil {
-		opts = append(opts, lima.WithEnvd(a.envd))
-	}
-	return lima.New(a.r, a.paths, a.out, a.status, opts...)
 }
 
 func (a *App) gatherFacts(ctx context.Context) host.Facts {

@@ -98,11 +98,12 @@ func TestDialRejectsBadInputBeforeConnecting(t *testing.T) {
 }
 
 func TestDialSurfacesBackendError(t *testing.T) {
-	d := &dialBackend{err: backend.ErrNoDial}
+	noRoute := errors.New("no route to host")
+	d := &dialBackend{err: noRoute}
 	a := dialApp(t, d)
 	err := a.Dial(context.Background(), "vm1", 22, strings.NewReader(""), io.Discard)
-	if !errors.Is(err, backend.ErrNoDial) || !strings.Contains(err.Error(), "vm1:22") {
-		t.Errorf("want wrapped ErrNoDial naming the target, got %v", err)
+	if !errors.Is(err, noRoute) || !strings.Contains(err.Error(), "vm1:22") {
+		t.Errorf("want the wrapped error naming the target, got %v", err)
 	}
 }
 
@@ -184,22 +185,23 @@ func TestRelayRunsTheBackendsRelayOrRefuses(t *testing.T) {
 
 func TestSSHConfigIsRewrittenWhenTheBackendRendersSomethingElse(t *testing.T) {
 	a := dialApp(t, nil)
-	a.backend = &pinningBackend{dialBackend: &dialBackend{}, knownHosts: ""}
+	a.backend = &pinningBackend{dialBackend: &dialBackend{}, knownHosts: "/old/known_hosts"}
 	if err := a.ensureSSHConfig(); err != nil {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(a.paths.SSHConfigPath())
-	if !strings.Contains(string(before), "StrictHostKeyChecking no") {
+	if !strings.Contains(string(before), "UserKnownHostsFile /old/known_hosts") {
 		t.Fatalf("unexpected config:\n%s", before)
 	}
-	// An upgrade pins host keys: the next session must not keep the old file.
+	// A moved state directory renders another file: the next session must
+	// not keep the old config.
 	a.backend = &pinningBackend{dialBackend: &dialBackend{}, knownHosts: "/home/known_hosts"}
 	if err := a.ensureSSHConfig(); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(a.paths.SSHConfigPath())
-	if !strings.Contains(string(after), "StrictHostKeyChecking yes") {
-		t.Errorf("config not upgraded:\n%s", after)
+	if !strings.Contains(string(after), "UserKnownHostsFile /home/known_hosts") {
+		t.Errorf("config not rewritten:\n%s", after)
 	}
 	stat, _ := os.Stat(a.paths.SSHConfigPath())
 	if err := a.ensureSSHConfig(); err != nil {

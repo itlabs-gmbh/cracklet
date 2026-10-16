@@ -8,74 +8,84 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/backend/backendtest"
 	"github.com/itlabs-gmbh/skiff/internal/grant"
-	"github.com/itlabs-gmbh/skiff/internal/runner"
 	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 var gcNow = time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 
-// gcList has one VM of every kind gc has to tell apart.
-const gcList = `[
- {"name":"manual","state":"running","owner":null,"slot":null,"created_at":"2026-10-01T12:00:00Z"},
- {"name":"paseo-1","state":"running","owner":"paseo","slot":"1","created_at":"2026-10-07T09:00:00Z"},
- {"name":"paseo-2","state":"running","owner":"paseo","slot":"2","created_at":"2026-10-07T11:50:00Z"},
- {"name":"ci-7","state":"stopped","owner":"ci","slot":null,"created_at":"2026-10-07T07:00:00Z"},
- {"name":"undated","state":"broken","owner":"paseo","slot":null,"created_at":null},
- {"name":"paseo-9","state":"creating","owner":"paseo","slot":"9","created_at":"2026-10-07T08:00:00Z"},
- {"name":"paseo-4","state":"stopped","owner":"paseo","slot":"4","created_at":"2026-10-07T08:00:00Z"}
-]`
-
-// gcHandler serves gcList and records which VMs the agent removed; failRm
-// makes the removal of that VM fail. paseo-4 was removed by someone else
-// after the listing, so the agent reports it gone. Removed VMs vanish from
-// later listings.
-func gcHandler(removed *[]string, failRm string) runner.FakeHandler {
-	return gcHandlerReborn(removed, failRm, "")
-}
-
-// gcHandlerReborn is gcHandler where reborn is created again under the same
-// name right after gc removed it, as a concurrent `new --grant` would.
-func gcHandlerReborn(removed *[]string, failRm, reborn string) runner.FakeHandler {
-	vanished := map[string]bool{}
-	return func(name string, args []string) ([]byte, error) {
-		joined := strings.Join(args, " ")
-		if _, rest, ok := strings.Cut(joined, config.AgentPath+" rm "); ok {
-			vmName := strings.Fields(rest)[0]
-			switch vmName {
-			case failRm:
-				return nil, errors.New("agent rm: VM is wedged")
-			case "paseo-4":
-				vanished[vmName] = true
-				return []byte("gone\n"), nil
-			}
-			*removed = append(*removed, rest)
-			vanished[vmName] = vmName != reborn
-			return []byte("removed\n"), nil
-		}
-		if strings.HasSuffix(joined, config.AgentPath+" ls") {
-			return listWithout(vanished), nil
-		}
-		return defaultHandler(nil)(name, args)
-	}
-}
-
-func listWithout(vanished map[string]bool) []byte {
-	var vms []map[string]any
-	if err := json.Unmarshal([]byte(gcList), &vms); err != nil {
+func at(s string) *time.Time {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
 		panic(err)
 	}
-	kept := []map[string]any{}
-	for _, v := range vms {
-		if !vanished[v["name"].(string)] {
-			kept = append(kept, v)
+	return &t
+}
+
+// seedGC adds one VM of every kind gc has to tell apart. paseo-4 is removed
+// by someone else after the listing, so the backend reports it gone.
+func seedGC(fb *backendtest.Fake, failRm, reborn string) {
+	for _, v := range []vm.Info{
+		{Name: "manual", CreatedAt: at("2026-10-01T12:00:00Z")},
+		{Name: "paseo-1", Owner: "paseo", Slot: "1", CreatedAt: at("2026-10-07T09:00:00Z")},
+		{Name: "paseo-2", Owner: "paseo", Slot: "2", CreatedAt: at("2026-10-07T11:50:00Z")},
+		{Name: "ci-7", State: vm.StateStopped, Owner: "ci", CreatedAt: at("2026-10-07T07:00:00Z")},
+		{Name: "undated", State: vm.StateBroken, Owner: "paseo"},
+		{Name: "paseo-9", State: vm.StateCreating, Owner: "paseo", Slot: "9", CreatedAt: at("2026-10-07T08:00:00Z")},
+		{Name: "paseo-4", State: vm.StateStopped, Owner: "paseo", Slot: "4", CreatedAt: at("2026-10-07T08:00:00Z")},
+	} {
+		fb.Add(v)
+	}
+	fb.OnRemove = func(name string) error {
+		switch name {
+		case failRm:
+			return errors.New("rm: VM is wedged")
+		case "paseo-4":
+			fb.Drop(name) // vanished between the listing and the removal
+		}
+		return nil
+	}
+	fb.OnRemoved = func(name string) {
+		if name == reborn { // a concurrent `new --grant` creates it again
+			fb.Add(vm.Info{Name: name, Owner: "paseo", CreatedAt: at("2026-10-07T12:00:00Z")})
 		}
 	}
-	out, _ := json.Marshal(kept)
+}
+
+// removed lists the guarded removals the backend was asked for, as
+// "name owner created".
+func removed(fb *backendtest.Fake) []string {
+	var out []string
+	for _, c := range fb.Calls {
+		if rest, ok := strings.CutPrefix(c, "rm "); ok {
+			out = append(out, rest)
+		}
+	}
 	return out
 }
 
+func newGCApp(t *testing.T, failRm, reborn string) (*App, *backendtest.Fake) {
+	t.Helper()
+	a, _, _ := newTestApp(t, sshOnly)
+	a.now = func() time.Time { return gcNow }
+	seedGC(backendOf(a), failRm, reborn)
+	return a, backendOf(a)
+}
+
+func TestGCRemovesOnlyTheListedVM(t *testing.T) {
+	a, fb := newGCApp(t, "", "")
+	if _, err := a.GC(context.Background(), GCOptions{Owner: "paseo"}); err != nil {
+		t.Fatalf("GC: %v", err)
+	}
+	// owner and creation time let the backend refuse a VM recreated under the same name
+	want := "paseo-1 paseo 2026-10-07T09:00:00Z,paseo-2 paseo 2026-10-07T11:50:00Z,undated paseo -,paseo-4 paseo 2026-10-07T08:00:00Z"
+	if got := strings.Join(removed(fb), ","); got != want {
+		t.Errorf("rm calls %q, want %q", got, want)
+	}
+}
+
+// firstWords reduces "name owner created" lines to the names.
 func firstWords(calls []string) string {
 	out := make([]string, 0, len(calls))
 	for _, c := range calls {
@@ -84,24 +94,16 @@ func firstWords(calls []string) string {
 	return strings.Join(out, ",")
 }
 
-func TestGCRemovesOnlyTheListedVM(t *testing.T) {
-	var removed []string
-	a, _ := newGCApp(t, gcHandler(&removed, ""))
-	if _, err := a.GC(context.Background(), GCOptions{Owner: "paseo"}); err != nil {
-		t.Fatalf("GC: %v", err)
+// collected lists the VMs whose removal the backend carried out: paseo-4
+// vanished before its guarded rm, so it never counts.
+func collected(fb *backendtest.Fake) string {
+	var out []string
+	for _, r := range removed(fb) {
+		if name := strings.Fields(r)[0]; name != "paseo-4" {
+			out = append(out, name)
+		}
 	}
-	// owner and creation time let the agent refuse a VM recreated under the same name
-	want := "paseo-1 paseo 2026-10-07T09:00:00Z,paseo-2 paseo 2026-10-07T11:50:00Z,undated paseo -"
-	if got := strings.Join(removed, ","); got != want {
-		t.Errorf("rm calls %q, want %q", got, want)
-	}
-}
-
-func newGCApp(t *testing.T, handle runner.FakeHandler) (*App, *runner.Fake) {
-	t.Helper()
-	a, fake, _ := newTestApp(t, handle)
-	a.now = func() time.Time { return gcNow }
-	return a, fake
+	return strings.Join(out, ",")
 }
 
 func names(vms []VMInfo) string {
@@ -126,8 +128,7 @@ func TestGCSelectsOwnedVMs(t *testing.T) {
 		{GCOptions{Owner: "nobody"}, ""},
 	}
 	for _, c := range cases {
-		var removed []string
-		a, _ := newGCApp(t, gcHandler(&removed, ""))
+		a, fb := newGCApp(t, "", "")
 		res, err := a.GC(context.Background(), c.opts)
 		if err != nil {
 			t.Fatalf("GC(%+v): %v", c.opts, err)
@@ -135,15 +136,14 @@ func TestGCSelectsOwnedVMs(t *testing.T) {
 		if got := names(res.VMs); got != c.want {
 			t.Errorf("GC(%+v) reported %q, want %q", c.opts, got, c.want)
 		}
-		if got := firstWords(removed); got != c.want {
+		if got := collected(fb); got != c.want {
 			t.Errorf("GC(%+v) removed %q, want %q", c.opts, got, c.want)
 		}
 	}
 }
 
 func TestGCDryRunRemovesNothing(t *testing.T) {
-	var removed []string
-	a, _ := newGCApp(t, gcHandler(&removed, ""))
+	a, fb := newGCApp(t, "", "")
 	store := grant.Store{Dir: a.paths.VMsDir()}
 	if err := store.Save("ghost", grant.Set{{Cap: "claude"}}); err != nil {
 		t.Fatal(err)
@@ -155,8 +155,8 @@ func TestGCDryRunRemovesNothing(t *testing.T) {
 	if !res.DryRun || names(res.VMs) != "paseo-1,paseo-2,undated,paseo-4" || strings.Join(res.HostState, ",") != "ghost" {
 		t.Errorf("unexpected result: %+v", res)
 	}
-	if len(removed) != 0 {
-		t.Errorf("a dry run must not remove VMs, removed %v", removed)
+	if r := removed(fb); len(r) != 0 {
+		t.Errorf("a dry run must not remove VMs, removed %v", r)
 	}
 	if set, _ := store.Load("ghost"); len(set) != 1 {
 		t.Error("a dry run must not remove host state")
@@ -164,8 +164,7 @@ func TestGCDryRunRemovesNothing(t *testing.T) {
 }
 
 func TestGCPrunesHostStateOfVanishedVMs(t *testing.T) {
-	var removed []string
-	a, fake := newGCApp(t, gcHandler(&removed, ""))
+	a, fb := newGCApp(t, "", "")
 	store := grant.Store{Dir: a.paths.VMsDir()}
 	for _, name := range []string{"ghost", "manual", "paseo-1"} {
 		if err := store.Save(name, grant.Set{{Cap: "claude"}}); err != nil {
@@ -176,8 +175,8 @@ func TestGCPrunesHostStateOfVanishedVMs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GC: %v", err)
 	}
-	if len(res.VMs) != 0 || len(removed) != 0 {
-		t.Errorf("without --owner or --older-than gc removes no VM, got %+v / %v", res.VMs, removed)
+	if len(res.VMs) != 0 || len(removed(fb)) != 0 {
+		t.Errorf("without --owner or --older-than gc removes no VM, got %+v / %v", res.VMs, removed(fb))
 	}
 	if strings.Join(res.HostState, ",") != "ghost" {
 		t.Errorf("pruned %v, want [ghost]", res.HostState)
@@ -189,19 +188,18 @@ func TestGCPrunesHostStateOfVanishedVMs(t *testing.T) {
 	}
 	// the second listing is the liveness check under the VMs' locks
 	lists := 0
-	for _, c := range fake.Calls() {
-		if strings.HasSuffix(c, config.AgentPath+" ls") {
+	for _, c := range fb.Calls {
+		if c == "list" {
 			lists++
 		}
 	}
 	if lists != 2 {
-		t.Errorf("expected a re-check before pruning, got %d listings:\n%s", lists, fake.Dump())
+		t.Errorf("expected a re-check before pruning, got %d listings:\n%s", lists, fb.Dump())
 	}
 }
 
 func TestGCRemovesStateOfCollectedVMs(t *testing.T) {
-	var removed []string
-	a, _ := newGCApp(t, gcHandler(&removed, ""))
+	a, _ := newGCApp(t, "", "")
 	store := grant.Store{Dir: a.paths.VMsDir()}
 	if err := store.Save("paseo-1", grant.Set{{Cap: "claude"}}); err != nil {
 		t.Fatal(err)
@@ -215,8 +213,7 @@ func TestGCRemovesStateOfCollectedVMs(t *testing.T) {
 }
 
 func TestGCKeepsStateOfAVMRecreatedMeanwhile(t *testing.T) {
-	var removed []string
-	a, _ := newGCApp(t, gcHandlerReborn(&removed, "", "paseo-1"))
+	a, _ := newGCApp(t, "", "paseo-1")
 	store := grant.Store{Dir: a.paths.VMsDir()}
 	if err := store.Save("paseo-1", grant.Set{{Cap: "claude"}}); err != nil {
 		t.Fatal(err)
@@ -238,8 +235,7 @@ func TestGCKeepsStateOfAVMRecreatedMeanwhile(t *testing.T) {
 }
 
 func TestGCPrunesStateOfAVMGoneMeanwhile(t *testing.T) {
-	var removed []string
-	a, _ := newGCApp(t, gcHandler(&removed, ""))
+	a, _ := newGCApp(t, "", "")
 	store := grant.Store{Dir: a.paths.VMsDir()}
 	if err := store.Save("paseo-4", grant.Set{{Cap: "claude"}}); err != nil {
 		t.Fatal(err)
@@ -257,14 +253,13 @@ func TestGCPrunesStateOfAVMGoneMeanwhile(t *testing.T) {
 }
 
 func TestGCContinuesAfterAFailedRemoval(t *testing.T) {
-	var removed []string
-	a, _ := newGCApp(t, gcHandler(&removed, "paseo-1"))
+	a, fb := newGCApp(t, "paseo-1", "")
 	res, err := a.GC(context.Background(), GCOptions{Owner: "paseo"})
 	if err == nil || !strings.Contains(err.Error(), "paseo-1") {
 		t.Fatalf("expected an error naming paseo-1, got %v", err)
 	}
-	if firstWords(removed) != "paseo-2,undated" || names(res.VMs) != "paseo-2,undated" {
-		t.Errorf("the other VMs must still be collected: removed %v, reported %q", removed, names(res.VMs))
+	if got := strings.Replace(collected(fb), "paseo-1,", "", 1); got != "paseo-2,undated" || names(res.VMs) != "paseo-2,undated" {
+		t.Errorf("the other VMs must still be collected: removed %v, reported %q", removed(fb), names(res.VMs))
 	}
 }
 
@@ -275,36 +270,34 @@ func TestGCRejectsInvalidOptions(t *testing.T) {
 		{OlderThan: -time.Hour},
 		{Owner: "paseo", Keep: []string{"../etc"}},
 	} {
-		a, fake := newGCApp(t, gcHandler(new([]string), ""))
+		a, fb := newGCApp(t, "", "")
 		if _, err := a.GC(context.Background(), opts); err == nil {
 			t.Errorf("GC(%+v) expected an error", opts)
 		}
-		if len(fake.Calls()) != 0 {
-			t.Errorf("GC(%+v) must not run commands, got:\n%s", opts, fake.Dump())
+		if len(fb.Calls) != 0 {
+			t.Errorf("GC(%+v) must not touch the backend, got:\n%s", opts, fb.Dump())
 		}
 	}
 }
 
 func TestNewPassesOwnerAndSlot(t *testing.T) {
 	cases := map[string]vm.Spec{
-		// the Mac stamps owned VMs, in UTC, because gc measures ages with its clock
-		" new vm1 2 1024 2G snapshot base paseo 3 2026-10-07T12:00:00Z": {Name: "vm1", VCPUs: 2, MemMiB: 1024, Owner: "paseo", Slot: "3"},
-		" new vm1 2 1024 2G snapshot base paseo - 2026-10-07T12:00:00Z": {Name: "vm1", VCPUs: 2, MemMiB: 1024, Owner: "paseo"},
+		"create vm1 2 1024 paseo 3": {Name: "vm1", VCPUs: 2, MemMiB: 1024, Owner: "paseo", Slot: "3"},
+		"create vm1 2 1024 paseo ":  {Name: "vm1", VCPUs: 2, MemMiB: 1024, Owner: "paseo"},
 	}
 	for want, spec := range cases {
-		a, fake, _ := newTestApp(t, defaultHandler(map[string]string{
-			"new": `{"name":"vm1","state":"running","owner":"paseo","slot":"3","created_at":"2026-10-07T12:00:00Z"}`,
-		}))
+		a, _, _ := newTestApp(t, sshOnly)
+		// the Mac stamps owned VMs, in UTC, because gc measures ages with its clock
 		a.now = func() time.Time { return gcNow.In(time.FixedZone("CEST", 2*3600)) }
 		info, err := a.NewVM(context.Background(), spec)
 		if err != nil {
 			t.Fatalf("NewVM: %v", err)
 		}
-		if !fake.CalledWithSuffix(config.AgentPath + want) {
-			t.Errorf("expected agent call ending in %q, got:\n%s", want, fake.Dump())
+		if !backendOf(a).Called(want) {
+			t.Errorf("expected call %q, got:\n%s", want, backendOf(a).Dump())
 		}
-		if info.Owner != "paseo" || info.Slot != "3" || info.CreatedAt == nil || !info.CreatedAt.Equal(gcNow) {
-			t.Errorf("metadata not parsed: %+v", info)
+		if info.Owner != "paseo" || info.Slot != spec.Slot || info.CreatedAt == nil || !info.CreatedAt.Equal(gcNow) {
+			t.Errorf("metadata not kept: %+v", info)
 		}
 	}
 }
@@ -329,7 +322,7 @@ func TestVMInfoJSONKeepsMetadataKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// consumers see the same keys for every VM, as the agent reports them
+	// consumers see the same keys for every VM
 	if !strings.Contains(string(data), `"owner":"","slot":"","created_at":null`) {
 		t.Errorf("metadata keys missing: %s", data)
 	}
@@ -338,20 +331,15 @@ func TestVMInfoJSONKeepsMetadataKeys(t *testing.T) {
 func TestNewVMPrunesLeftoversBeforeTheVMRuns(t *testing.T) {
 	store := grant.Store{}
 	var leftoverAtCreate []string
-	a, _, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
-		joined := strings.Join(args, " ")
-		switch {
-		case strings.HasSuffix(joined, config.AgentPath+" ls"):
-			return []byte(`[{"name":"agent1","state":"running"}]`), nil
-		case strings.Contains(joined, config.AgentPath+" new "):
-			// the broker reads grants by name as soon as the VM runs
-			leftoverAtCreate, _ = store.Names()
-			return []byte(`{"name":"vm3","state":"running"}`), nil
-		}
-		return defaultHandler(nil)(name, args)
-	})
+	a, _, _ := newTestApp(t, sshOnly)
+	seed(a, vm.Info{Name: "agent1"})
+	backendOf(a).OnCreate = func(context.Context, vm.Spec) error {
+		// the broker reads grants by name as soon as the VM runs
+		leftoverAtCreate, _ = store.Names()
+		return nil
+	}
 	store.Dir = a.paths.VMsDir()
-	for _, vmName := range []string{"agent1", "vm3"} { // vm3: an earlier VM the agent will auto-name again
+	for _, vmName := range []string{"agent1", "vm1"} { // vm1: an earlier VM the backend will auto-name again
 		if err := store.Save(vmName, grant.Set{{Cap: "claude"}}); err != nil {
 			t.Fatal(err)
 		}
@@ -370,10 +358,12 @@ func TestNewVMPrunesLeftoversBeforeTheVMRuns(t *testing.T) {
 func TestNewVMStartsWithoutLeftoverGrants(t *testing.T) {
 	// paseo-1 still existed when NewVM pruned and was replaced right after
 	// (gc removing it); the clear after creation catches that ordering
-	a, _, _ := newTestApp(t, defaultHandler(map[string]string{
-		"ls":  `[{"name":"paseo-1","state":"running","owner":"paseo"}]`,
-		"new": `{"name":"paseo-1","state":"running","owner":"paseo","slot":"1","created_at":"2026-10-07T12:00:00Z"}`,
-	}))
+	a, _, _ := newTestApp(t, sshOnly)
+	seed(a, vm.Info{Name: "paseo-1", Owner: "paseo"})
+	backendOf(a).OnCreate = func(_ context.Context, spec vm.Spec) error {
+		backendOf(a).Drop(spec.Name) // gc removed the old one just now
+		return nil
+	}
 	store := grant.Store{Dir: a.paths.VMsDir()}
 	// state of an earlier paseo-1 that gc kept because the new one already existed
 	if err := store.Save("paseo-1", grant.Set{{Cap: "github"}}); err != nil {
@@ -397,29 +387,27 @@ func TestNewVMStartsWithoutLeftoverGrants(t *testing.T) {
 func TestNewVMKeepsAGrantGivenWhileItStarts(t *testing.T) {
 	store := grant.Store{}
 	granted := make(chan struct{})
-	a, _, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
-		if strings.Contains(strings.Join(args, " "), config.AgentPath+" new ") {
-			// `skiff grant box claude` in another terminal, as soon as box runs
-			go func() {
-				defer close(granted)
-				unlock, err := store.Lock("box")
-				if err != nil {
-					t.Error(err)
-					return
-				}
-				defer unlock()
-				if err := store.Save("box", grant.Set{{Cap: "claude"}}); err != nil {
-					t.Error(err)
-				}
-			}()
-			select { // give it the chance to land before NewVM clears
-			case <-granted:
-			case <-time.After(100 * time.Millisecond):
+	a, _, _ := newTestApp(t, sshOnly)
+	backendOf(a).OnCreate = func(context.Context, vm.Spec) error {
+		// `skiff grant box claude` in another terminal, as soon as box runs
+		go func() {
+			defer close(granted)
+			unlock, err := store.Lock("box")
+			if err != nil {
+				t.Error(err)
+				return
 			}
-			return []byte(`{"name":"box","state":"running"}`), nil
+			defer unlock()
+			if err := store.Save("box", grant.Set{{Cap: "claude"}}); err != nil {
+				t.Error(err)
+			}
+		}()
+		select { // give it the chance to land before NewVM clears
+		case <-granted:
+		case <-time.After(100 * time.Millisecond):
 		}
-		return defaultHandler(nil)(name, args)
-	})
+		return nil
+	}
 	store.Dir = a.paths.VMsDir()
 	if _, err := a.NewVM(context.Background(), vm.Spec{Name: "box", VCPUs: 2, MemMiB: 1024}); err != nil {
 		t.Fatalf("NewVM: %v", err)
@@ -431,12 +419,9 @@ func TestNewVMKeepsAGrantGivenWhileItStarts(t *testing.T) {
 }
 
 func TestNewVMCancelledWhileWaitingLeavesTheOtherVMAlone(t *testing.T) {
-	a, fake, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
-		if strings.Contains(strings.Join(args, " "), config.AgentPath+" new ") {
-			return nil, errors.New("signal: killed") // limactl under a cancelled context
-		}
-		return defaultHandler(map[string]string{"rm": ""})(name, args)
-	})
+	a, _, _ := newTestApp(t, sshOnly)
+	fb := backendOf(a)
+	fb.OnCreate = func(context.Context, vm.Spec) error { return errors.New("signal: killed") }
 	store := grant.Store{Dir: a.paths.VMsDir()}
 	// another `skiff new box` is creating box and holds its grant lock
 	unlock, err := store.Lock("box")
@@ -455,26 +440,22 @@ func TestNewVMCancelledWhileWaitingLeavesTheOtherVMAlone(t *testing.T) {
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Errorf("want the cancellation, got %v", err)
 	}
-	for _, c := range fake.Calls() {
-		if strings.Contains(c, config.AgentPath+" rm ") || strings.Contains(c, config.AgentPath+" new ") {
+	for _, c := range fb.Calls {
+		if strings.HasPrefix(c, "rm ") || strings.HasPrefix(c, "create ") {
 			t.Errorf("a call cancelled before it created anything must not touch box: %s", c)
 		}
 	}
 }
 
 func TestNewVMKeepsGrantsWhenTheNameIsTaken(t *testing.T) {
-	a, _, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
-		if strings.Contains(strings.Join(args, " "), config.AgentPath+" new ") {
-			return nil, errors.New("agent new: VM 'paseo-1' already exists")
-		}
-		return defaultHandler(nil)(name, args)
-	})
+	a, _, _ := newTestApp(t, sshOnly)
+	seed(a, vm.Info{Name: "paseo-1"})
 	store := grant.Store{Dir: a.paths.VMsDir()}
 	if err := store.Save("paseo-1", grant.Set{{Cap: "claude"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.NewVM(context.Background(), vm.Spec{Name: "paseo-1", VCPUs: 2, MemMiB: 1024}); err == nil {
-		t.Fatal("expected the agent's error")
+		t.Fatal("expected the backend's error")
 	}
 	if set, _ := store.Load("paseo-1"); len(set) != 1 {
 		t.Error("a failed new must not touch the grants of the existing VM")

@@ -30,11 +30,11 @@ func TestForwardRendering(t *testing.T) {
 }
 
 func TestSpecValidatesForwards(t *testing.T) {
-	ok := Spec{Name: "web", VCPUs: 1, MemMiB: 256, Disk: "2G", Forwards: []string{"8080:80", "3000"}}
+	ok := Spec{Name: "web", VCPUs: 1, MemMiB: 1024, Forwards: []string{"8080:80", "3000"}}
 	if err := ok.Validate(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	bad := Spec{Name: "web", VCPUs: 1, MemMiB: 256, Disk: "2G", Forwards: []string{"80"}}
+	bad := Spec{Name: "web", VCPUs: 1, MemMiB: 1024, Forwards: []string{"80"}}
 	if err := bad.Validate(); err == nil {
 		t.Fatal("privileged host port must be rejected")
 	}

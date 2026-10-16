@@ -15,7 +15,10 @@ func TestBackendSwitchRefusedWhileLimaHasVMs(t *testing.T) {
 	a, _, _ := newTestApp(t, defaultHandler(map[string]string{
 		"ls": `[{"name":"vm1","index":1,"ip":"172.16.1.2","state":"running"}]`,
 	}))
-	// The stored choice is lima (default); the App was built for container.
+	// The stored choice is lima; the App was built for container.
+	if err := backend.SaveName(a.paths, backend.NameLima); err != nil {
+		t.Fatal(err)
+	}
 	a.backend = containerBackend(a)
 	err := a.CheckBackendSwitch(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "still has VMs (vm1)") {
@@ -26,6 +29,9 @@ func TestBackendSwitchRefusedWhileLimaHasVMs(t *testing.T) {
 func TestBackendSwitchRefusedWhileGrantsExist(t *testing.T) {
 	a, fake, _ := newTestApp(t, defaultHandler(map[string]string{"ls": `[]`}))
 	if err := a.grantStore().Save("old", grant.Set{}.Add(grant.Grant{Cap: "claude"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.SaveName(a.paths, backend.NameLima); err != nil {
 		t.Fatal(err)
 	}
 	a.backend = containerBackend(a)

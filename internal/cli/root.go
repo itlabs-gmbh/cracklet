@@ -68,10 +68,10 @@ func newRoot(build appBuilder) *cobra.Command {
 	var a *app.App
 	root := &cobra.Command{
 		Use:   "skiff",
-		Short: "Firecracker microVMs on your Mac",
-		Long: `skiff runs real Firecracker microVMs on Apple Silicon. A single Lima VM with
-nested virtualization hosts Firecracker; every microVM gets its own kernel,
-root disk, IP address and SSH access.`,
+		Short: "A fresh Linux VM on your Mac in half a second",
+		Long: `skiff creates throwaway Linux VMs on Apple Silicon, one per task or agent. Every
+VM gets its own kernel, root disk, IP address and root SSH access; credentials
+stay on the Mac and are brokered into the VM per grant.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) (err error) {

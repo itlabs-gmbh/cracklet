@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Start with one microVM – skiff docs</title>
-  <meta name="description" content="Install skiff on Apple Silicon, start a Firecracker microVM, reach it over SSH and forward its ports. Quickstart and command reference.">
+  <meta name="description" content="Install skiff on Apple Silicon, start a Linux VM, reach it over SSH and forward its ports. Quickstart and command reference.">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#232323" media="(prefers-color-scheme: dark)">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -30,13 +30,13 @@
     </nav>
 
     <h1>Start with one microVM</h1>
-    <p class="lead">Install skiff, start a Firecracker microVM on your Mac, reach it over SSH and bring its ports to localhost.</p>
+    <p class="lead">Install skiff, start a Linux VM on your Mac, reach it over SSH and bring its ports to localhost.</p>
 
     <div class="prose">
 
       <section id="install">
         <h2>Install</h2>
-        <p>skiff needs an Apple M3 or newer (nested virtualization is an M3 hardware feature), macOS 15 or newer, Homebrew and Go 1.26+. Check a Mac with <code>skiff doctor</code>.</p>
+        <p>skiff needs Apple Silicon, macOS 26 or newer (what Apple's <code>container</code> supports), Homebrew and Go 1.26+. Check a Mac with <code>skiff doctor</code>.</p>
         <div class="cmd" data-copy="go install github.com/itlabs-gmbh/skiff/cmd/skiff@latest">
           <span class="prompt" aria-hidden="true">$</span>
           <span class="text">go install github.com/itlabs-gmbh/skiff/cmd/skiff@latest</span>
@@ -47,7 +47,7 @@
           <span class="text">skiff prepare</span>
           <button type="button" aria-label="Copy skiff prepare to the clipboard"></button>
         </div>
-        <p><code>prepare</code> is a one-time setup of a few minutes and safe to run again. It creates one Lima VM with nested virtualization (4 CPUs, 8 GiB, 40 GiB disk by default), installs the upstream Firecracker binary, downloads the guest kernel and an Ubuntu 24.04 image, verifies all three against pinned SHA-256 digests and writes an SSH key pair to <code>~/.skiff</code>. The Lima VM mounts nothing from your Mac.</p>
+        <p><code>prepare</code> is a one-time setup of about a minute and safe to run again. It installs Apple's <code>container</code> through Homebrew if needed, starts its service, builds the guest image (Ubuntu 24.04 with systemd, sshd, your key and an internet-only firewall) and writes an SSH key pair to <code>~/.skiff</code>.</p>
       </section>
 
       <section id="first-vm">
@@ -57,7 +57,7 @@
           <span class="text">skiff new dev</span>
           <button type="button" aria-label="Copy skiff new dev to the clipboard"></button>
         </div>
-<pre class="code">dev is running at 172.16.1.2
+<pre class="code">dev is running at 192.168.64.2
 <span class="dim">  skiff ssh dev</span>
 <span class="dim">  ssh dev.skiff</span></pre>
         <p><code>new</code> does not boot. It restores a <em>golden snapshot</em>: a fully booted VM frozen together with its memory, then gives the clone its own IP, hostname, clock and fresh entropy. The first <code>new</code> for a given size builds that snapshot (about 15 seconds); every later one takes about three. Without a name, VMs are called <code>vm1</code>, <code>vm2</code> and so on.</p>
@@ -72,7 +72,7 @@
           <span class="text">Include ~/.skiff/ssh_config</span>
           <button type="button" aria-label="Copy the ssh config Include line to the clipboard"></button>
         </div>
-        <p>Then <code>ssh dev.skiff</code> works from anywhere. It jumps through the Lima VM, so neither port forwarding nor <code>sudo</code> is needed on macOS.</p>
+        <p>Then <code>ssh dev.skiff</code> works from anywhere. skiff's ProxyCommand connects to the VM and verifies the host key pinned at creation, so neither port forwarding nor <code>sudo</code> is needed on macOS.</p>
       </section>
 
       <section id="size">
@@ -104,7 +104,7 @@
 
       <section id="network">
         <h2>What a microVM can reach</h2>
-        <p>The internet, through NAT, and nothing else: not other microVMs, not your Mac, not your LAN, not services on the Lima VM. Packets with a foreign source address are dropped and IPv6 is off on every tap. The only controlled way back to the Mac is the <a href="capabilities.html">capability broker</a>.</p>
+        <p>The internet, through NAT, and nothing else: a firewall in the guest rejects your Mac, your LAN and other VMs. Root in the VM can lift it, so treat it as a guard rail. The only controlled way back to the Mac is the <a href="capabilities.html">capability broker</a>.</p>
       </section>
 
       <section id="commands">
@@ -115,7 +115,7 @@
             <thead><tr><th>Command</th><th>What it does</th></tr></thead>
             <tbody>
               <tr><td><code>doctor</code></td><td>Explain what this Mac is missing.</td></tr>
-              <tr><td><code>prepare [--cpus N --memory GiB --disk GiB] [--profile P]</code></td><td>Set up or update Lima, Firecracker, kernel and images. Size flags on an existing Lima VM resize it in place; stop microVMs first.</td></tr>
+              <tr><td><code>prepare [--backend container|lima]</code></td><td>Set up or update the backend runtime and the guest image.</td></tr>
               <tr><td><code>new [NAME] [--vcpus --mem --disk --profile --fresh]</code></td><td>Create a microVM from the golden snapshot; <code>--fresh</code> cold-boots.</td></tr>
               <tr><td><code>new … -p [HOST:]GUEST --grant CAP</code></td><td>Forward ports and grant capabilities right away.</td></tr>
               <tr><td><code>new … --owner NAME --slot N</code></td><td>Label a VM a tool manages, for <code>gc</code>.</td></tr>
@@ -141,10 +141,10 @@
         <h2>Troubleshooting</h2>
         <ul>
           <li>Exit code 255 from <code>ssh</code> or <code>exec</code> means the connection failed; check <code>skiff ls</code>.</li>
-          <li>After a reboot of the Mac, the next <code>skiff</code> command starts the Lima VM and the microVMs that were running come back; ones stopped with <code>skiff stop</code> stay stopped. If one fails to boot, <code>skiff start NAME</code> retries it.</li>
+          <li>After a reboot of the Mac, the next <code>skiff</code> command starts the container service and the VMs that were running come back; ones stopped with <code>skiff stop</code> stay stopped. If one fails to boot, <code>skiff start NAME</code> retries it.</li>
           <li><code>broken</code> in <code>skiff ls</code> means damaged metadata; <code>skiff rm NAME</code> cleans it up.</li>
-          <li>Console of a VM: <code>limactl shell skiff sudo cat /var/lib/skiff/vms/NAME/console.log</code></li>
-          <li>Reset everything: <code>limactl delete -f skiff &amp;&amp; rm -rf ~/.skiff</code></li>
+          <li>Boot log of a VM: <code>container machine logs NAME</code>; port forwards: <code>~/.skiff/relay.log</code></li>
+          <li>Reset everything: <code>skiff rm</code> each VM, then <code>rm -rf ~/.skiff</code></li>
         </ul>
       </section>
 
@@ -155,7 +155,7 @@
           <span class="text">skiff stop dev</span>
           <button type="button" aria-label="Copy skiff stop dev to the clipboard"></button>
         </div>
-        <p>Stop keeps the disk; <code>rm</code> is a separate step. A microVM's disk lives inside the Lima VM, so <code>limactl delete skiff</code> takes every VM with it.</p>
+        <p>Stop keeps the disk; <code>rm</code> is a separate step.</p>
       </section>
 
     </div>

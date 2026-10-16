@@ -18,8 +18,8 @@ func newPrepareCmd(get func() *app.App) *cobra.Command {
 		Short: "Set up the backend runtime and the guest images (idempotent)",
 		Long: "Set up the backend runtime and the guest images (idempotent).\n\n" +
 			"--backend picks how microVMs run and is remembered in ~/.skiff/backend:\n" +
-			"  lima       Firecracker inside a Lima VM with nested virtualization (default)\n" +
-			"  container  one Virtualization.framework VM per microVM via Apple's container\n\n" +
+			"  container  one Virtualization.framework VM per microVM via Apple's container (default)\n" +
+			"  lima       Firecracker inside a Lima VM with nested virtualization (deprecated)\n\n" +
 			"--cpus, --memory and --disk size a new Lima VM. Given explicitly on an existing\n" +
 			"one, they resize it in place: the Lima VM restarts, so stop running microVMs first.\n" +
 			"The disk can only grow. The container backend has no shared VM to size.",

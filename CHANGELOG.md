@@ -9,6 +9,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **The container backend is the default.** A new `~/.skiff` uses Apple's
+  `container`; `skiff prepare --backend lima` still selects the deprecated
+  Firecracker-in-Lima backend until it is removed. README, website and the
+  CLI texts describe the container backend first; the tagline is now
+  "A fresh Linux VM on your Mac in half a second".
+
 - **cracklet is now skiff.** The binary, the module path
   (`github.com/itlabs-gmbh/skiff`), the state directory (`~/.skiff`,
   `SKIFF_HOME`), the ssh alias (`ssh <vm>.skiff`), the guest image

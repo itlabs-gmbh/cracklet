@@ -14,9 +14,10 @@ import (
 const (
 	NameLima      = "lima"
 	NameContainer = "container"
-	// DefaultName is used while no choice has been stored. It flips to
-	// NameContainer in phase 5 of docs/design/container-backend.md.
-	DefaultName = NameLima
+	// DefaultName is used while no choice has been stored. The Lima backend
+	// stays selectable until phase 5 of docs/design/container-backend.md
+	// removes it.
+	DefaultName = NameContainer
 )
 
 // Names lists the selectable backends.

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agent guides – skiff docs</title>
-  <meta name="description" content="Run Claude Code and other coding agents in their own Firecracker microVM on your Mac, with GitHub, MCP servers and SSH keys handed in through the broker.">
+  <meta name="description" content="Run Claude Code and other coding agents in their own Linux VM on your Mac, with GitHub, MCP servers and SSH keys handed in through the broker.">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#232323" media="(prefers-color-scheme: dark)">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -182,7 +182,7 @@
           <span class="text">for n in a b c; do skiff new agent-$n --profile paseo --grant claude --grant github; done</span>
           <button type="button" aria-label="Copy the loop that creates three agent VMs to the clipboard"></button>
         </div>
-        <p>All microVMs share the Lima VM's CPUs and memory. The defaults (4 CPUs, 8 GiB) fit about two or three task VMs at a time; grow it while no microVM runs with <code>skiff prepare --cpus 8 --memory 16</code>.</p>
+        <p>Each VM gets the CPUs and memory you pass with <code>--vcpus</code> and <code>--mem</code> (at least 1 GiB); the Mac's own resources are the only limit.</p>
 
         <h3>Pools owned by a tool</h3>
         <p>A tool that keeps a pool of agent VMs labels them with an owner and a slot. <code>skiff ls</code> shows both in <code>OWNER</code> and the age in <code>AGE</code>:</p>

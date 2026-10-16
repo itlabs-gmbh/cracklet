@@ -12,7 +12,7 @@ import (
 	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
-const testVersion = "v0.0.0-20261006143901-0b5ed29f8468"
+const testVersion = "v0.0.0-20261015181303-cc10579fd691"
 
 func goFound(name string) (string, error) {
 	if name == "go" {

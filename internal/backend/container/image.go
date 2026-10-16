@@ -15,8 +15,9 @@ import (
 const (
 	// ImageRef is the guest image every machine boots from.
 	ImageRef = "skiff/guest:latest"
-	// imageRev is bumped whenever the Dockerfile or nftables.conf changes.
-	imageRev = "3"
+	// imageRev is bumped whenever the Dockerfile, nftables.conf or the banner
+	// changes.
+	imageRev = "4"
 	labelRev = "skiff.rev"
 	labelKey = "skiff.key"
 )
@@ -24,10 +25,10 @@ const (
 // dockerfile is the guest image: Ubuntu with systemd as PID 1 (the machine
 // init execs /sbin/init), sshd for root with skiff's key, networkd DHCP so
 // the guest takes the address `machine ls` reports, the nftables guard rail
-// (firewall.go) and the tools the provisioning scripts (internal/guest) rely
-// on. The key and the ruleset are copied from the build context, never
-// interpolated into a shell line. Only the labels are formatted in, and they
-// are hex and a constant.
+// (firewall.go), the login banner (motd.go) and the tools the provisioning
+// scripts (internal/guest) rely on. The key, the ruleset and the banner are
+// copied from the build context, never interpolated into a shell line. Only
+// the labels are formatted in, and they are hex and a constant.
 //
 // apt generates host keys while the image is built; they are removed again
 // and every VM makes its own on first boot (the drop-in runs before sshd's
@@ -46,9 +47,11 @@ RUN printf '[Match]\nName=e*\n\n[Network]\nDHCP=yes\n' > /etc/systemd/network/10
     && printf 'PermitRootLogin prohibit-password\nHostKey /etc/ssh/ssh_host_ed25519_key\n' > /etc/ssh/sshd_config.d/10-skiff.conf \
     && install -d -m 0700 /root/.ssh
 RUN rm -f /etc/ssh/ssh_host_*
+RUN rm -f /etc/update-motd.d/* /etc/motd && : > /etc/legal && install -d -m 0755 /etc/update-motd.d
 COPY --chmod=0600 authorized_keys /root/.ssh/authorized_keys
 COPY --chmod=0644 nftables.conf /etc/nftables.conf
 COPY --chmod=0644 hostkeys.conf /etc/systemd/system/ssh.service.d/10-skiff-hostkeys.conf
+COPY --chmod=0755 motd /etc/update-motd.d/00-skiff
 LABEL %s=%s %s=%s
 `
 
@@ -91,7 +94,7 @@ func (b *Backend) ensureImage(ctx context.Context) error {
 	}
 	defer os.RemoveAll(dir)
 	content := fmt.Sprintf(dockerfile, labelRev, want[labelRev], labelKey, want[labelKey])
-	for name, data := range map[string]string{"Dockerfile": content, "authorized_keys": key + "\n", "nftables.conf": nftablesConf, "hostkeys.conf": hostKeysDropIn} {
+	for name, data := range map[string]string{"Dockerfile": content, "authorized_keys": key + "\n", "nftables.conf": nftablesConf, "hostkeys.conf": hostKeysDropIn, "motd": motdScript} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", name, err)
 		}

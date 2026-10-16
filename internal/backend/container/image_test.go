@@ -24,7 +24,7 @@ func TestGuestImageHasPerVMHostKeysAndFirewall(t *testing.T) {
 			t.Errorf("Dockerfile lacks %q", want)
 		}
 	}
-	if imageRev == "2" {
+	if imageRev == "3" {
 		t.Error("the Dockerfile changed, imageRev must be bumped")
 	}
 	for _, want := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16",
@@ -32,6 +32,32 @@ func TestGuestImageHasPerVMHostKeysAndFirewall(t *testing.T) {
 		if !strings.Contains(nftablesConf, want) {
 			t.Errorf("nftables.conf lacks %q", want)
 		}
+	}
+}
+
+// TestGuestImageReplacesUbuntusLoginBanner: Ubuntu's update-motd scripts (the
+// help links and the "minimized" notice) and the legal notice give way to
+// skiff's own banner, which pam_motd runs on every ssh login.
+func TestGuestImageReplacesUbuntusLoginBanner(t *testing.T) {
+	for _, want := range []string{
+		"rm -f /etc/update-motd.d/* /etc/motd",
+		": > /etc/legal",
+		"COPY --chmod=0755 motd /etc/update-motd.d/00-skiff",
+	} {
+		if !strings.Contains(dockerfile, want) {
+			t.Errorf("Dockerfile lacks %q", want)
+		}
+	}
+	if !strings.HasPrefix(motdScript, "#!/bin/sh\n") {
+		t.Error("run-parts only runs the banner with a shebang")
+	}
+	for _, want := range []string{"skiff", "hostname -I", "nproc", "/proc/meminfo", "/proc/uptime", "no LAN"} {
+		if !strings.Contains(motdScript, want) {
+			t.Errorf("banner lacks %q", want)
+		}
+	}
+	if strings.Contains(motdScript, "Firecracker") {
+		t.Error("the banner must not name the removed Firecracker backend")
 	}
 }
 
@@ -51,7 +77,7 @@ func TestPrepareWritesTheFirewallIntoTheBuildContext(t *testing.T) {
 	if !strings.Contains(hostKeysDropIn, "ssh-keygen -q -N \"\" -t ed25519") || !strings.Contains(hostKeysDropIn, "ExecStartPre=/usr/sbin/sshd -t") {
 		t.Errorf("drop-in must make the key before sshd's config check:\n%s", hostKeysDropIn)
 	}
-	for name, want := range map[string]string{"nftables.conf": nftablesConf, "hostkeys.conf": hostKeysDropIn, "authorized_keys": "ssh-ed25519 AAAA test\n"} {
+	for name, want := range map[string]string{"nftables.conf": nftablesConf, "hostkeys.conf": hostKeysDropIn, "motd": motdScript, "authorized_keys": "ssh-ed25519 AAAA test\n"} {
 		if got, ok := f.built[name]; !ok || got != want {
 			t.Errorf("%s in the build context = %q, want %q", name, got, want)
 		}

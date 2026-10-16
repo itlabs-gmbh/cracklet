@@ -1,13 +1,19 @@
 # Changelog
 
-All notable changes to cracklet are documented here.
+All notable changes to skiff are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **The login banner is back.** The guest image replaces Ubuntu's motd (help
+  links, the "minimized" notice, the legal text) with skiff's banner again:
+  logo, host, IP, vCPUs, memory, uptime, kernel, disk and load. It got lost
+  with the Firecracker guest agent; `skiff prepare` rebuilds the image, new
+  VMs show it.
 
 ## [0.1.0] - 2026-10-16
 

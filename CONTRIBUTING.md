@@ -13,7 +13,8 @@ rules are short. If something here is unclear, open an issue and ask.
 
 ## Development setup
 
-You need an Apple Silicon Mac (M3 or newer) with macOS 15+ to run microVMs.
+You need an Apple Silicon Mac with macOS 26+ to run VMs (the deprecated Lima
+backend needs an M3 or newer and macOS 15+).
 Unit tests, `go vet` and `shellcheck` also run on Linux.
 
 ```sh
@@ -23,7 +24,7 @@ make envd     # cross-compile the guest daemon so `make build` embeds it
 make build    # -> bin/skiff
 make test     # unit tests with -race
 make lint     # gofmt, go vet, shellcheck
-make e2e      # boots a real microVM, needs `skiff prepare` first
+make e2e      # boots a real VM, needs `skiff prepare` first
 ```
 
 `make lint` and `make test` must pass before you open a pull request. CI runs
@@ -42,8 +43,9 @@ Tools: Go 1.26+, `shellcheck` (`brew install shellcheck`).
 | `cmd/skiff-envd` | guest identity daemon, cross-compiled for linux/arm64 |
 | `internal/cli`      | cobra commands                                       |
 | `internal/app`      | workflows (prepare, new, ssh, forward, ...)          |
-| `internal/lima`     | `limactl` wrapper and embedded Lima template         |
-| `internal/agent`    | bash agent that runs inside the Lima VM              |
+| `internal/backend`  | backend interface; `container` (Apple's `container`) and `lima` (deprecated) |
+| `internal/lima`     | `limactl` wrapper and embedded Lima template (deprecated) |
+| `internal/agent`    | bash agent that runs inside the Lima VM (deprecated)  |
 | `internal/host`     | host preflight checks (`skiff doctor`)            |
 | `internal/vm`       | VM spec and port-forward validation                  |
 | `internal/sshcfg`   | `~/.skiff/ssh_config` rendering                   |
@@ -55,15 +57,16 @@ Tools: Go 1.26+, `shellcheck` (`brew install shellcheck`).
 - **Go:** idiomatic Go, `gofmt`-formatted, `go vet` clean. Keep functions and
   files small. Return errors with context (`fmt.Errorf("...: %w", err)`),
   never swallow them.
-- **Bash (`internal/agent/agent.sh`):** must pass `shellcheck -s bash`. Any
-  command that changes state on the Lima VM has to hold the agent `flock` and
-  roll back on failure, as the existing `new`/`rm` paths do.
+- **Backend calls:** anything that changes state through the `container`
+  CLI runs under the backend lock (`internal/backend/container/records.go`)
+  and rolls back on failure, as the existing create/remove paths do. A helper
+  that takes the lock must never be called from under it.
+- **Guest image:** a change to the Dockerfile or the nftables ruleset in
+  `internal/backend/container` bumps `imageRev`, so `skiff prepare` rebuilds.
+- **Bash (`internal/agent/agent.sh`, deprecated Lima backend):** must pass
+  `shellcheck -s bash`; state changes hold the agent `flock` and roll back.
 - **Tests:** every change comes with tests. Table-driven tests for pure logic,
-  fakes for `limactl`/`ssh` (see `internal/runner`). Pure agent helpers are
-  tested under bash in `internal/agent/agent_test.go`.
-- **Pinned artifacts:** bumping Firecracker, the kernel or the Ubuntu image
-  means updating the SHA-256 digests in `internal/config` *and* noting it in
-  the changelog, because it invalidates golden snapshots for all users.
+  fakes for `container`/`limactl`/`ssh` (see `internal/runner`).
 - **Security:** skiff's network isolation rules are documented in the
   README. A change that loosens them needs a written justification in the PR.
 
@@ -92,7 +95,7 @@ fix: rebuild firewall chains atomically and block CGNAT ranges
 2. Make your change, add tests, run `make lint test`.
 3. Add a line to the *Unreleased* section of [CHANGELOG.md](CHANGELOG.md).
 4. Open the PR. Fill in the template: what changed, why, and how you tested
-   it (`make e2e` output is welcome for anything that touches the agent or
+   it (`make e2e` output is welcome for anything that touches the backend or
    networking).
 5. One maintainer review is required. Squash-merge is the default.
 

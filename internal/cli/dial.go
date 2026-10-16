@@ -16,7 +16,7 @@ const annotationStdoutIsData = "stdout-is-data"
 func newDialCmd(get func() *app.App) *cobra.Command {
 	return &cobra.Command{
 		Use:    "_dial HOST PORT",
-		Short:  "ssh ProxyCommand: relay stdin/stdout to a port on a microVM",
+		Short:  "ssh ProxyCommand: relay stdin/stdout to a port on a VM",
 		Hidden: true,
 		Long: `_dial is the ProxyCommand in ~/.skiff/ssh_config for backends whose guests
 the Mac reaches directly. ssh runs it as "skiff _dial %h %p"; HOST is the
@@ -38,7 +38,7 @@ func newRelayCmd(get func() *app.App) *cobra.Command {
 		Use:    "_relay",
 		Short:  "Serve the port forwards of the container backend (started by skiff itself)",
 		Hidden: true,
-		Long: `_relay listens on 127.0.0.1:HOST for every forward of every microVM and joins
+		Long: `_relay listens on 127.0.0.1:HOST for every forward of every VM and joins
 each connection to the VM's guest port. skiff starts it as a detached process
 whenever forwards exist and none runs (log: ~/.skiff/relay.log); it exits on
 its own once no forwards are left.`,

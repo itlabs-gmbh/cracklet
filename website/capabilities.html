@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Grants and capabilities – skiff docs</title>
-  <meta name="description" content="How skiff hands GitHub, Claude Code and MCP servers into a microVM without copying a single secret: the broker, grants, secrets and capability files in detail.">
+  <meta name="description" content="How skiff hands GitHub, Claude Code and MCP servers into a VM without copying a single secret: the broker, grants, secrets and capability files in detail.">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#232323" media="(prefers-color-scheme: dark)">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -30,7 +30,7 @@
     </nav>
 
     <h1>Grants and capabilities</h1>
-    <p class="lead">A microVM is cut off from your Mac on purpose. When the agent inside needs GitHub, Claude Code or an MCP server that only runs on the Mac, skiff opens one controlled hole: a broker that hands out connections, never secrets.</p>
+    <p class="lead">A VM is cut off from your Mac on purpose. When the agent inside needs GitHub, Claude Code or an MCP server that only runs on the Mac, skiff opens one controlled hole: a broker that hands out connections, never secrets.</p>
 
     <nav class="toc" aria-label="On this page">
       <strong>On this page</strong>
@@ -63,7 +63,7 @@
           </div>
           <div class="concept">
             <h3>grant</h3>
-            <p>A line in a per-VM file that says <strong>whether</strong> a microVM may use a capability, by name, such as <code>github</code>. Default is deny. How far it reaches is up to the credential.</p>
+            <p>A line in a per-VM file that says <strong>whether</strong> a VM may use a capability, by name, such as <code>github</code>. Default is deny. How far it reaches is up to the credential.</p>
           </div>
           <div class="concept">
             <h3>broker</h3>
@@ -79,8 +79,8 @@
 
       <section id="request">
         <h2>What happens on a request</h2>
-        <p>Say Claude Code inside the microVM <code>agent1</code> sends a message. It was configured by the <code>claude</code> capability to talk to <code>http://127.0.0.1:7777/claude</code>:</p>
-<pre class="code"><span class="dim">microVM agent1</span>                                  <span class="dim">your Mac</span>
+        <p>Say Claude Code inside the VM <code>agent1</code> sends a message. It was configured by the <code>claude</code> capability to talk to <code>http://127.0.0.1:7777/claude</code>:</p>
+<pre class="code"><span class="dim">VM agent1</span>                                  <span class="dim">your Mac</span>
 claude ──► 127.0.0.1:7777/claude/v1/messages
            <span class="dim">Authorization: Bearer sk-ant-oat01-&lt;placeholder&gt;</span>
                │
@@ -276,7 +276,7 @@ claude ──► 127.0.0.1:7777/claude/v1/messages
           <li>A request may take up to five minutes. The server's stderr goes to the audit log.</li>
         </ul>
         <div class="callout">
-          <p>An MCP capability runs code on your Mac, outside the microVM. Pin versions (<code>chrome-devtools-mcp@1.10.1</code>, not <code>@latest</code>) and bump them deliberately.</p>
+          <p>An MCP capability runs code on your Mac, outside the VM. Pin versions (<code>chrome-devtools-mcp@1.10.1</code>, not <code>@latest</code>) and bump them deliberately.</p>
         </div>
 
         <h3 id="exec"><code>[exec]</code> – run a program per request</h3>
@@ -466,8 +466,8 @@ install as ~/.skiff/caps/gemini.toml? [y/N]</pre>
     </div>
 
     <nav class="next" aria-label="Read next">
-      <a href="agents.html"><span>Guide</span><strong>Run Claude Code, git and MCPs in a microVM</strong></a>
-      <a href="docs.html"><span>Quickstart</span><strong>Install skiff and start a microVM</strong></a>
+      <a href="agents.html"><span>Guide</span><strong>Run Claude Code, git and MCPs in a VM</strong></a>
+      <a href="docs.html"><span>Quickstart</span><strong>Install skiff and start a VM</strong></a>
     </nav>
   </main>
 

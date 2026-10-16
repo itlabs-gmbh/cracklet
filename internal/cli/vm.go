@@ -19,7 +19,7 @@ func newNewCmd(get func() *app.App) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "new [name]",
-		Short: "Create and boot a microVM",
+		Short: "Create and boot a VM",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
@@ -116,7 +116,7 @@ func forwardLabels(info app.VMInfo) string {
 func newRmCmd(get func() *app.App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "rm NAME",
-		Short: "Stop and delete a microVM",
+		Short: "Stop and delete a VM",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return get().RemoveVM(cmd.Context(), args[0])
@@ -127,7 +127,7 @@ func newRmCmd(get func() *app.App) *cobra.Command {
 func newStartCmd(get func() *app.App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "start NAME",
-		Short: "Boot a stopped microVM",
+		Short: "Boot a stopped VM",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, err := get().StartVM(cmd.Context(), args[0])
@@ -139,7 +139,7 @@ func newStartCmd(get func() *app.App) *cobra.Command {
 func newStopCmd(get func() *app.App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop NAME",
-		Short: "Shut a microVM down, keeping its disk",
+		Short: "Shut a VM down, keeping its disk",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, err := get().StopVM(cmd.Context(), args[0])
@@ -153,7 +153,7 @@ func newLsCmd(get func() *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
-		Short:   "List microVMs",
+		Short:   "List VMs",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			vms, err := get().ListVMs(cmd.Context())
@@ -185,7 +185,7 @@ func newInspectCmd(get func() *app.App) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "inspect NAME",
-		Short: "Show the details of a microVM",
+		Short: "Show the details of a VM",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			info, err := get().InspectVM(cmd.Context(), args[0])
@@ -255,7 +255,7 @@ func sshHint(v app.VMInfo) string {
 func newSSHCmd(get func() *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ssh NAME [command...]",
-		Short: "Open a shell in a microVM (or run a command)",
+		Short: "Open a shell in a VM (or run a command)",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return get().SSH(cmd.Context(), args[0], remoteArgs(args))
@@ -268,7 +268,7 @@ func newSSHCmd(get func() *app.App) *cobra.Command {
 func newTunnelCmd(get func() *app.App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "tunnel NAME",
-		Short: "Serve a microVM's broker without an interactive session",
+		Short: "Serve a VM's broker without an interactive session",
 		Long: `tunnel holds the broker forward into NAME until it is interrupted or NAME
 stops, reconnecting when the connection drops. Use it when the guest is
 reached by something other than 'skiff ssh', e.g. an editor or agent
@@ -283,8 +283,8 @@ runner with its own ssh session. 'skiff ssh NAME' keeps working alongside.`,
 func newExecCmd(get func() *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "exec NAME -- command [arg...]",
-		Short: "Run a command in a microVM with its arguments passed verbatim",
-		Long: `exec runs a command in a microVM with every argument quoted, so the guest
+		Short: "Run a command in a VM with its arguments passed verbatim",
+		Long: `exec runs a command in a VM with every argument quoted, so the guest
 receives exactly the argument vector given here. Unlike 'skiff ssh NAME cmd',
 no word is re-split or expanded by the guest shell; scripts and plugins can pass
 untrusted strings safely. Stdin, stdout, stderr and the exit status are

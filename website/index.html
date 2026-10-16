@@ -48,7 +48,7 @@
 
     <section>
       <div class="container section section--center">
-        <h2>A microVM in one command</h2>
+        <h2>A VM in one command</h2>
         <p class="intro">No boot to wait for. <code>skiff new</code> hands you a running Ubuntu 24.04 with root SSH, its own kernel, disk, IP and hostname.</p>
         <div class="term">$ skiff new dev
 dev is running at 192.168.64.2
@@ -62,7 +62,7 @@ $ skiff ssh dev uname -a
     <section>
       <div class="container section">
         <h2>A sandbox per agent</h2>
-        <p class="intro">Coding agents want root, a package manager and the freedom to run whatever they just wrote. Give each one its own microVM instead of your Mac. Create it per task, let the agent work, throw it away.</p>
+        <p class="intro">Coding agents want root, a package manager and the freedom to run whatever they just wrote. Give each one its own VM instead of your Mac. Create it per task, let the agent work, throw it away.</p>
         <div class="grid grid--3" style="margin-top:2.5rem">
           <div class="card">
             <h3 class="small">Run the agent inside</h3>
@@ -99,7 +99,7 @@ $ skiff ssh dev uname -a
     <section>
       <div class="container section">
         <h2>Your credentials stay on the Mac</h2>
-        <p class="intro">An agent in a microVM still needs a <code>git push</code>, a Claude login or a browser MCP that only runs on your Mac. Copying tokens into the VM would throw the isolation away. skiff opens one controlled hole instead: a broker that hands out connections, never secrets.</p>
+        <p class="intro">An agent in a VM still needs a <code>git push</code>, a Claude login or a browser MCP that only runs on your Mac. Copying tokens into the VM would throw the isolation away. skiff opens one controlled hole instead: a broker that hands out connections, never secrets.</p>
         <div class="grid grid--3" style="margin-top:2.5rem">
           <div class="card">
             <h3 class="small">Grant, don't copy</h3>
@@ -174,8 +174,8 @@ $ skiff ssh dev uname -a
     <section>
       <div class="container section grid grid--2 grid--wide-left" style="margin-top:0">
         <div class="card">
-          <h2>Find your microVMs</h2>
-          <p>List every microVM with its state, IP, size, port forwards, grants and the SSH destination to use.</p>
+          <h2>Find your VMs</h2>
+          <p>List every VM with its state, IP, size, port forwards, grants and the SSH destination to use.</p>
           <div class="cmd" data-copy="skiff ls">
             <span class="prompt" aria-hidden="true">$</span>
             <span class="text">skiff ls</span>
@@ -198,7 +198,7 @@ ai    running  192.168.64.3  2      1024M  3000   claude  ssh ai.skiff</div>
         </div>
         <div class="card">
           <h2>Plain ssh, scp, rsync, your IDE</h2>
-          <p>Add one line to <code>~/.ssh/config</code> and every microVM is reachable as <code>NAME.skiff</code>. No port forwarding and no sudo needed on macOS.</p>
+          <p>Add one line to <code>~/.ssh/config</code> and every VM is reachable as <code>NAME.skiff</code>. No port forwarding and no sudo needed on macOS.</p>
           <div class="cmd" data-copy="Include ~/.skiff/ssh_config">
             <span class="prompt" aria-hidden="true">+</span>
             <span class="text">Include ~/.skiff/ssh_config</span>

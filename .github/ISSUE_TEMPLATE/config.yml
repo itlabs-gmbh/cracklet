@@ -5,4 +5,4 @@ contact_links:
     about: Please report security issues privately, not as a public issue.
   - name: Documentation
     url: https://github.com/itlabs-gmbh/skiff#readme
-    about: Usage, how a microVM is wired, and troubleshooting.
+    about: Usage, how a VM is wired, and troubleshooting.

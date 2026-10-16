@@ -60,7 +60,7 @@
 <pre class="code">dev is running at 192.168.64.2
 <span class="dim">  skiff ssh dev</span>
 <span class="dim">  ssh dev.skiff</span></pre>
-        <p><code>new</code> does not boot. It restores a <em>golden snapshot</em>: a fully booted VM frozen together with its memory, then gives the clone its own IP, hostname, clock and fresh entropy. The first <code>new</code> for a given size builds that snapshot (about 15 seconds); every later one takes about three. Without a name, VMs are called <code>vm1</code>, <code>vm2</code> and so on.</p>
+        <p><code>new</code> boots a fresh Ubuntu 24.04 in about half a second and returns once it answers SSH, about two seconds after you hit enter. Without a name, VMs are called <code>vm1</code>, <code>vm2</code> and so on.</p>
         <div class="cmd" data-copy="skiff ssh dev">
           <span class="prompt" aria-hidden="true">$</span>
           <span class="text">skiff ssh dev</span>
@@ -76,14 +76,14 @@
       </section>
 
       <section id="size">
-        <h2>Size and profile</h2>
-        <p>Defaults are 2 vCPUs, 1 GiB RAM and a 2 GiB disk. A disk size other than the profile's image cold-boots instead of restoring the snapshot, and grows the root filesystem on first boot.</p>
-        <div class="cmd" data-copy="skiff new dev --vcpus 4 --mem 2048 --disk 8G">
+        <h2>Size</h2>
+        <p>Defaults are 2 vCPUs and 1 GiB RAM, the minimum Apple's <code>container</code> accepts. The disk is a sparse volume that grows as the VM writes, so there is nothing to size there.</p>
+        <div class="cmd" data-copy="skiff new dev --vcpus 4 --mem 2048">
           <span class="prompt" aria-hidden="true">$</span>
-          <span class="text">skiff new dev --vcpus 4 --mem 2048 --disk 8G</span>
+          <span class="text">skiff new dev --vcpus 4 --mem 2048</span>
           <button type="button" aria-label="Copy the sized create command to the clipboard"></button>
         </div>
-        <p><code>--profile</code> picks the guest image. <code>base</code> is plain Ubuntu; <code>paseo</code> adds Node 22, Claude Code, git, gh and rsync for <a href="agents.html">agent work</a>. Build a profile once with <code>skiff prepare --profile paseo</code>.</p>
+        <p>The guest is a plain Ubuntu 24.04 with git, curl and jq. Install what a task needs over SSH; the <a href="agents.html">agent guide</a> shows the commands for Node, Claude Code and gh. Guest image profiles and golden snapshots exist only on the deprecated Lima backend.</p>
       </section>
 
       <section id="ports">
@@ -116,7 +116,7 @@
             <tbody>
               <tr><td><code>doctor</code></td><td>Explain what this Mac is missing.</td></tr>
               <tr><td><code>prepare [--backend container|lima]</code></td><td>Set up or update the backend runtime and the guest image.</td></tr>
-              <tr><td><code>new [NAME] [--vcpus --mem --disk --profile --fresh]</code></td><td>Create a microVM from the golden snapshot; <code>--fresh</code> cold-boots.</td></tr>
+              <tr><td><code>new [NAME] [--vcpus N --mem MiB -p PORT --grant CAP --owner O --slot S]</code></td><td>Create and boot a VM.</td></tr>
               <tr><td><code>new … -p [HOST:]GUEST --grant CAP</code></td><td>Forward ports and grant capabilities right away.</td></tr>
               <tr><td><code>new … --owner NAME --slot N</code></td><td>Label a VM a tool manages, for <code>gc</code>.</td></tr>
               <tr><td><code>ls [--json]</code></td><td>Every VM with state, IP, size, ports, grants, owner, age and SSH destination.</td></tr>

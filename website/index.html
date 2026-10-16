@@ -147,11 +147,11 @@ $ skiff ssh dev uname -a
     <section>
       <div class="container section">
         <h2>Size it as you need</h2>
-        <p class="intro">Defaults are 2 vCPUs, 1 GiB RAM and a 2 GiB disk. Pass <code>--vcpus</code>, <code>--mem</code> and <code>--disk</code> to change them; a bigger disk grows the root filesystem on first boot.</p>
+        <p class="intro">Defaults are 2 vCPUs and 1 GiB RAM. Pass <code>--vcpus</code> and <code>--mem</code> to change them; the disk is a sparse volume that grows as the VM writes.</p>
         <div class="grid grid--2">
           <div class="card">
             <h3>Default</h3>
-            <p>2 vCPUs, 1 GiB RAM, 2 GiB disk.</p>
+            <p>2 vCPUs, 1 GiB RAM, disk grows on demand.</p>
             <div class="cmd" data-copy="skiff new">
               <span class="prompt" aria-hidden="true">$</span>
               <span class="text">skiff new</span>
@@ -160,10 +160,10 @@ $ skiff ssh dev uname -a
           </div>
           <div class="card">
             <h3>Bigger</h3>
-            <p>4 vCPUs, 2 GiB RAM, 8 GiB disk. The disk grows on first boot.</p>
-            <div class="cmd" data-copy="skiff new dev --vcpus 4 --mem 2048 --disk 8G">
+            <p>4 vCPUs, 2 GiB RAM.</p>
+            <div class="cmd" data-copy="skiff new dev --vcpus 4 --mem 2048">
               <span class="prompt" aria-hidden="true">$</span>
-              <span class="text">skiff new dev --vcpus 4 --mem 2048 --disk 8G</span>
+              <span class="text">skiff new dev --vcpus 4 --mem 2048</span>
               <button type="button" aria-label="Copy the sized create command to the clipboard"></button>
             </div>
           </div>

@@ -7,74 +7,53 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/skiff/internal/agent"
-	"github.com/itlabs-gmbh/skiff/internal/backend/lima"
+	"github.com/itlabs-gmbh/skiff/internal/backend/backendtest"
 	"github.com/itlabs-gmbh/skiff/internal/config"
 	"github.com/itlabs-gmbh/skiff/internal/runner"
 	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
-const runningList = `{"name":"skiff","status":"Running","dir":"/tmp/lima/skiff"}` + "\n"
-
-// newTestApp wires an App against a fake runner whose behaviour is defined by handle.
+// newTestApp wires an App on an in-memory backend and a fake runner for the
+// commands app runs itself (ssh, security); handle answers those.
 func newTestApp(t *testing.T, handle runner.FakeHandler) (*App, *runner.Fake, *bytes.Buffer) {
 	t.Helper()
 	fake := runner.NewFake(handle)
 	out := &bytes.Buffer{}
-	paths := config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}
-	return New(fake, paths, out, WithEnvd(fakeEnvd), WithStatus(out)), fake, out
+	return New(fake, testPaths(t), out, WithBackend(backendtest.New()), WithStatus(out)), fake, out
 }
 
-// limaOf reaches the Lima backend behind an App for tests of its locks and boot path.
-func limaOf(a *App) *lima.Backend {
-	return a.backend.(*lima.Backend)
+// backendOf reaches the fake backend behind an App.
+func backendOf(a *App) *backendtest.Fake {
+	return a.backend.(*backendtest.Fake)
 }
 
-// fakeEnvd stands in for the cross-compiled guest daemon so tests do not depend
-// on `make envd` having run.
-func fakeEnvd(context.Context) ([]byte, error) {
-	return bytes.Repeat([]byte{0x7f}, 2048), nil
+// sshOnly answers ssh and the Keychain and refuses everything else: with the
+// backend faked in memory, no other command should run.
+func sshOnly(name string, args []string) ([]byte, error) {
+	if name == "ssh" || name == "security" {
+		return nil, nil
+	}
+	return nil, errors.New("unexpected command: " + name + " " + strings.Join(args, " "))
 }
 
-// defaultHandler simulates a prepared, running Lima instance with a current agent.
-func defaultHandler(agentResponses map[string]string) runner.FakeHandler {
-	return func(name string, args []string) ([]byte, error) {
-		joined := name + " " + strings.Join(args, " ")
-		switch {
-		case strings.HasPrefix(joined, "limactl list"):
-			return []byte(runningList), nil
-		case strings.Contains(joined, "sha256sum"):
-			return []byte(agent.Checksum() + "\n"), nil
-		case strings.Contains(joined, config.AgentPath+" "):
-			sub := args[len(args)-1]
-			for i, a := range args {
-				if a == config.AgentPath && i+1 < len(args) {
-					sub = args[i+1]
-				}
-			}
-			if resp, ok := agentResponses[sub]; ok {
-				return []byte(resp), nil
-			}
-			return nil, errors.New("unexpected agent call: " + joined)
-		}
-		return nil, errors.New("unexpected command: " + joined)
+// seed adds VMs to the App's fake backend.
+func seed(a *App, vms ...vm.Info) {
+	for _, v := range vms {
+		backendOf(a).Add(v)
 	}
 }
 
-func TestNewRunsAgentWithSpec(t *testing.T) {
-	app, fake, out := newTestApp(t, defaultHandler(map[string]string{
-		"new": `{"name":"vm1","index":1,"ip":"172.16.1.2","state":"running"}`,
-	}))
-	info, err := app.NewVM(context.Background(), vm.Spec{Name: "vm1", VCPUs: 2, MemMiB: 1024, Disk: "2G"})
+func TestNewCreatesThroughTheBackend(t *testing.T) {
+	app, _, out := newTestApp(t, sshOnly)
+	info, err := app.NewVM(context.Background(), vm.Spec{Name: "vm1", VCPUs: 2, MemMiB: 1024})
 	if err != nil {
 		t.Fatalf("NewVM: %v", err)
 	}
-	if info.IP != "172.16.1.2" || info.Name != "vm1" {
+	if info.Name != "vm1" || info.IP == "" || info.State != vm.StateRunning {
 		t.Errorf("unexpected info: %+v", info)
 	}
-	want := "limactl shell skiff -- sudo " + config.AgentPath + " new vm1 2 1024 2G snapshot base"
-	if !fake.Called(want) {
-		t.Errorf("expected call %q, got:\n%s", want, fake.Dump())
+	if !backendOf(app).Called("create vm1 2 1024") {
+		t.Errorf("expected a create call, got:\n%s", backendOf(app).Dump())
 	}
 	if !strings.Contains(out.String(), "skiff ssh vm1") {
 		t.Errorf("output should hint at ssh usage, got:\n%s", out.String())
@@ -82,60 +61,30 @@ func TestNewRunsAgentWithSpec(t *testing.T) {
 }
 
 func TestNewRejectsInvalidSpec(t *testing.T) {
-	app, fake, _ := newTestApp(t, defaultHandler(nil))
-	if _, err := app.NewVM(context.Background(), vm.Spec{Name: "Bad Name", VCPUs: 2, MemMiB: 1024, Disk: "2G"}); err == nil {
+	app, _, _ := newTestApp(t, sshOnly)
+	if _, err := app.NewVM(context.Background(), vm.Spec{Name: "Bad Name", VCPUs: 2, MemMiB: 1024}); err == nil {
 		t.Fatal("expected validation error")
 	}
-	if len(fake.Calls()) != 0 {
-		t.Errorf("no commands should run for an invalid spec, got:\n%s", fake.Dump())
+	if len(backendOf(app).Calls) != 0 {
+		t.Errorf("nothing should reach the backend for an invalid spec, got:\n%s", backendOf(app).Dump())
 	}
 }
 
-func TestNewRequiresRunningInstance(t *testing.T) {
-	app, _, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
-		return []byte(`{"name":"skiff","status":"Broken"}` + "\n"), nil
-	})
-	_, err := app.NewVM(context.Background(), vm.Spec{Name: "vm1", VCPUs: 2, MemMiB: 1024, Disk: "2G"})
+func TestNewRequiresReadyBackend(t *testing.T) {
+	app, _, _ := newTestApp(t, sshOnly)
+	backendOf(app).ReadyErr = errors.New("the container system service is not running, run 'skiff prepare'")
+	_, err := app.NewVM(context.Background(), vm.Spec{Name: "vm1", VCPUs: 2, MemMiB: 1024})
 	if err == nil || !strings.Contains(err.Error(), "skiff prepare") {
 		t.Fatalf("expected error pointing at 'skiff prepare', got %v", err)
 	}
-}
-
-func TestAgentIsReinstalledWhenChecksumDiffers(t *testing.T) {
-	installed := false
-	app, fake, _ := newTestApp(t, func(name string, args []string) ([]byte, error) {
-		joined := name + " " + strings.Join(args, " ")
-		switch {
-		case strings.HasPrefix(joined, "limactl list"):
-			return []byte(runningList), nil
-		case strings.Contains(joined, "sha256sum"):
-			if !strings.Contains(joined, "-- sudo sh -c sha256sum") {
-				t.Errorf("the checksum probe must run with sudo (root-owned directory): %s", joined)
-			}
-			return []byte("deadbeef\n"), nil
-		case strings.HasSuffix(joined, "sh "+config.AgentPath+" 0755"):
-			installed = true
-			return nil, nil
-		case strings.Contains(joined, config.AgentPath+" ls"):
-			return []byte("[]"), nil
-		}
-		return nil, errors.New("unexpected command: " + joined)
-	})
-	if _, err := app.ListVMs(context.Background()); err != nil {
-		t.Fatalf("ListVMs: %v", err)
-	}
-	if !installed {
-		t.Errorf("agent should have been reinstalled, calls:\n%s", fake.Dump())
-	}
-	if in, ok := fake.Input("sh " + config.AgentPath + " 0755"); !ok || in != agent.Script {
-		t.Errorf("the embedded agent script must be streamed verbatim (got %d bytes, ok=%v)", len(in), ok)
+	if backendOf(app).CalledWithPrefix("create") {
+		t.Error("nothing is created while the backend is not ready")
 	}
 }
 
-func TestListParsesAgentOutput(t *testing.T) {
-	app, _, _ := newTestApp(t, defaultHandler(map[string]string{
-		"ls": `[{"name":"vm1","index":1,"ip":"172.16.1.2","state":"running","vcpus":2,"mem_mib":1024}]`,
-	}))
+func TestListReportsTheBackendsVMs(t *testing.T) {
+	app, _, _ := newTestApp(t, sshOnly)
+	seed(app, vm.Info{Name: "vm1", VCPUs: 2, MemMiB: 1024})
 	vms, err := app.ListVMs(context.Background())
 	if err != nil {
 		t.Fatalf("ListVMs: %v", err)
@@ -146,52 +95,51 @@ func TestListParsesAgentOutput(t *testing.T) {
 }
 
 func TestInspectVM(t *testing.T) {
-	app, fake, _ := newTestApp(t, defaultHandler(map[string]string{
-		"ls": `[{"name":"vm1","index":1,"ip":"172.16.1.2","state":"running"},` +
-			`{"name":"vm2","index":2,"ip":"172.16.2.2","state":"stopped"}]`,
-	}))
+	app, _, _ := newTestApp(t, sshOnly)
+	seed(app, vm.Info{Name: "vm1"}, vm.Info{Name: "vm2", State: vm.StateStopped})
 	ctx := context.Background()
 	info, err := app.InspectVM(ctx, "vm2")
 	if err != nil {
 		t.Fatalf("InspectVM: %v", err)
 	}
-	if info.Name != "vm2" || info.State != "stopped" || info.IP != "172.16.2.2" {
+	if info.Name != "vm2" || info.State != "stopped" {
 		t.Errorf("unexpected VM: %+v", info)
 	}
 	if _, err := app.InspectVM(ctx, "vm9"); err == nil || !strings.Contains(err.Error(), "does not exist") {
 		t.Errorf("unknown VM: want 'does not exist', got %v", err)
 	}
-	calls := len(fake.Calls())
+	calls := len(backendOf(app).Calls)
 	if _, err := app.InspectVM(ctx, "../etc"); err == nil {
 		t.Error("invalid name must be rejected")
 	}
-	if len(fake.Calls()) != calls {
-		t.Errorf("an invalid name must not reach the agent:\n%s", fake.Dump())
+	if len(backendOf(app).Calls) != calls {
+		t.Errorf("an invalid name must not reach the backend:\n%s", backendOf(app).Dump())
 	}
 }
 
-func TestRemoveCallsAgent(t *testing.T) {
-	app, fake, _ := newTestApp(t, defaultHandler(map[string]string{"rm": ""}))
+func TestRemoveCallsTheBackend(t *testing.T) {
+	app, _, _ := newTestApp(t, sshOnly)
+	seed(app, vm.Info{Name: "vm1"})
 	if err := app.RemoveVM(context.Background(), "vm1"); err != nil {
 		t.Fatalf("RemoveVM: %v", err)
 	}
-	if !fake.Called("limactl shell skiff -- sudo " + config.AgentPath + " rm vm1") {
-		t.Errorf("expected rm call, got:\n%s", fake.Dump())
+	if !backendOf(app).Called("rm vm1") {
+		t.Errorf("expected rm call, got:\n%s", backendOf(app).Dump())
 	}
 }
 
 func TestRemoveRejectsInvalidName(t *testing.T) {
-	app, fake, _ := newTestApp(t, defaultHandler(nil))
+	app, _, _ := newTestApp(t, sshOnly)
 	if err := app.RemoveVM(context.Background(), "../etc"); err == nil {
 		t.Fatal("expected validation error")
 	}
-	if len(fake.Calls()) != 0 {
-		t.Errorf("no commands should run, got:\n%s", fake.Dump())
+	if len(backendOf(app).Calls) != 0 {
+		t.Errorf("nothing should run, got:\n%s", backendOf(app).Dump())
 	}
 }
 
 func TestSSHArgsSeparateRemoteCommand(t *testing.T) {
-	app, _, _ := newTestApp(t, defaultHandler(nil))
+	app, _, _ := newTestApp(t, sshOnly)
 	args := app.sshArgs("vm1", []string{"uname", "-a"})
 	joined := strings.Join(args, " ")
 	if !strings.HasPrefix(joined, "-F ") || !strings.HasSuffix(joined, " vm1.skiff -- uname -a") {
@@ -203,7 +151,7 @@ func TestSSHArgsSeparateRemoteCommand(t *testing.T) {
 }
 
 func TestSSHArgsNeutraliseOptionLookalikes(t *testing.T) {
-	app, _, _ := newTestApp(t, defaultHandler(nil))
+	app, _, _ := newTestApp(t, sshOnly)
 	payload := "-oProxyCommand=touch /tmp/pwned"
 	args := app.sshArgs("vm1", []string{payload})
 	sep := -1
@@ -222,28 +170,27 @@ func TestSSHArgsNeutraliseOptionLookalikes(t *testing.T) {
 	}
 }
 
-func TestNewForwardsCanonicalDiskSize(t *testing.T) {
-	app, fake, _ := newTestApp(t, defaultHandler(map[string]string{
-		"new": `{"name":"vm1","index":1,"ip":"172.16.1.2","state":"running"}`,
-	}))
-	if _, err := app.NewVM(context.Background(), vm.Spec{Name: "vm1", VCPUs: 1, MemMiB: 256, Disk: " 4g "}); err != nil {
-		t.Fatalf("NewVM: %v", err)
+func TestSSHWritesAStrictConfig(t *testing.T) {
+	app, fake, _ := newTestApp(t, sshOnly)
+	if err := app.SSH(context.Background(), "vm1", []string{"true"}); err != nil {
+		t.Fatalf("SSH: %v", err)
 	}
-	if !fake.CalledWithSuffix(config.AgentPath + " new vm1 1 256 4G snapshot base") {
-		t.Errorf("disk size must be canonicalised, got:\n%s", fake.Dump())
+	if !fake.Called("ssh -F " + app.paths.SSHConfigPath() + " vm1.skiff -- true") {
+		t.Errorf("ssh not run:\n%s", fake.Dump())
+	}
+	text, err := readFile(app.paths.SSHConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"StrictHostKeyChecking yes", "UserKnownHostsFile /tmp/known_hosts", "ProxyCommand /usr/local/bin/skiff _dial %h %p"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("ssh_config lacks %q:\n%s", want, text)
+		}
 	}
 }
 
-func TestListToleratesBrokenEntries(t *testing.T) {
-	app, _, _ := newTestApp(t, defaultHandler(map[string]string{
-		"ls": `[{"name":"ok","index":1,"ip":"172.16.1.2","state":"running","vcpus":2,"mem_mib":1024},` +
-			`{"name":"bad","index":null,"ip":null,"state":"broken","vcpus":null,"mem_mib":null}]`,
-	}))
-	vms, err := app.ListVMs(context.Background())
-	if err != nil {
-		t.Fatalf("ListVMs: %v", err)
-	}
-	if len(vms) != 2 || vms[1].State != "broken" || vms[1].IP != "" {
-		t.Errorf("unexpected vms: %+v", vms)
-	}
+// testPaths returns a short home so Unix sockets fit on macOS.
+func testPaths(t *testing.T) config.Paths {
+	t.Helper()
+	return config.Paths{Home: t.TempDir()}
 }

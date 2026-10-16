@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/itlabs-gmbh/skiff/internal/backend"
 )
 
 // TestGuestImageHasPerVMHostKeysAndFirewall: the image must not ship the host
@@ -44,7 +42,7 @@ func TestPrepareWritesTheFirewallIntoTheBuildContext(t *testing.T) {
 	b, _, _ := newTestBackend(t, f)
 	// Keep the context around: ensureImage removes it after the build.
 	f.labels = nil
-	if err := b.Prepare(context.Background(), backend.PrepareOptions{}); err != nil {
+	if err := b.Prepare(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if contextDir == "" {

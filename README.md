@@ -51,26 +51,24 @@ Or from a checkout: `make install` (go install ./cmd/skiff → `$(go env GOPATH)
    image recipe or your key changes,
 5. writes `~/.skiff/ssh_config`.
 
-### Backends
+### Why Apple's container
 
-`skiff prepare --backend lima|container` picks how VMs run; the choice is
-remembered in `~/.skiff/backend`. `container` is the default. `lima` runs
-real Firecracker microVMs inside a Lima VM with nested virtualization; it is
-deprecated and scheduled for removal, see [The Lima backend](#the-lima-backend-deprecated).
-A state directory has one backend; switching is refused while the old one
-still has VMs.
+skiff started as Firecracker microVMs inside a Lima VM with nested
+virtualization. Measured on an M4 Pro (2 vCPU / 1 GiB guests), the nesting
+cost JIT-heavy workloads such as Claude Code about twice the CPU, which is why
+skiff moved to one Virtualization.framework VM per guest:
 
-| measurement (2 vCPU / 1 GiB)          | Mac     | Lima    | Firecracker nested | container |
-|---------------------------------------|---------|---------|--------------------|-----------|
-| first touch of fresh RAM, ms/MiB      | 0.18    | 0.39    | 0.39               | 0.18–0.23 |
-| `CTR_EL0` read (JIT icache flushes)   | n/a     | 0.001 µs| 24 µs              | 0.001 µs  |
-| Claude Code CPU in the first 3 s, JIT | 0.64–0.71 s | –   | 1.13–1.22 s        | 0.69–0.87 s |
-| cold boot to sshd                     | –       | –       | 1.5 s (+0.1 s ssh) | 0.5 s     |
+| measurement                           | Mac     | Firecracker in Lima | container |
+|---------------------------------------|---------|---------------------|-----------|
+| first touch of fresh RAM, ms/MiB      | 0.18    | 0.39                | 0.18–0.23 |
+| `CTR_EL0` read (JIT icache flushes)   | n/a     | 24 µs               | 0.001 µs  |
+| Claude Code CPU in the first 3 s, JIT | 0.64–0.71 s | 1.13–1.22 s     | 0.69–0.87 s |
+| cold boot to sshd                     | –       | 1.5 s (+0.1 s ssh)  | 0.5 s     |
 
-Not on the container backend: golden snapshots (`--fresh` is a no-op, every
-boot is cold and fast), image profiles (`--profile` is ignored, the root disk
-is a sparse 512 GiB volume that grows on demand), and `--disk`; VMs need at
-least 1 GiB of memory.
+There are no golden snapshots (every boot is cold and fast), no image
+profiles (install what a task needs over ssh) and no `--disk` (the root disk
+is a sparse 512 GiB volume that grows on demand); VMs need at least 1 GiB of
+memory.
 
 ## Usage
 
@@ -270,136 +268,18 @@ address cannot pose as it towards `skiff ssh`, grants or the broker tunnel.
 - Reset everything: `skiff rm` each VM, then `rm -rf ~/.skiff` and
   `container image rm skiff/guest:latest`.
 
-## The Lima backend (deprecated)
-
-`skiff prepare --backend lima` runs real, unmodified Firecracker microVMs
-inside a single Lima VM with nested virtualization. It needs an Apple M3 or
-newer and macOS 15+, and `prepare` installs Firecracker, a pinned guest kernel
-and rootfs (SHA-256 verified) into the Lima VM, which `--cpus`, `--memory` and
-`--disk` size (defaults 4 / 8 GiB / 40 GiB, resizable in place while no microVM
-runs). It is kept until the container backend has settled and will then be
-removed together with the sections below.
-
-#### Golden snapshots
-
-`skiff new` does not boot: it restores a *golden snapshot*, a fully booted VM
-(sshd and the guest daemon `skiff-envd` running) frozen together with its
-memory. The first `skiff new` for a given `--vcpus`/`--mem` combination builds
-that snapshot (about 15 s), every later one restores it in roughly 3 s.
-
-After the restore the clone still carries the snapshot's IP, hostname and
-clock. The agent sends the real identity over vsock (Firecracker's Unix socket
-with the `CONNECT 52` handshake) and `skiff-envd` applies it with netlink and
-syscalls, without spawning a process: right after a restore every page the
-guest touches is a nested page fault, so even `ip addr add` costs hundreds of
-milliseconds there.
-
-`--fresh` forces a cold boot; a `--disk` other than the profile's image size
-implies it. Snapshots are keyed on the profile image, kernel, Firecracker version and the
-agent revision, so they rebuild automatically after `skiff prepare` changes any
-of them. `skiff-envd` is cross-compiled for linux/arm64 and embedded into skiff
-(`make envd`). A skiff installed with `go install ...@latest` has no embedded copy;
-`skiff prepare` then cross-compiles the daemon from the module cache with your Go
-toolchain, at the same module version as the CLI.
-
-#### Image profiles
-
-`--profile` picks the guest image. `base` is the plain Ubuntu 24.04 image (curl
-and python3, 2G). `paseo` adds Node 22, `@getpaseo/cli`, Claude Code (native
-installer), git, gh and rsync on an 8G image. Build a profile once, then use it:
-
-```sh
-skiff prepare --profile paseo   # chroot install from apt/npm/claude.ai, a few minutes
-skiff new agent --profile paseo # restores the paseo golden snapshot
-```
-
-A profile image is built at its full size because a golden snapshot can only
-be restored onto a disk of exactly that size; `--disk` defaults to it.
-`paseo.service` (`paseo daemon run --home /root/.paseo`) is installed but not
-enabled, so the snapshot carries no daemon keypair; start it per VM with
-`systemctl enable --now paseo`. Package versions are the newest available when
-the image is built; a new base image or agent revision rebuilds the profile.
-
-### How a Firecracker microVM is wired
-
-| Piece            | Value                                                                 |
-|------------------|-----------------------------------------------------------------------|
-| Kernel           | Firecracker CI `vmlinux-6.1.186` (aarch64)                            |
-| Root disk        | copy of the Ubuntu 24.04 base image, grown to `--disk` with resize2fs |
-| Network          | tap `skiff<N>` on the Lima VM, guest IP `172.16.<N>.2/30`, NAT to the internet |
-| Guest IP config  | kernel `ip=` boot argument, hostname via `systemd.hostname=`          |
-| Process          | transient systemd unit `skiff-vm-<name>`, console in `console.log`      |
-| Port forwards    | `forwards` file per VM, socket units `skiff-fwd-<name>-<port>`          |
-| State            | `/var/lib/skiff/vms/<name>/` inside the Lima VM                         |
-
-Stopping uses a guest `reboot` over SSH (Firecracker on aarch64 has no ACPI
-power button) and falls back to SIGTERM after 30 seconds.
-
-Each Firecracker process runs in a transient systemd unit with
-`NoNewPrivileges`, `PrivateTmp`, `ProtectHome`, a device allow-list
-(`/dev/kvm`, `/dev/net/tun`) and a `MemoryMax` of guest memory plus 256 MiB.
-Agent commands that change state are serialised with `flock`, and a `skiff new`
-that fails half-way rolls back its disk, tap, hosts entry and unit.
-
-#### Network isolation
-
-Two dedicated iptables chains (`SKIFF-FORWARD` for routed traffic,
-`SKIFF-INPUT` for traffic addressed to the Lima VM itself) let microVMs reach
-the internet through NAT but:
-
-- microVMs cannot talk to each other (tap-to-tap traffic is dropped),
-- microVMs cannot reach the Mac or your LAN: Lima's gateway (which forwards
-  to the macOS loopback) and all private, link-local and loopback
-  destinations are rejected, so the Mac's own LAN address is out of reach too,
-- microVMs cannot reach services on the Lima VM, including the port-forward
-  proxies of other microVMs (only replies to connections the Lima VM opened
-  are let back in),
-- packets whose source is not in the guest subnet are dropped, and IPv6 is
-  disabled on every tap, so the IPv4 rules cannot be side-stepped.
-
-Both chains end in an explicit `DROP`, so isolation does not depend on the
-default INPUT/FORWARD policy, and they are rebuilt through a single
-`iptables-restore` batch so running guests never observe an empty chain. If you want guests to reach a service on your
-Mac or LAN, edit `PRIVATE_NETS` and the `REJECT` rules in `setup_host_network`
-in `internal/agent/agent.sh`.
-
-#### Entropy after restore
-
-Every microVM restored from the golden snapshot starts with the snapshot's
-kernel random state. The host agent sends 32 bytes from the Lima VM's
-`/dev/urandom` with the identity message; `skiff-envd` credits them with
-`RNDADDENTROPY` and forces a reseed with `RNDRESEEDCRNG`, so clones diverge
-immediately instead of at the kernel's next scheduled reseed.
-
-### Troubleshooting Lima
-
-- Console output of a VM: `limactl shell skiff sudo cat /var/lib/skiff/vms/<name>/console.log`
-- Agent logs: `limactl shell skiff sudo journalctl -u skiff-vm-<name>`
-- `skiff ls` shows `broken` for a VM whose metadata is damaged; `skiff rm <name>` cleans it up.
-- Reset: `limactl delete -f skiff && rm -rf ~/.skiff`
-
-### Why not Firecracker on the Virtualization framework directly?
-
-There is a proof of concept that ports Firecracker to Apple's Virtualization
-framework (`drink7036290/firecracker`, branch `macos_avf`). It has been
-untouched since February 2025, disables most of Firecracker (no API server,
-no event loop, console on stdio) and needs a custom-built kernel. Nested
-virtualization keeps the upstream binary, API, snapshots and kernels intact,
-which is why skiff builds on it.
-
 ## Development
 
 ```sh
-make envd     # cross-compile the guest daemon (needed before go build)
-make test     # unit tests (with -race); pure agent helpers run under bash too
+make test     # unit tests (with -race)
 make cover    # coverage summary
-make lint     # gofmt, go vet, shellcheck
-make e2e      # boots a real microVM (requires skiff prepare), cleans up afterwards
+make lint     # gofmt, go vet
+make e2e      # boots a real VM (requires skiff prepare), cleans up afterwards
 ```
 
 Layout: `cmd/skiff` (entry point), `internal/cli` (cobra commands),
-`internal/app` (workflows), `internal/lima` (limactl wrapper + template),
-`internal/agent` (embedded guest script), `internal/host` (preflight),
+`internal/app` (workflows), `internal/backend` (the interface, the `container`
+backend and an in-memory fake for tests), `internal/host` (host facts),
 `internal/broker` (per-VM capability broker), `internal/cap` (capability files,
 embedded defaults), `internal/grant` (per-VM policy), `internal/guest`
 (guest provisioning scripts), `internal/secret` (Keychain/env/cmd/file resolver),
@@ -416,6 +296,6 @@ vulnerabilities privately. This project follows the
 ## License
 
 skiff is licensed under the [Apache License 2.0](LICENSE).
-Copyright 2026 IT-Labs GmbH. Firecracker, the guest kernel, the Ubuntu image
-and Lima are downloaded at `skiff prepare` time and keep their own
-licenses; see [NOTICE](NOTICE).
+Copyright 2026 IT-Labs GmbH. Apple's container CLI, its guest kernel and the
+Ubuntu image are installed or downloaded at `skiff prepare` time and keep
+their own licenses; see [NOTICE](NOTICE).

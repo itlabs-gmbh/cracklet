@@ -20,8 +20,8 @@ import (
 
 // record is what skiff knows about a machine beyond what `container`
 // reports: the metadata gc needs and whether the VM should be running (so a
-// restart of the service brings it back). The Lima agent keeps the same facts
-// inside its VM; here they live on the Mac, next to the backend choice.
+// restart of the service brings it back). They live on the Mac, next to the
+// per-VM grants.
 type record struct {
 	// ID tells this VM from a later one created under the same name while
 	// an unlocked step (the host key scan) of the first was still running.
@@ -29,7 +29,6 @@ type record struct {
 	Owner     string     `json:"owner,omitempty"`
 	Slot      string     `json:"slot,omitempty"`
 	CreatedAt *time.Time `json:"created_at,omitempty"`
-	Profile   string     `json:"profile,omitempty"`
 	Running   bool       `json:"running"`
 	// HostKeys are the "TYPE KEY" lines ssh-keyscan read from the VM on its
 	// first boot; known_hosts is rendered from them.
@@ -226,7 +225,7 @@ func (b *Backend) flock(ctx context.Context, path string) (func(), error) {
 // infoFrom combines what `container` reports with skiff's record.
 func infoFrom(m machine, r record) vm.Info {
 	info := vm.Info{Name: m.ID, IP: m.addr(), State: m.state(), VCPUs: m.CPUs, MemMiB: int(m.Memory >> 20),
-		Profile: r.Profile, Forwards: []vm.Forward{}, Owner: r.Owner, Slot: r.Slot, CreatedAt: r.CreatedAt}
+		Forwards: []vm.Forward{}, Owner: r.Owner, Slot: r.Slot, CreatedAt: r.CreatedAt}
 	if i := strings.LastIndex(info.IP, "."); i >= 0 {
 		_, _ = fmt.Sscanf(info.IP[i+1:], "%d", &info.Index)
 	}

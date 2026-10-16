@@ -153,7 +153,7 @@ func (b *Backend) createLocked(ctx context.Context, spec vm.Spec, createdAt time
 	if err != nil {
 		return "", "", err
 	}
-	rec := record{ID: id, Owner: spec.Owner, Slot: spec.Slot, Profile: spec.ProfileName(), Running: true}
+	rec := record{ID: id, Owner: spec.Owner, Slot: spec.Slot, Running: true}
 	if spec.Owner != "" {
 		created := createdAt.UTC()
 		rec.CreatedAt = &created
@@ -264,7 +264,7 @@ func (b *Backend) Stop(ctx context.Context, name string) (vm.Info, error) {
 // record) are removed: `skiff rm foo` must never delete a machine the user
 // made with `container machine create`. With a guard, a VM whose record no
 // longer matches owner and creation time is a different VM under the same
-// name: it is left alone and reported as gone, like the Lima agent does.
+// name: it is left alone and reported as gone.
 func (b *Backend) Remove(ctx context.Context, name string, guard *backend.RemoveGuard) (bool, error) {
 	release, err := b.lock(ctx)
 	if err != nil {

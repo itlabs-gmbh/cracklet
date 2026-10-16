@@ -12,8 +12,7 @@ Use one of these private channels:
 
 Include what you found, how to reproduce it, the skiff version
 (`go version -m $(command -v skiff) | grep -E "mod|vcs.revision"`, or the
-commit hash you built from), your macOS version and `container --version`
-(or the Lima version on the deprecated Lima backend).
+commit hash you built from), your macOS version and `container --version`.
 
 You will get an acknowledgement within 5 working days. We will keep you
 informed about the fix and credit you in the release notes unless you prefer
@@ -36,15 +35,12 @@ README). A report is in scope if it shows that a VM can:
 - make a `skiff` command on the Mac execute attacker-controlled input
   (for example through a crafted VM name, forward spec, host key line or
   guest output),
-- on the deprecated Lima backend: reach another microVM, the Lima VM's own
-  services, the Mac or the LAN, spoof a source address, escape its systemd
-  sandbox, or influence another clone through a shared golden snapshot.
 
 Also in scope: supply-chain issues such as the SHA-256 pins in
 `internal/config` being bypassable, or downloads happening without
 verification.
 
 Out of scope: vulnerabilities in Apple's `container`, the Virtualization
-framework, the Linux kernel, Ubuntu, Firecracker or Lima themselves. Please
+framework, the Linux kernel or Ubuntu themselves. Please
 report those upstream; we are happy to bump pinned versions once a fix is
 released.

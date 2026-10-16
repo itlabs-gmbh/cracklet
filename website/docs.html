@@ -83,7 +83,7 @@
           <span class="text">skiff new dev --vcpus 4 --mem 2048</span>
           <button type="button" aria-label="Copy the sized create command to the clipboard"></button>
         </div>
-        <p>The guest is a plain Ubuntu 24.04 with git, curl and jq. Install what a task needs over SSH; the <a href="agents.html">agent guide</a> shows the commands for Node, Claude Code and gh. Guest image profiles and golden snapshots exist only on the deprecated Lima backend.</p>
+        <p>The guest is a plain Ubuntu 24.04 with git, curl and jq. Install what a task needs over SSH; the <a href="agents.html">agent guide</a> shows the commands for Node, Claude Code and gh.</p>
       </section>
 
       <section id="ports">
@@ -115,7 +115,7 @@
             <thead><tr><th>Command</th><th>What it does</th></tr></thead>
             <tbody>
               <tr><td><code>doctor</code></td><td>Explain what this Mac is missing.</td></tr>
-              <tr><td><code>prepare [--backend container|lima]</code></td><td>Set up or update the backend runtime and the guest image.</td></tr>
+              <tr><td><code>prepare</code></td><td>Set up or update Apple's container runtime and the guest image.</td></tr>
               <tr><td><code>new [NAME] [--vcpus N --mem MiB -p PORT --grant CAP --owner O --slot S]</code></td><td>Create and boot a VM.</td></tr>
               <tr><td><code>new … -p [HOST:]GUEST --grant CAP</code></td><td>Forward ports and grant capabilities right away.</td></tr>
               <tr><td><code>new … --owner NAME --slot N</code></td><td>Label a VM a tool manages, for <code>gc</code>.</td></tr>

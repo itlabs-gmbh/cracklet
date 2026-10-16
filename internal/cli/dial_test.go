@@ -1,11 +1,8 @@
 package cli
 
 import (
-	"errors"
 	"strings"
 	"testing"
-
-	"github.com/itlabs-gmbh/skiff/internal/backend"
 )
 
 func TestDialIsHiddenAndValidatesPort(t *testing.T) {
@@ -33,13 +30,10 @@ func TestDialIsHiddenAndValidatesPort(t *testing.T) {
 	}
 }
 
-func TestDialOnLimaExplainsItself(t *testing.T) {
-	_, fake, err := run(t, "_dial", "vm1.skiff", "22")
-	if !errors.Is(err, backend.ErrNoDial) {
-		t.Fatalf("the Lima backend has no direct path, got %v", err)
-	}
-	if len(fake.Calls()) != 0 {
-		t.Errorf("no command may run for an unsupported dial:\n%s", fake.Dump())
+func TestDialAsksTheBackend(t *testing.T) {
+	_, fb, err := run(t, "_dial", "vm1.skiff", "22")
+	if err == nil || !strings.Contains(err.Error(), "vm1:22") || !fb.Called("dial vm1 22") {
+		t.Fatalf("want the backend's dial error naming the target, got %v\n%s", err, fb.Dump())
 	}
 }
 
@@ -52,6 +46,6 @@ func TestRelayCommandIsHiddenAndTakesNoArgs(t *testing.T) {
 		t.Error("_relay takes no arguments")
 	}
 	if _, _, err := run(t, "_relay"); err == nil || !strings.Contains(err.Error(), "relay") {
-		t.Errorf("the Lima backend has no relay to run, got %v", err)
+		t.Errorf("a backend without a relay must be refused clearly, got %v", err)
 	}
 }

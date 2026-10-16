@@ -13,7 +13,7 @@ import (
 // interrupted; it may have to wait for the agent's lock first.
 const cleanupTimeout = 2 * time.Minute
 
-// VMInfo is what the backend reports about a microVM, plus its grants.
+// VMInfo is what the backend reports about a VM, plus its grants.
 type VMInfo = vm.Info
 
 // NewVM creates and boots a microVM.
@@ -26,21 +26,17 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 		f, _ := vm.ParseForward(s) // validated above
 		forwards = append(forwards, f)
 	}
-	if err := a.checkForwardsSupported(forwards); err != nil {
-		return VMInfo{}, err
-	}
 	if err := a.checkHostPortsFree(forwards); err != nil {
 		return VMInfo{}, err
 	}
-	release, err := a.backend.ReadyToBoot(ctx)
-	if err != nil {
+	if err := a.backend.Ready(ctx); err != nil {
 		return VMInfo{}, err
 	}
-	defer release()
 	if err := a.pruneVanished(ctx); err != nil {
 		return VMInfo{}, fmt.Errorf("clear grants left by removed VMs: %w", err)
 	}
 	var info VMInfo
+	var err error
 	started := false
 	create := func() (err error) {
 		// Ctrl-C while waiting for the lock: another `new` of this name
@@ -95,16 +91,13 @@ func (a *App) StartVM(ctx context.Context, name string) (VMInfo, error) {
 	if err := vm.ValidateName(name); err != nil {
 		return VMInfo{}, err
 	}
-	release, err := a.backend.ReadyToBoot(ctx)
-	if err != nil {
+	if err := a.backend.Ready(ctx); err != nil {
 		return VMInfo{}, err
 	}
-	defer release()
 	return a.report(a.backend.Start(ctx, name))
 }
 
-// StopVM shuts a microVM down but keeps its disk. Stopping is allowed while
-// the runtime is resized: it only makes it emptier.
+// StopVM shuts a VM down but keeps its disk.
 func (a *App) StopVM(ctx context.Context, name string) (VMInfo, error) {
 	if err := vm.ValidateName(name); err != nil {
 		return VMInfo{}, err

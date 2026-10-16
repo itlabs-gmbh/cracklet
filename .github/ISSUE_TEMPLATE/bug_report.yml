@@ -42,7 +42,7 @@ body:
     id: runtime
     attributes:
       label: Runtime version
-      description: Output of `container --version` (or `limactl --version` on the deprecated Lima backend).
+      description: Output of `container --version`.
   - type: textarea
     id: logs
     attributes:

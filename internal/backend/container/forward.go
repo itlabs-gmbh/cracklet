@@ -20,7 +20,7 @@ type forwardTarget struct {
 // Forward implements backend.Backend. `container machine` cannot publish
 // ports, so a forward is a line in the VM's record that the relay (relay.go)
 // serves on 127.0.0.1:HOST. A host port belongs to one VM; forwarding it
-// again on the same VM replaces the guest port, as on Lima. The relay is
+// again on the same VM replaces the guest port. The relay is
 // started (or kicked, if it idled out) once the record is written.
 func (b *Backend) Forward(ctx context.Context, name string, forwards []vm.Forward) (vm.Info, error) {
 	release, err := b.lock(ctx)

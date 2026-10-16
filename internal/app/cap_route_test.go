@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/itlabs-gmbh/skiff/internal/backend/backendtest"
 	"github.com/itlabs-gmbh/skiff/internal/cap"
 	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
@@ -87,8 +88,8 @@ func TestCapAddRechecksHostsAfterConfirmation(t *testing.T) {
 
 	fake := runner.NewFake(func(string, []string) ([]byte, error) { return nil, nil })
 	paths := testPaths(t)
-	first := New(fake, paths, &strings.Builder{})
-	second := New(fake, paths, &strings.Builder{})
+	first := New(fake, paths, &strings.Builder{}, WithBackend(backendtest.New()))
+	second := New(fake, paths, &strings.Builder{}, WithBackend(backendtest.New()))
 
 	confirm := &pausingReader{asked: make(chan struct{}), answer: make(chan string)}
 	done := make(chan error, 1)

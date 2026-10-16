@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	// MinHostPort is the lowest port Lima can expose on the Mac without root.
+	// MinHostPort is the lowest port the relay can bind on the Mac without root.
 	MinHostPort = 1024
 	// MaxPort is the highest TCP port.
 	MaxPort = 65535
@@ -38,7 +38,7 @@ func ParseForward(spec string) (Forward, error) {
 	return Forward{Host: host, Guest: guest}, nil
 }
 
-// Spec renders the canonical HOST:GUEST form understood by the agent.
+// Spec renders the canonical HOST:GUEST form.
 func (f Forward) Spec() string {
 	return strconv.Itoa(f.Host) + ":" + strconv.Itoa(f.Guest)
 }

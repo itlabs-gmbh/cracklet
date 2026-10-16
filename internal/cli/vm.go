@@ -19,7 +19,7 @@ func newNewCmd(get func() *app.App) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "new [name]",
-		Short: "Create and boot a VM",
+		Short: "Create and boot a VM (needs at least 1 GiB of memory)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
@@ -38,11 +38,7 @@ func newNewCmd(get func() *app.App) *cobra.Command {
 	addJSONFlag(cmd, &asJSON)
 	cmd.Flags().IntVar(&spec.VCPUs, "vcpus", config.DefaultVCPUs, "number of vCPUs")
 	cmd.Flags().IntVar(&spec.MemMiB, "mem", config.DefaultMemMiB, "memory in MiB")
-	cmd.Flags().StringVar(&spec.Disk, "disk", "", "root disk size, e.g. 4G (default: the profile's image size; anything else cold-boots)")
-	cmd.Flags().StringVar(&spec.Profile, "profile", vm.ProfileBase,
-		"guest image: "+strings.Join(vm.ProfileNames(), ", ")+" (build it first with 'skiff prepare --profile')")
 	cmd.Flags().StringArrayVarP(&spec.Forwards, "port", "p", nil, "forward localhost:[HOST:]GUEST to the VM (repeatable)")
-	cmd.Flags().BoolVar(&spec.Fresh, "fresh", false, "cold-boot instead of restoring the golden snapshot")
 	cmd.Flags().StringArrayVar(&spec.Grants, "grant", nil, "grant a capability right away, e.g. claude or github (repeatable)")
 	cmd.Flags().StringVar(&spec.Owner, "owner", "", "label the tool or person managing the VM; owned VMs can be collected by 'skiff gc'")
 	cmd.Flags().StringVar(&spec.Slot, "slot", "", "the VM's position in its owner's pool, e.g. 3 (needs --owner)")
@@ -207,7 +203,6 @@ func printVM(cmd *cobra.Command, v app.VMInfo) error {
 	fmt.Fprintf(w, "Name:\t%s\n", v.Name)
 	fmt.Fprintf(w, "State:\t%s\n", v.State)
 	fmt.Fprintf(w, "IP:\t%s\n", v.IP)
-	fmt.Fprintf(w, "Profile:\t%s\n", v.Profile)
 	fmt.Fprintf(w, "vCPUs:\t%d\n", v.VCPUs)
 	fmt.Fprintf(w, "Memory:\t%dM\n", v.MemMiB)
 	fmt.Fprintf(w, "Ports:\t%s\n", forwardLabels(v))

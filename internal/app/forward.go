@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	// portWait is how long Forward waits for Lima to expose a new host port.
+	// portWait is how long Forward waits for the relay to serve a new host port.
 	portWait     = 15 * time.Second
 	portInterval = 250 * time.Millisecond
 )
@@ -29,11 +29,6 @@ func (a *App) Forward(ctx context.Context, name string, specs []string) (VMInfo,
 			return VMInfo{}, err
 		}
 		forwards = append(forwards, f)
-	}
-	if len(forwards) > 0 {
-		if err := a.checkForwardsSupported(forwards); err != nil {
-			return VMInfo{}, err
-		}
 	}
 	if err := a.backend.Ready(ctx); err != nil {
 		return VMInfo{}, err
@@ -88,15 +83,6 @@ func (a *App) Unforward(ctx context.Context, name string, hostPorts []int) (VMIn
 	return info, nil
 }
 
-// checkForwardsSupported fails early on a backend without port forwards, so
-// a `new -p` does not create a VM it then cannot expose.
-func (a *App) checkForwardsSupported(forwards []vm.Forward) error {
-	if len(forwards) > 0 && !a.backend.Capabilities().Forwards {
-		return fmt.Errorf("port forwards are not supported on the %s backend yet; reach the VM at its address from 'skiff ls' instead", a.backend.Name())
-	}
-	return nil
-}
-
 // newForwards returns the forwards whose host port the VM does not have yet.
 func newForwards(current VMInfo, forwards []vm.Forward) []vm.Forward {
 	owned := make(map[int]bool, len(current.Forwards))
@@ -113,7 +99,7 @@ func newForwards(current VMInfo, forwards []vm.Forward) []vm.Forward {
 }
 
 // checkHostPortsFree refuses host ports that something on the Mac already
-// uses: Lima could not bind them, and the forward would silently go nowhere.
+// uses: the relay could not bind them, and the forward would silently go nowhere.
 func (a *App) checkHostPortsFree(forwards []vm.Forward) error {
 	for _, f := range forwards {
 		if a.portBusy(f.Host) {

@@ -49,7 +49,7 @@ func TestPrepareInstallsCLIStartsServiceAndBuildsImage(t *testing.T) {
 		return h
 	}
 	b, fake, out := newTestBackend(t, f, WithFacts(facts))
-	if err := b.Prepare(context.Background(), backend.PrepareOptions{}); err != nil {
+	if err := b.Prepare(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"brew install container", "container system start --enable-kernel-install", "container build --tag " + ImageRef} {
@@ -69,13 +69,13 @@ func TestPrepareSkipsBuildWhenImageIsCurrent(t *testing.T) {
 	f := newFake()
 	b, fake, out := newTestBackend(t, f)
 	f.labels = imageLabels([]byte("ssh-ed25519 AAAA test"))
-	if err := b.Prepare(context.Background(), backend.PrepareOptions{Profiles: []string{"paseo"}}); err != nil {
+	if err := b.Prepare(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if called(fake.Calls(), "container build") {
 		t.Errorf("a current image must not be rebuilt:\n%s", fake.Dump())
 	}
-	if !strings.Contains(out.String(), "is current") || !strings.Contains(out.String(), "ignore --profile") {
+	if !strings.Contains(out.String(), "is current") {
 		t.Errorf("output:\n%s", out.String())
 	}
 }
@@ -84,7 +84,7 @@ func TestPrepareRebuildsWhenKeyChanged(t *testing.T) {
 	f := newFake()
 	f.labels = map[string]string{labelRev: imageRev, labelKey: "someone-elses-key"}
 	b, fake, _ := newTestBackend(t, f)
-	if err := b.Prepare(context.Background(), backend.PrepareOptions{}); err != nil {
+	if err := b.Prepare(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if !called(fake.Calls(), "container build") {
@@ -92,16 +92,11 @@ func TestPrepareRebuildsWhenKeyChanged(t *testing.T) {
 	}
 }
 
-func TestPrepareRefusesSizingAndOldVersion(t *testing.T) {
-	b, fake, _ := newTestBackend(t, newFake())
-	err := b.Prepare(context.Background(), backend.PrepareOptions{CPUs: 8, Explicit: backend.SizeFlags{CPUs: true}})
-	if err == nil || !strings.Contains(err.Error(), "no") || len(fake.Calls()) != 0 {
-		t.Fatalf("explicit sizing must be refused before anything runs, got %v", err)
-	}
+func TestPrepareRefusesOldVersion(t *testing.T) {
 	f := newFake()
 	f.version = "1.4.1"
-	b, _, _ = newTestBackend(t, f)
-	if err := b.Prepare(context.Background(), backend.PrepareOptions{}); err == nil || !strings.Contains(err.Error(), "too old") {
+	b, _, _ := newTestBackend(t, f)
+	if err := b.Prepare(context.Background()); err == nil || !strings.Contains(err.Error(), "too old") {
 		t.Fatalf("want version gate, got %v", err)
 	}
 }
@@ -137,7 +132,7 @@ func TestListDoesNotPruneARecordBeingCreated(t *testing.T) {
 		t.Fatalf("record must survive a concurrent List, got %v", names)
 	}
 	// Create prunes leftovers itself, under the lock.
-	if _, err := b.Create(context.Background(), vm.Spec{Name: "other", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+	if _, err := b.Create(context.Background(), vm.Spec{Name: "other", VCPUs: 1, MemMiB: 512}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if names, _ := b.recordNames(); len(names) != 1 || names[0] != "other" {
@@ -153,7 +148,7 @@ func TestCreateFailureRemovesMachineAndRecord(t *testing.T) {
 	f.mu.Lock()
 	f.machines["half"] = &machine{ID: "half", Status: "stopped"}
 	f.mu.Unlock()
-	_, err := b.Create(context.Background(), vm.Spec{VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now())
+	_, err := b.Create(context.Background(), vm.Spec{VCPUs: 1, MemMiB: 512}, time.Now())
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("want the create error, got %v", err)
 	}
@@ -164,7 +159,7 @@ func TestCreateFailureRemovesMachineAndRecord(t *testing.T) {
 	if fake.CalledWithSuffix("machine rm vm1") {
 		t.Errorf("no rm for a machine the API never created:\n%s", fake.Dump())
 	}
-	auto, err := b.Create(context.Background(), vm.Spec{VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now())
+	auto, err := b.Create(context.Background(), vm.Spec{VCPUs: 1, MemMiB: 512}, time.Now())
 	if err == nil {
 		t.Fatalf("create still failing, got %+v", auto)
 	}
@@ -174,11 +169,11 @@ func TestAutoNameSkipsUnrecordedMachines(t *testing.T) {
 	f := newFake()
 	f.machines["vm1"] = &machine{ID: "vm1", Status: "running", IP: "192.168.64.50"}
 	b, _, _ := newTestBackend(t, f)
-	info, err := b.Create(context.Background(), vm.Spec{VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now())
+	info, err := b.Create(context.Background(), vm.Spec{VCPUs: 1, MemMiB: 512}, time.Now())
 	if err != nil || info.Name != "vm2" {
 		t.Fatalf("auto name = %q, %v; want vm2 (vm1 belongs to the user)", info.Name, err)
 	}
-	if _, err := b.Create(context.Background(), vm.Spec{Name: "vm1", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err == nil || !strings.Contains(err.Error(), "already exists") {
+	if _, err := b.Create(context.Background(), vm.Spec{Name: "vm1", VCPUs: 1, MemMiB: 512}, time.Now()); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("an unrecorded machine still blocks its name: %v", err)
 	}
 }
@@ -214,7 +209,7 @@ func TestRemoveOnlyTouchesSkiffsMachines(t *testing.T) {
 func TestCorruptRecordStillListsAndRemoves(t *testing.T) {
 	f := newFake()
 	b, _, out := newTestBackend(t, f)
-	if _, err := b.Create(context.Background(), vm.Spec{Name: "odd", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+	if _, err := b.Create(context.Background(), vm.Spec{Name: "odd", VCPUs: 1, MemMiB: 512}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(b.recordPath("odd"), []byte("{truncated"), 0o600); err != nil {
@@ -232,7 +227,7 @@ func TestCorruptRecordStillListsAndRemoves(t *testing.T) {
 func TestDialRefusesStoppedMachine(t *testing.T) {
 	f := newFake()
 	b, _, _ := newTestBackend(t, f)
-	if _, err := b.Create(context.Background(), vm.Spec{Name: "s", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+	if _, err := b.Create(context.Background(), vm.Spec{Name: "s", VCPUs: 1, MemMiB: 512}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := b.Stop(context.Background(), "s"); err != nil {
@@ -265,7 +260,7 @@ func TestCreateListStopStartRemove(t *testing.T) {
 	b, fake, _ := newTestBackend(t, f)
 	ctx := context.Background()
 	created := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
-	info, err := b.Create(ctx, vm.Spec{Name: "dev", VCPUs: 2, MemMiB: 1024, Disk: "2G", Owner: "paseo", Slot: "1"}, created)
+	info, err := b.Create(ctx, vm.Spec{Name: "dev", VCPUs: 2, MemMiB: 1024, Owner: "paseo", Slot: "1"}, created)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +274,7 @@ func TestCreateListStopStartRemove(t *testing.T) {
 	if fake.CalledWithSuffix("machine run --name dev --root -- true") {
 		t.Error("create must not run a command in the fresh machine (first-run bug in container 1.5)")
 	}
-	auto, err := b.Create(ctx, vm.Spec{VCPUs: 1, MemMiB: 512, Disk: "2G"}, created)
+	auto, err := b.Create(ctx, vm.Spec{VCPUs: 1, MemMiB: 512}, created)
 	if err != nil || auto.Name != "vm1" {
 		t.Fatalf("auto name = %q, %v; want vm1", auto.Name, err)
 	}
@@ -287,7 +282,7 @@ func TestCreateListStopStartRemove(t *testing.T) {
 	if err != nil || len(list) != 2 || list[0].Name != "dev" || list[1].Name != "vm1" {
 		t.Fatalf("List = %+v, %v", list, err)
 	}
-	if _, err := b.Create(ctx, vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512, Disk: "2G"}, created); err == nil || !strings.Contains(err.Error(), "already exists") {
+	if _, err := b.Create(ctx, vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512}, created); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("duplicate name: %v", err)
 	}
 
@@ -335,7 +330,7 @@ func TestCreateCleansUpWhenSSHNeverAnswers(t *testing.T) {
 	f := newFake()
 	b, fake, _ := newTestBackend(t, f, WithSSHWait(30*time.Millisecond, 5*time.Millisecond), WithDialer(
 		func(context.Context, string) (backend.Conn, error) { return nil, errors.New("refused") }))
-	_, err := b.Create(context.Background(), vm.Spec{Name: "dead", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now())
+	_, err := b.Create(context.Background(), vm.Spec{Name: "dead", VCPUs: 1, MemMiB: 512}, time.Now())
 	if err == nil || !strings.Contains(err.Error(), "did not answer on SSH") {
 		t.Fatalf("want ssh timeout, got %v", err)
 	}
@@ -350,7 +345,7 @@ func TestCreateCleansUpWhenSSHNeverAnswers(t *testing.T) {
 func TestListHidesVanishedMachinesUntilPruned(t *testing.T) {
 	f := newFake()
 	b, _, _ := newTestBackend(t, f)
-	if _, err := b.Create(context.Background(), vm.Spec{Name: "gone", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+	if _, err := b.Create(context.Background(), vm.Spec{Name: "gone", VCPUs: 1, MemMiB: 512}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	f.mu.Lock()
@@ -375,7 +370,7 @@ func TestReadyStartsServiceAndRestoresRunningMachines(t *testing.T) {
 	b, fake, out := newTestBackend(t, f)
 	ctx := context.Background()
 	for _, n := range []string{"up", "down"} {
-		if _, err := b.Create(ctx, vm.Spec{Name: n, VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+		if _, err := b.Create(ctx, vm.Spec{Name: n, VCPUs: 1, MemMiB: 512}, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -415,7 +410,7 @@ func TestDialAndProxyCommand(t *testing.T) {
 	if _, err := b.Dial(context.Background(), "nope", 22); err == nil {
 		t.Error("dialing an unknown VM must fail")
 	}
-	if _, err := b.Create(context.Background(), vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+	if _, err := b.Create(context.Background(), vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	conn, err := b.Dial(context.Background(), "dev", 22)
@@ -423,14 +418,6 @@ func TestDialAndProxyCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = conn.Close()
-}
-
-func TestCapabilitiesHaveForwardsAndTheGuardRail(t *testing.T) {
-	b, _, _ := newTestBackend(t, newFake())
-	caps := b.Capabilities()
-	if !caps.Forwards || !caps.GuestFirewall || caps.Snapshots || caps.Profiles || caps.Resize {
-		t.Errorf("Capabilities = %+v", caps)
-	}
 }
 
 func called(calls []string, needle string) bool {
@@ -448,7 +435,7 @@ func TestReadyWaitsForARestoreInProgress(t *testing.T) {
 	f := newFake()
 	b, _, _ := newTestBackend(t, f)
 	ctx := context.Background()
-	if _, err := b.Create(ctx, vm.Spec{Name: "up", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+	if _, err := b.Create(ctx, vm.Spec{Name: "up", VCPUs: 1, MemMiB: 512}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	f.mu.Lock()
@@ -485,7 +472,7 @@ func TestPrepareRestoresMachinesAfterReboot(t *testing.T) {
 	f := newFake()
 	b, fake, _ := newTestBackend(t, f)
 	ctx := context.Background()
-	if _, err := b.Create(ctx, vm.Spec{Name: "up", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+	if _, err := b.Create(ctx, vm.Spec{Name: "up", VCPUs: 1, MemMiB: 512}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	f.mu.Lock()
@@ -493,7 +480,7 @@ func TestPrepareRestoresMachinesAfterReboot(t *testing.T) {
 	f.machines["up"].Status, f.machines["up"].IP = "stopped", ""
 	f.labels = imageLabels([]byte("ssh-ed25519 AAAA test"))
 	f.mu.Unlock()
-	if err := b.Prepare(ctx, backend.PrepareOptions{}); err != nil {
+	if err := b.Prepare(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if !fake.CalledWithSuffix("machine run --name up --root -- true") {
@@ -510,7 +497,7 @@ func TestStopDuringBootKeepsTheVM(t *testing.T) {
 	ctx := context.Background()
 	done := make(chan error, 1)
 	go func() {
-		_, err := b.Create(ctx, vm.Spec{Name: "slow", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now())
+		_, err := b.Create(ctx, vm.Spec{Name: "slow", VCPUs: 1, MemMiB: 512}, time.Now())
 		done <- err
 	}()
 	// Wait until the machine exists and Create is polling, then stop it.

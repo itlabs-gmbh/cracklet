@@ -9,9 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/itlabs-gmbh/skiff/internal/backend/backendtest"
 	"github.com/itlabs-gmbh/skiff/internal/broker"
 	"github.com/itlabs-gmbh/skiff/internal/grant"
 	"github.com/itlabs-gmbh/skiff/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 // tunnelScript scripts the VM states `ls` reports and what each `ssh -N`
@@ -40,24 +42,33 @@ func (s *tunnelScript) handle(name string, args []string) ([]byte, error) {
 	if name == "ssh" {
 		return nil, nil // an interactive session
 	}
-	if name == "limactl" && args[len(args)-1] == "ls" {
-		state := s.states[0]
-		if state == "error" {
-			s.states = s.states[1:]
-			return nil, errors.New("limactl: connection refused")
-		}
-		if len(s.states) > 1 {
-			s.states = s.states[1:]
-		}
-		return []byte(`[{"name":"agent1","state":"` + state + `"}]`), nil
+	return sshOnly(name, args)
+}
+
+// nextState feeds the scripted VM states to the fake backend, one per List;
+// "error" fails the listing.
+func (s *tunnelScript) nextState(fb *backendtest.Fake) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.states[0]
+	if state == "error" {
+		s.states = s.states[1:]
+		return errors.New("container machine ls: connection refused")
 	}
-	return defaultHandler(nil)(name, args)
+	if len(s.states) > 1 {
+		s.states = s.states[1:]
+	}
+	fb.SetState("agent1", state)
+	return nil
 }
 
 func newTunnelApp(t *testing.T, script *tunnelScript, grants ...string) (*App, *runner.Fake) {
 	t.Helper()
 	fake := runner.NewFake(script.handle)
-	app := New(fake, testPaths(t), &strings.Builder{}, WithEnvd(fakeEnvd), WithTunnel(fakeTunnel))
+	fb := backendtest.New()
+	fb.Add(vm.Info{Name: "agent1"})
+	fb.OnList = func() error { return script.nextState(fb) }
+	app := New(fake, testPaths(t), &strings.Builder{}, WithBackend(fb), WithTunnel(fakeTunnel))
 	app.tunnelRetry = time.Millisecond
 	set, err := grant.ParseSet(grants)
 	if err != nil {
@@ -185,13 +196,28 @@ func (o *ownedBroker) isHeld() bool {
 	return o.held
 }
 
+// lockedWriter is an output buffer goroutines may share.
+type lockedWriter struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
 // newSharedBrokerApp returns an App whose agent1 has a claude grant and
 // whose broker is already owned by another session.
 func newSharedBrokerApp(t *testing.T, handle runner.FakeHandler) (*App, *runner.Fake, *ownedBroker) {
 	t.Helper()
 	owner := &ownedBroker{held: true}
 	fake := runner.NewFake(handle)
-	app := New(fake, testPaths(t), &strings.Builder{}, WithEnvd(fakeEnvd), WithTunnel(owner.tunnel))
+	fb := backendtest.New()
+	fb.Add(vm.Info{Name: "agent1"})
+	// Several sessions of one App print at once in the takeover tests.
+	app := New(fake, testPaths(t), &lockedWriter{}, WithBackend(fb), WithTunnel(owner.tunnel))
 	app.tunnelRetry = time.Millisecond
 	app.brokerWatch = time.Millisecond
 	set, _ := grant.ParseSet([]string{"claude"})
@@ -288,10 +314,7 @@ func TestConcurrentTakeoversForwardOnlyAsOwner(t *testing.T) {
 			mu.Unlock()
 			return nil, errors.New("exit status 255")
 		}
-		if name == "limactl" && args[len(args)-1] == "ls" {
-			return []byte(`[{"name":"agent1","state":"running"}]`), nil
-		}
-		return defaultHandler(nil)(name, args)
+		return sshOnly(name, args)
 	}
 	app, _, o := newSharedBrokerApp(t, handle)
 	owner = o

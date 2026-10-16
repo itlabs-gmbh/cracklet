@@ -5,50 +5,61 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/skiff/internal/agent"
 	"github.com/itlabs-gmbh/skiff/internal/app"
+	"github.com/itlabs-gmbh/skiff/internal/backend/backendtest"
 	"github.com/itlabs-gmbh/skiff/internal/config"
 	"github.com/itlabs-gmbh/skiff/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
+// fakeHandler answers the commands app runs itself; the VMs live in the
+// fake backend.
 func fakeHandler(t *testing.T) runner.FakeHandler {
 	t.Helper()
 	return func(name string, args []string) ([]byte, error) {
-		joined := name + " " + strings.Join(args, " ")
-		switch {
-		case strings.HasPrefix(joined, "limactl list"):
-			return []byte(`{"name":"skiff","status":"Running"}` + "\n"), nil
-		case strings.Contains(joined, "sha256sum"):
-			return []byte(agent.Checksum() + "\n"), nil
-		case strings.Contains(joined, config.AgentPath+" ls"):
-			return []byte(`[{"name":"vm1","index":1,"ip":"172.16.1.2","state":"running","vcpus":2,"mem_mib":1024}]`), nil
-		case strings.Contains(joined, config.AgentPath+" new "):
-			return []byte(`{"name":"box","index":2,"ip":"172.16.2.2","state":"running"}`), nil
-		case strings.Contains(joined, config.AgentPath+" rm "):
-			return nil, nil
-		case name == "ssh", name == "security":
+		if name == "ssh" || name == "security" {
 			return nil, nil
 		}
-		return nil, errors.New("unexpected: " + joined)
+		return nil, errors.New("unexpected: " + name + " " + strings.Join(args, " "))
 	}
 }
 
-func run(t *testing.T, args ...string) (string, *runner.Fake, error) {
+// seededBackend has the one VM most tests expect.
+func seededBackend() *backendtest.Fake {
+	fb := backendtest.New()
+	fb.Add(vm.Info{Name: "vm1", VCPUs: 2, MemMiB: 1024})
+	return fb
+}
+
+// builder returns an appBuilder on the given fakes with extra options.
+func builder(fake *runner.Fake, fb *backendtest.Fake, home string, opts ...app.Option) appBuilder {
+	return func(out io.Writer) (*app.App, error) {
+		opts = append([]app.Option{app.WithBackend(fb)}, opts...)
+		return app.New(fake, config.Paths{Home: home}, out, opts...), nil
+	}
+}
+
+func run(t *testing.T, args ...string) (string, *backendtest.Fake, error) {
+	t.Helper()
+	out, fb, _, err := runWith(t, seededBackend(), args...)
+	return out, fb, err
+}
+
+// runWith runs the CLI against the given backend and returns stdout+stderr,
+// the backend and the runner fake.
+func runWith(t *testing.T, fb *backendtest.Fake, args ...string) (string, *backendtest.Fake, *runner.Fake, error) {
 	t.Helper()
 	fake := runner.NewFake(fakeHandler(t))
 	buf := &bytes.Buffer{}
-	root := newRoot(func(out io.Writer, _ string) (*app.App, error) {
-		return app.New(fake, config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}, out), nil
-	})
+	root := newRoot(builder(fake, fb, t.TempDir()))
 	root.SetOut(buf)
 	root.SetErr(buf)
 	root.SetArgs(args)
 	err := root.Execute()
-	return buf.String(), fake, err
+	return buf.String(), fb, fake, err
 }
 
 func TestLsPrintsTable(t *testing.T) {
@@ -56,28 +67,39 @@ func TestLsPrintsTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ls: %v", err)
 	}
-	if !strings.Contains(out, "NAME") || !strings.Contains(out, "vm1") || !strings.Contains(out, "172.16.1.2") {
+	if !strings.Contains(out, "NAME") || !strings.Contains(out, "vm1") || !strings.Contains(out, "192.168.64.2") {
 		t.Errorf("unexpected output:\n%s", out)
 	}
 }
 
 func TestNewPassesFlags(t *testing.T) {
-	_, fake, err := run(t, "new", "box", "--vcpus", "3", "--mem", "2048", "--disk", "4g")
+	_, fb, err := run(t, "new", "box", "--vcpus", "3", "--mem", "2048")
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	if !fake.Called("limactl shell skiff -- sudo " + config.AgentPath + " new box 3 2048 4G snapshot base") {
-		t.Errorf("flags not forwarded (disk must be canonical):\n%s", fake.Dump())
+	if !fb.Called("create box 3 2048") {
+		t.Errorf("flags not forwarded:\n%s", fb.Dump())
 	}
 }
 
 func TestNewDefaultsAndAutoName(t *testing.T) {
-	_, fake, err := run(t, "new")
+	_, fb, err := run(t, "new")
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	if !fake.Called("limactl shell skiff -- sudo " + config.AgentPath + " new - 2 1024 2G snapshot base") {
-		t.Errorf("defaults not applied:\n%s", fake.Dump())
+	if !fb.Called("create  2 1024") {
+		t.Errorf("defaults not applied:\n%s", fb.Dump())
+	}
+	if _, ok := fb.VM("vm2"); !ok {
+		t.Errorf("the backend picks the next free name, got %v", fb.Names())
+	}
+}
+
+func TestNewRejectsRemovedFlags(t *testing.T) {
+	for _, flag := range []string{"--disk", "--profile", "--fresh"} {
+		if _, _, err := run(t, "new", "box", flag, "x"); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+			t.Errorf("%s belonged to the Lima backend and must be gone, got %v", flag, err)
+		}
 	}
 }
 
@@ -87,18 +109,18 @@ func TestRmRequiresName(t *testing.T) {
 	}
 }
 
-func TestRmCallsAgent(t *testing.T) {
-	_, fake, err := run(t, "rm", "vm1")
+func TestRmCallsTheBackend(t *testing.T) {
+	_, fb, err := run(t, "rm", "vm1")
 	if err != nil {
 		t.Fatalf("rm: %v", err)
 	}
-	if !fake.Called("limactl shell skiff -- sudo " + config.AgentPath + " rm vm1") {
-		t.Errorf("rm not forwarded:\n%s", fake.Dump())
+	if !fb.Called("rm vm1") {
+		t.Errorf("rm not forwarded:\n%s", fb.Dump())
 	}
 }
 
 func TestSSHForwardsCommandWithFlags(t *testing.T) {
-	_, fake, err := run(t, "ssh", "vm1", "ls", "-la")
+	_, _, fake, err := runWith(t, seededBackend(), "ssh", "vm1", "ls", "-la")
 	if err != nil {
 		t.Fatalf("ssh: %v", err)
 	}
@@ -114,7 +136,7 @@ func TestSSHForwardsCommandWithFlags(t *testing.T) {
 }
 
 func TestSSHStripsLeadingSeparator(t *testing.T) {
-	_, fake, err := run(t, "ssh", "vm1", "--", "echo", "hi")
+	_, _, fake, err := runWith(t, seededBackend(), "ssh", "vm1", "--", "echo", "hi")
 	if err != nil {
 		t.Fatalf("ssh: %v", err)
 	}
@@ -124,7 +146,7 @@ func TestSSHStripsLeadingSeparator(t *testing.T) {
 }
 
 func TestBuilderErrorsSurface(t *testing.T) {
-	root := newRoot(func(io.Writer, string) (*app.App, error) { return nil, errors.New("no home") })
+	root := newRoot(func(io.Writer) (*app.App, error) { return nil, errors.New("no home") })
 	root.SetOut(io.Discard)
 	root.SetErr(io.Discard)
 	root.SetArgs([]string{"ls"})
@@ -150,144 +172,57 @@ func TestExitCodeMapping(t *testing.T) {
 	}
 }
 
-func TestStartStopForwardToAgent(t *testing.T) {
-	handler := func(name string, args []string) ([]byte, error) {
-		joined := strings.Join(args, " ")
-		if strings.Contains(joined, config.AgentPath+" start vm1") || strings.Contains(joined, config.AgentPath+" stop vm1") {
-			return []byte(`{"name":"vm1","index":1,"ip":"172.16.1.2","state":"running"}`), nil
-		}
-		return fakeHandler(t)(name, args)
-	}
-	fake := runner.NewFake(handler)
-	for _, verb := range []string{"start", "stop"} {
-		root := newRoot(func(out io.Writer, _ string) (*app.App, error) {
-			return app.New(fake, config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}, out), nil
-		})
-		root.SetOut(io.Discard)
-		root.SetErr(io.Discard)
-		root.SetArgs([]string{verb, "vm1"})
-		if err := root.Execute(); err != nil {
+func TestStartStopForwardToTheBackend(t *testing.T) {
+	for _, verb := range []string{"stop", "start"} {
+		_, fb, err := run(t, verb, "vm1")
+		if err != nil {
 			t.Fatalf("%s: %v", verb, err)
 		}
-		if !fake.CalledWithSuffix(config.AgentPath + " " + verb + " vm1") {
-			t.Errorf("%s not forwarded:\n%s", verb, fake.Dump())
+		if !fb.Called(verb + " vm1") {
+			t.Errorf("%s not forwarded:\n%s", verb, fb.Dump())
 		}
 	}
 }
 
 func TestPrepareAndDoctorWiring(t *testing.T) {
-	handler := func(name string, args []string) ([]byte, error) {
-		joined := name + " " + strings.Join(args, " ")
-		switch {
-		case name == "sw_vers":
-			return []byte("26.7\n"), nil
-		case joined == "sysctl -n machdep.cpu.brand_string":
-			return []byte("Apple M4 Pro\n"), nil
-		case joined == "sysctl -n kern.hv_support":
-			return []byte("1\n"), nil
-		}
-		return fakeHandler(t)(name, args)
-	}
-	fake := runner.NewFake(handler)
-	home := t.TempDir()
-	build := func(out io.Writer, _ string) (*app.App, error) {
-		return app.New(fake, config.Paths{Home: home, LimaHome: "/tmp/lima"}, out,
-			app.WithPlatform("darwin", "arm64"),
-			app.WithLookPath(func(string) (string, error) { return "/usr/local/bin/x", nil })), nil
-	}
-	out := &bytes.Buffer{}
-	root := newRoot(build)
-	root.SetOut(out)
-	root.SetErr(out)
-	root.SetArgs([]string{"doctor"})
-	if err := root.Execute(); err != nil {
+	out, fb, err := run(t, "doctor")
+	if err != nil {
 		t.Fatalf("doctor: %v", err)
 	}
-	if !strings.Contains(out.String(), "Running") {
-		t.Errorf("doctor output should report the instance state:\n%s", out.String())
+	if !strings.Contains(out, "backend: fake") || !fb.Called("doctor") {
+		t.Errorf("doctor output should name the backend and ask it:\n%s", out)
 	}
-
-	root = newRoot(build)
-	root.SetOut(io.Discard)
-	root.SetErr(io.Discard)
-	root.SetArgs([]string{"prepare", "--cpus", "0"})
-	if err := root.Execute(); err == nil {
-		t.Fatal("prepare must reject --cpus 0")
+	out, fb, err = run(t, "prepare")
+	if err != nil {
+		t.Fatalf("prepare: %v\n%s", err, out)
 	}
-}
-
-func TestPrepareResizesOnlyExplicitFlags(t *testing.T) {
-	handler := func(name string, args []string) ([]byte, error) {
-		joined := name + " " + strings.Join(args, " ")
-		switch {
-		case name == "sw_vers":
-			return []byte("26.7\n"), nil
-		case joined == "sysctl -n machdep.cpu.brand_string":
-			return []byte("Apple M4 Pro\n"), nil
-		case joined == "sysctl -n kern.hv_support":
-			return []byte("1\n"), nil
-		case strings.HasPrefix(joined, "limactl list"):
-			return []byte(`{"name":"skiff","status":"Running","cpus":6,"memory":8589934592,"disk":42949672960}` + "\n"), nil
-		case strings.Contains(joined, "sha256sum"):
-			return []byte(agent.Checksum() + "\n"), nil
-		case strings.Contains(joined, config.AgentPath+" ls"):
-			return []byte(`[]`), nil
+	if !fb.Called("prepare") || !strings.Contains(out, "Ready") {
+		t.Errorf("prepare must run the backend's prepare:\n%s\n%s", out, fb.Dump())
+	}
+	for _, flag := range []string{"--backend", "--cpus", "--profile"} {
+		if _, _, err := run(t, "prepare", flag, "x"); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+			t.Errorf("prepare %s belonged to the Lima backend and must be gone, got %v", flag, err)
 		}
-		return nil, nil
-	}
-	fake := runner.NewFake(handler)
-	paths := config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}
-	for _, p := range []string{paths.KeyPath(), paths.PubKeyPath()} {
-		if err := os.WriteFile(p, []byte("key"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	root := newRoot(func(out io.Writer, _ string) (*app.App, error) {
-		return app.New(fake, paths, out,
-			app.WithPlatform("darwin", "arm64"),
-			app.WithLookPath(func(string) (string, error) { return "/usr/local/bin/x", nil }),
-			app.WithEnvd(func(context.Context) ([]byte, error) { return []byte("envd"), nil })), nil
-	})
-	root.SetOut(io.Discard)
-	root.SetErr(io.Discard)
-	root.SetArgs([]string{"prepare", "--memory", "16"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("prepare: %v", err)
-	}
-	// --cpus defaults to 4 but was not given, so the 6-CPU VM keeps its CPUs.
-	if !fake.Called("limactl edit --tty=false --memory 16 skiff") {
-		t.Errorf("only the explicit --memory may be applied:\n%s", fake.Dump())
 	}
 }
 
 func TestDefaultBuilder(t *testing.T) {
 	t.Setenv("SKIFF_HOME", t.TempDir())
-	if a, err := defaultBuilder(io.Discard, ""); err != nil || a == nil {
+	if a, err := defaultBuilder(io.Discard); err != nil || a == nil {
 		t.Fatalf("defaultBuilder: %v", err)
 	}
 }
 
 func TestForwardCommands(t *testing.T) {
-	handler := func(name string, args []string) ([]byte, error) {
-		joined := strings.Join(args, " ")
-		switch {
-		case strings.Contains(joined, config.AgentPath+" forward web"):
-			return []byte(`{"name":"web","index":1,"ip":"172.16.1.2","state":"running","forwards":[{"host":8080,"guest":80,"state":"active"}]}`), nil
-		case strings.Contains(joined, config.AgentPath+" unforward web"):
-			return []byte(`{"name":"web","index":1,"ip":"172.16.1.2","state":"running","forwards":[]}`), nil
-		case strings.Contains(joined, config.AgentPath+" ls"):
-			return []byte(`[{"name":"web","index":1,"ip":"172.16.1.2","state":"running","vcpus":2,"mem_mib":1024,"forwards":[{"host":8080,"guest":80,"state":"active"},{"host":3000,"guest":3000,"state":"active"}]}]`), nil
-		}
-		return fakeHandler(t)(name, args)
-	}
-	fake := runner.NewFake(handler)
+	fb := backendtest.New()
+	fb.Add(vm.Info{Name: "web", VCPUs: 2, MemMiB: 1024})
+	fake := runner.NewFake(fakeHandler(t))
+	home := t.TempDir()
 	exec := func(args ...string) (string, error) {
 		buf := &bytes.Buffer{}
-		root := newRoot(func(out io.Writer, _ string) (*app.App, error) {
-			return app.New(fake, config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}, out,
-				app.WithPortProbe(func(context.Context, int) bool { return true }),
-				app.WithPortCheck(func(int) bool { return false })), nil
-		})
+		root := newRoot(builder(fake, fb, home,
+			app.WithPortProbe(func(context.Context, int) bool { return true }),
+			app.WithPortCheck(func(int) bool { return false })))
 		root.SetOut(buf)
 		root.SetErr(buf)
 		root.SetArgs(args)
@@ -295,64 +230,43 @@ func TestForwardCommands(t *testing.T) {
 		return buf.String(), err
 	}
 
-	if out, err := exec("forward", "web", "8080:80"); err != nil || !strings.Contains(out, "ready") {
+	if out, err := exec("forward", "web", "8080:80", "3000"); err != nil || !strings.Contains(out, "ready") {
 		t.Errorf("forward: %v %q", err, out)
 	}
-	if !fake.CalledWithSuffix(config.AgentPath + " forward web 8080:80") {
-		t.Errorf("forward not forwarded:\n%s", fake.Dump())
+	if !fb.Called("forward web 8080:80 3000:3000") {
+		t.Errorf("forward not forwarded:\n%s", fb.Dump())
 	}
 	if out, err := exec("forward", "web"); err != nil || !strings.Contains(out, "localhost:8080") || !strings.Contains(out, "web:80") {
 		t.Errorf("forward listing: %v %q", err, out)
 	}
+	if out, err := exec("ls"); err != nil || !strings.Contains(out, "PORTS") || !strings.Contains(out, "8080→80,3000→3000") {
+		t.Errorf("ls should show forwards: %v %q", err, out)
+	}
 	if _, err := exec("unforward", "web", "8080"); err != nil {
 		t.Errorf("unforward: %v", err)
 	}
-	if !fake.CalledWithSuffix(config.AgentPath + " unforward web 8080") {
-		t.Errorf("unforward not forwarded:\n%s", fake.Dump())
+	if !fb.Called("unforward web 8080") {
+		t.Errorf("unforward not forwarded:\n%s", fb.Dump())
 	}
 	if _, err := exec("unforward", "web", "abc"); err == nil {
 		t.Error("non-numeric port must be rejected")
 	}
-	if out, err := exec("ls"); err != nil || !strings.Contains(out, "PORTS") || !strings.Contains(out, "8080→80,3000→3000") {
-		t.Errorf("ls should show forwards: %v %q", err, out)
-	}
 }
 
 func TestNewWithPortFlags(t *testing.T) {
-	handler := func(name string, args []string) ([]byte, error) {
-		joined := strings.Join(args, " ")
-		switch {
-		case strings.Contains(joined, config.AgentPath+" new "):
-			return []byte(`{"name":"web","index":1,"ip":"172.16.1.2","state":"running","forwards":[]}`), nil
-		case strings.Contains(joined, config.AgentPath+" forward web"):
-			return []byte(`{"name":"web","index":1,"ip":"172.16.1.2","state":"running","forwards":[{"host":8080,"guest":80,"state":"active"},{"host":3000,"guest":3000,"state":"active"}]}`), nil
-		}
-		return fakeHandler(t)(name, args)
-	}
-	fake := runner.NewFake(handler)
-	root := newRoot(func(out io.Writer, _ string) (*app.App, error) {
-		return app.New(fake, config.Paths{Home: t.TempDir(), LimaHome: "/tmp/lima"}, out,
-			app.WithPortProbe(func(context.Context, int) bool { return true }),
-			app.WithPortCheck(func(int) bool { return false })), nil
-	})
+	fb := backendtest.New()
+	fake := runner.NewFake(fakeHandler(t))
+	root := newRoot(builder(fake, fb, t.TempDir(),
+		app.WithPortProbe(func(context.Context, int) bool { return true }),
+		app.WithPortCheck(func(int) bool { return false })))
 	root.SetOut(io.Discard)
 	root.SetErr(io.Discard)
 	root.SetArgs([]string{"new", "web", "-p", "8080:80", "-p", "3000"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	if !fake.CalledWithSuffix(config.AgentPath + " forward web 8080:80 3000:3000") {
-		t.Errorf("-p flags not applied:\n%s", fake.Dump())
-	}
-}
-
-func TestNewFreshFlag(t *testing.T) {
-	_, fake, err := run(t, "new", "box", "--fresh")
-	if err != nil {
-		t.Fatalf("new --fresh: %v", err)
-	}
-	if !fake.CalledWithSuffix(config.AgentPath + " new box 2 1024 2G fresh base") {
-		t.Errorf("--fresh not forwarded:\n%s", fake.Dump())
+	if !fb.Called("forward web 8080:80 3000:3000") {
+		t.Errorf("-p flags not applied:\n%s", fb.Dump())
 	}
 }
 
@@ -360,7 +274,7 @@ func TestTunnelWiring(t *testing.T) {
 	if _, _, err := run(t, "tunnel"); err == nil {
 		t.Error("tunnel without a name must fail")
 	}
-	_, fake, err := run(t, "tunnel", "vm1")
+	_, _, fake, err := runWith(t, seededBackend(), "tunnel", "vm1")
 	if err == nil || !strings.Contains(err.Error(), "skiff grant vm1") {
 		t.Errorf("tunnel without broker grants should hint at grant, got %v", err)
 	}
@@ -368,25 +282,5 @@ func TestTunnelWiring(t *testing.T) {
 		if strings.HasPrefix(c, "ssh ") {
 			t.Errorf("no ssh without grants: %s", c)
 		}
-	}
-}
-
-func TestNewProfileDefaultsDiskToImageSize(t *testing.T) {
-	_, fake, err := run(t, "new", "agent", "--profile", "paseo")
-	if err != nil {
-		t.Fatalf("new --profile: %v", err)
-	}
-	if !fake.CalledWithSuffix(config.AgentPath + " new agent 2 1024 8G snapshot paseo") {
-		t.Errorf("profile and its image size not forwarded:\n%s", fake.Dump())
-	}
-}
-
-func TestNewRejectsUnknownProfile(t *testing.T) {
-	_, fake, err := run(t, "new", "--profile", "nope")
-	if err == nil || !strings.Contains(err.Error(), "unknown profile") {
-		t.Fatalf("expected unknown profile error, got %v", err)
-	}
-	if len(fake.Calls()) != 0 {
-		t.Errorf("an invalid profile must be rejected before the agent runs:\n%s", fake.Dump())
 	}
 }

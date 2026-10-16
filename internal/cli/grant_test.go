@@ -2,14 +2,12 @@ package cli
 
 import (
 	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/itlabs-gmbh/skiff/internal/app"
-	"github.com/itlabs-gmbh/skiff/internal/config"
 	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
@@ -18,10 +16,8 @@ func runIn(t *testing.T, home string, stdin string, args ...string) (string, *ru
 	t.Helper()
 	fake := runner.NewFake(fakeHandler(t))
 	buf := &bytes.Buffer{}
-	root := newRoot(func(out io.Writer, _ string) (*app.App, error) {
-		tunnel := func(ctx contextT, name string) (string, func(), error) { return "/tmp/t.sock", func() {}, nil }
-		return app.New(fake, config.Paths{Home: home, LimaHome: "/tmp/lima"}, out, app.WithTunnel(tunnel)), nil
-	})
+	tunnel := func(ctx contextT, name string) (string, func(), error) { return "/tmp/t.sock", func() {}, nil }
+	root := newRoot(builder(fake, seededBackend(), home, app.WithTunnel(tunnel)))
 	root.SetOut(buf)
 	root.SetErr(buf)
 	root.SetIn(strings.NewReader(stdin))

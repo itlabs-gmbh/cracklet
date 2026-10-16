@@ -1,33 +1,25 @@
 BINARY := skiff
 GOFLAGS ?=
 
-ENVD := internal/envdbin/bin/skiff-envd
 
-.PHONY: build install test cover lint e2e clean envd
+.PHONY: build install test cover lint e2e clean
 
-# The guest identity daemon of the deprecated Lima backend, cross-compiled and embedded into skiff.
-envd: $(ENVD)
-
-$(ENVD): $(wildcard cmd/skiff-envd/*.go) $(wildcard internal/envd/*.go) go.mod
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o $(ENVD) ./cmd/skiff-envd
-
-build: $(ENVD)
+build:
 	go build $(GOFLAGS) -o bin/$(BINARY) ./cmd/$(BINARY)
 
-install: $(ENVD)
+install:
 	go install $(GOFLAGS) ./cmd/$(BINARY)
 
-test: $(ENVD)
+test:
 	go test -race ./...
 
-cover: $(ENVD)
+cover:
 	go test -race -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | tail -1
 
 lint:
 	gofmt -l . | tee /dev/stderr | test -z "$$(cat)"
 	go vet ./...
-	shellcheck -s bash internal/agent/agent.sh
 
 # Boots a real VM; needs a prepared host (skiff prepare). Always cleans up.
 e2e: build
@@ -37,4 +29,4 @@ e2e: build
 	./bin/$(BINARY) rm e2e-smoke; exit $$status
 
 clean:
-	rm -rf bin coverage.out $(ENVD)
+	rm -rf bin coverage.out

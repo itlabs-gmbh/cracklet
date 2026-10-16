@@ -1,4 +1,4 @@
-// Command skiff runs Firecracker microVMs on Apple Silicon Macs.
+// Command skiff creates throwaway Linux VMs on Apple Silicon Macs.
 package main
 
 import (

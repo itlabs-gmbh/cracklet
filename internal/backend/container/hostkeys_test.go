@@ -24,7 +24,7 @@ func TestCreatePinsTheHostKeyAndRemoveForgetsIt(t *testing.T) {
 	f := newFake()
 	b, fake, _ := newTestBackend(t, f)
 	ctx := context.Background()
-	if _, err := b.Create(ctx, vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+	if _, err := b.Create(ctx, vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if !fake.CalledWithSuffix("ssh-keyscan -q -t ed25519 -T 5 192.168.64.2") {
@@ -37,7 +37,7 @@ func TestCreatePinsTheHostKeyAndRemoveForgetsIt(t *testing.T) {
 	if got, want := knownHosts(t, b), "dev.skiff ssh-ed25519 AAAA-dev-1\n"; got != want {
 		t.Errorf("known_hosts = %q, want %q", got, want)
 	}
-	if _, err := b.Create(ctx, vm.Spec{Name: "web", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+	if _, err := b.Create(ctx, vm.Spec{Name: "web", VCPUs: 1, MemMiB: 512}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got := knownHosts(t, b); !strings.Contains(got, "dev.skiff ssh-ed25519 AAAA-dev-1\n") || !strings.Contains(got, "web.skiff ssh-ed25519 AAAA-web-2\n") {
@@ -52,7 +52,7 @@ func TestCreatePinsTheHostKeyAndRemoveForgetsIt(t *testing.T) {
 	if got := knownHosts(t, b); strings.Contains(got, "dev.skiff") {
 		t.Errorf("known_hosts still has dev after rm: %q", got)
 	}
-	if _, err := b.Create(ctx, vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+	if _, err := b.Create(ctx, vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := knownHosts(t, b), "dev.skiff ssh-ed25519 AAAA-dev-3\nweb.skiff ssh-ed25519 AAAA-web-2\n"; got != want {
@@ -64,7 +64,7 @@ func TestCreateWithoutAHostKeyIsUndone(t *testing.T) {
 	f := newFake()
 	f.noHostKey = true
 	b, fake, _ := newTestBackend(t, f)
-	_, err := b.Create(context.Background(), vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now())
+	_, err := b.Create(context.Background(), vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512}, time.Now())
 	if err == nil || !strings.Contains(err.Error(), "host key") {
 		t.Fatalf("a VM whose key cannot be pinned is unusable with strict checking, got %v", err)
 	}
@@ -76,7 +76,7 @@ func TestCreateWithoutAHostKeyIsUndone(t *testing.T) {
 	}
 	f.noHostKey = false
 	f.failing["ssh-keyscan"] = errors.New("ssh-keyscan: not found")
-	if _, err := b.Create(context.Background(), vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err == nil || !strings.Contains(err.Error(), "not found") {
+	if _, err := b.Create(context.Background(), vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512}, time.Now()); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("a failing keyscan must surface, got %v", err)
 	}
 }
@@ -100,7 +100,7 @@ func TestPinRefusesARecordReplacedDuringTheScan(t *testing.T) {
 		rec.ID = "someone-else"
 		_ = b.saveRecord("dev", rec)
 	}
-	_, err := b.Create(context.Background(), vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now())
+	_, err := b.Create(context.Background(), vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512}, time.Now())
 	if err == nil || !strings.Contains(err.Error(), "replaced") {
 		t.Fatalf("want a replaced error, got %v", err)
 	}
@@ -117,7 +117,7 @@ func TestEveryRecordGetsAUniqueID(t *testing.T) {
 	b, _, _ := newTestBackend(t, newFake())
 	ctx := context.Background()
 	for _, name := range []string{"a", "b"} {
-		if _, err := b.Create(ctx, vm.Spec{Name: name, VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
+		if _, err := b.Create(ctx, vm.Spec{Name: name, VCPUs: 1, MemMiB: 512}, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}

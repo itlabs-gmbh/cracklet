@@ -32,7 +32,7 @@ func TestGatherUsesRunnerAndLookPath(t *testing.T) {
 	if f.OS != "darwin" || f.Arch != "arm64" {
 		t.Errorf("configured platform must be reported, got %s/%s", f.OS, f.Arch)
 	}
-	if f.MacOSVersion != "26.7" || f.Chip != "Apple M4 Pro" || !f.HVSupport || !f.HasBrew || f.HasLima {
+	if f.MacOSVersion != "26.7" || f.Chip != "Apple M4 Pro" || !f.HVSupport || !f.HasBrew {
 		t.Errorf("unexpected facts: %+v", f)
 	}
 }
@@ -62,7 +62,7 @@ func TestGatherToleratesFailingCommands(t *testing.T) {
 	fake := runner.NewFake(func(string, []string) ([]byte, error) { return nil, errors.New("nope") })
 	g := Gatherer{Runner: fake, LookPath: func(string) (string, error) { return "", errors.New("nope") }}
 	f := g.Gather(context.Background())
-	if f.HVSupport || f.HasBrew || f.HasLima || f.MacOSVersion != "" {
+	if f.HVSupport || f.HasBrew || f.MacOSVersion != "" {
 		t.Errorf("failures should yield empty facts, got %+v", f)
 	}
 }

@@ -17,8 +17,8 @@ func newGCCmd(get func() *app.App) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "gc",
-		Short: "Remove orphaned microVMs and leftover host state",
-		Long: `gc removes microVMs that a tool created with 'skiff new --owner' and no
+		Short: "Remove orphaned VMs and leftover host state",
+		Long: `gc removes VMs that a tool created with 'skiff new --owner' and no
 longer tracks. Only VMs with an owner are ever collected, so VMs made by hand
 are safe. --owner and --older-than select which owned VMs go; without either,
 gc removes no VM and only deletes the grants and tokens on the Mac of VMs that

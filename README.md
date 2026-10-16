@@ -140,7 +140,7 @@ forwarding or `sudo` is needed on macOS.
 
 ### Capabilities: credentials and MCPs without copying secrets
 
-A microVM is isolated from your Mac on purpose. When an agent inside needs
+A VM is isolated from your Mac on purpose. When an agent inside needs
 GitHub, Claude Code or an MCP server that only runs on the Mac, skiff opens
 one controlled hole: a **broker** that hands out *connections, never secrets*.
 

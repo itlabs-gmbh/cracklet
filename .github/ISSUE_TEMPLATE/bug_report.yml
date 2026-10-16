@@ -35,20 +35,19 @@ body:
     id: macos
     attributes:
       label: macOS version and chip
-      placeholder: macOS 15.3, Apple M3 Pro
+      placeholder: macOS 26.1, Apple M4 Pro
     validations:
       required: true
   - type: input
-    id: lima
+    id: runtime
     attributes:
-      label: Lima version
-      description: Output of `limactl --version`.
+      label: Runtime version
+      description: Output of `container --version` (or `limactl --version` on the deprecated Lima backend).
   - type: textarea
     id: logs
     attributes:
       label: Relevant logs
       description: |
-        For VM problems:
-        `limactl shell skiff sudo cat /var/lib/skiff/vms/<name>/console.log`
-        `limactl shell skiff sudo journalctl -u skiff-vm-<name>`
+        For VM problems: `container machine logs <name>`; for port forwards
+        `~/.skiff/relay.log`.
       render: shell

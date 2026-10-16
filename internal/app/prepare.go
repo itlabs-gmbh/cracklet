@@ -49,6 +49,10 @@ func vmNames(vms []VMInfo) string {
 }
 
 // RememberBackend stores the active backend as the one later commands use.
+// Prepare calls it after a successful run, so a prepared state directory
+// always carries its backend and a later change of the default cannot move
+// it silently; only a prepared backend is stored, a failed prepare must not
+// strand every later command on it.
 func (a *App) RememberBackend() error {
 	previous, err := backend.LoadName(a.paths)
 	if err != nil {
@@ -77,6 +81,9 @@ func (a *App) Prepare(ctx context.Context, o PrepareOptions) error {
 		return err
 	}
 	if err := a.writeSSHConfig(); err != nil {
+		return err
+	}
+	if err := a.RememberBackend(); err != nil {
 		return err
 	}
 	a.printf("\nReady. Next steps:\n  skiff new            # boot a microVM\n  skiff ssh vm1        # open a shell\n\n"+

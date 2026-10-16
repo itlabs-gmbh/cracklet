@@ -33,15 +33,7 @@ func newPrepareCmd(get func() *app.App) *cobra.Command {
 					return err
 				}
 			}
-			if err := get().Prepare(cmd.Context(), opts); err != nil {
-				return err
-			}
-			// Only a prepared backend becomes the stored choice; a failed
-			// prepare must not strand every later command on it.
-			if chosenBackend(cmd) != "" {
-				return get().RememberBackend()
-			}
-			return nil
+			return get().Prepare(cmd.Context(), opts)
 		},
 	}
 	cmd.Flags().String(backendFlag, "", "backend to use from now on: "+strings.Join(backend.Names(), " or "))

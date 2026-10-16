@@ -7,6 +7,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.0] - 2026-10-16
+
+The first release under the new name. Everything below is a break from
+0.0.1: the binary, state directory, ssh alias and guest paths are renamed,
+and the Lima/Firecracker runtime is replaced by Apple's `container`. Run
+`skiff prepare` and recreate your VMs.
+
 ### Removed
 
 - **The Lima/Firecracker backend.** `prepare --backend`, `--cpus/--memory/
@@ -187,5 +196,6 @@ First public release.
 - The guest CRNG is reseeded from the Lima VM's `/dev/urandom` after every
   snapshot restore so clones diverge immediately.
 
-[Unreleased]: https://github.com/itlabs-gmbh/cracklet/compare/v0.0.1...HEAD
-[0.0.1]: https://github.com/itlabs-gmbh/cracklet/releases/tag/v0.0.1
+[Unreleased]: https://github.com/itlabs-gmbh/skiff/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/itlabs-gmbh/skiff/compare/v0.0.1...v0.1.0
+[0.0.1]: https://github.com/itlabs-gmbh/skiff/releases/tag/v0.0.1

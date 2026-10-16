@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/broker"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/broker"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
 // testPaths returns a short home so Unix sockets fit on macOS.
@@ -88,7 +88,7 @@ func TestCapInitAndLint(t *testing.T) {
 }
 
 func TestCapAddDownloadsAndInstalls(t *testing.T) {
-	body := "name = \"remote\"\n[proxy]\nupstream = \"https://x.example\"\n[proxy.headers]\nAuthorization = \"Bearer {{ secret \\\"keychain:cracklet/claude-token\\\" }}\"\n"
+	body := "name = \"remote\"\n[proxy]\nupstream = \"https://x.example\"\n[proxy.headers]\nAuthorization = \"Bearer {{ secret \\\"keychain:skiff/claude-token\\\" }}\"\n"
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/bad":
@@ -116,7 +116,7 @@ func TestCapAddDownloadsAndInstalls(t *testing.T) {
 	if err := app.CapAdd(context.Background(), srv.URL+"/remote.toml", false, strings.NewReader("n\n")); err == nil || !strings.Contains(err.Error(), "not installed") {
 		t.Errorf("declining must not install, got %v", err)
 	}
-	if !strings.Contains(out.String(), "sends the secret keychain:cracklet/claude-token in the Authorization header") ||
+	if !strings.Contains(out.String(), "sends the secret keychain:skiff/claude-token in the Authorization header") ||
 		!strings.Contains(out.String(), "proxies guest requests to https://x.example") {
 		t.Errorf("confirmation should spell out the consequences:\n%s", out.String())
 	}
@@ -127,15 +127,15 @@ func TestCapAddDownloadsAndInstalls(t *testing.T) {
 	if err != nil || string(data) != body {
 		t.Errorf("installed file = %q, %v", data, err)
 	}
-	if !strings.Contains(out.String(), "cracklet grant <vm> remote") {
+	if !strings.Contains(out.String(), "skiff grant <vm> remote") {
 		t.Errorf("hint missing:\n%s", out.String())
 	}
 }
 
 func TestSecretRefsListLiteralReferences(t *testing.T) {
 	cases := map[string][]string{
-		`Bearer {{ secret "keychain:cracklet/a" }}`: {"keychain:cracklet/a"},
-		"Bearer {{ secret `keychain:cracklet/b` }}": {"keychain:cracklet/b"},
+		`Bearer {{ secret "keychain:skiff/a" }}`:    {"keychain:skiff/a"},
+		"Bearer {{ secret `keychain:skiff/b` }}":    {"keychain:skiff/b"},
 		`{{ secret "env:D" }} {{ secret "env:E" }}`: {"env:D", "env:E"},
 		`plain`: nil,
 	}
@@ -167,7 +167,7 @@ func TestSecretSetAndRemove(t *testing.T) {
 	if in, ok := fake.Input("security -i"); !ok || !strings.Contains(in, "-a claude-token -w \"value\"") {
 		t.Errorf("secret should go to security -i via stdin, got %q:\n%s", in, fake.Dump())
 	}
-	if !strings.Contains(out.String(), "keychain:cracklet/claude-token") {
+	if !strings.Contains(out.String(), "keychain:skiff/claude-token") {
 		t.Errorf("output:\n%s", out.String())
 	}
 	if err := app.SecretSet(context.Background(), "Bad Name", "v"); err == nil {
@@ -176,14 +176,14 @@ func TestSecretSetAndRemove(t *testing.T) {
 	if err := app.SecretRemove(context.Background(), "claude-token"); err != nil {
 		t.Fatal(err)
 	}
-	if !fake.Called("security delete-generic-password -s cracklet -a claude-token") {
+	if !fake.Called("security delete-generic-password -s skiff -a claude-token") {
 		t.Errorf("unexpected calls:\n%s", fake.Dump())
 	}
 }
 
 func TestStartBrokerServesSocket(t *testing.T) {
 	fake := runner.NewFake(func(name string, args []string) ([]byte, error) { return nil, errors.New("no") })
-	dir, err := os.MkdirTemp("/tmp", "cracklet-")
+	dir, err := os.MkdirTemp("/tmp", "skiff-")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	// MinMemMiB is the smallest guest memory cracklet accepts.
+	// MinMemMiB is the smallest guest memory skiff accepts.
 	MinMemMiB = 128
 	// MaxMemMiB caps guest memory (256 GiB) to catch typos before the agent does.
 	MaxMemMiB = 262144
@@ -62,7 +62,7 @@ type Spec struct {
 	// Grants are capabilities to grant right after creation, by capability name.
 	Grants []string
 	// Owner labels the tool or person that manages the VM; only owned VMs
-	// are candidates for `cracklet gc`. Empty means created by hand.
+	// are candidates for `skiff gc`. Empty means created by hand.
 	Owner string
 	// Slot is the VM's position in its owner's pool, e.g. "3"; needs Owner.
 	Slot string
@@ -178,7 +178,7 @@ func NormalizeSize(s string) (string, error) {
 	return m[1] + strings.ToUpper(m[2]), nil
 }
 
-// Validate checks the spec against cracklet limits.
+// Validate checks the spec against skiff limits.
 func (s Spec) Validate() error {
 	if s.Name != "" {
 		if err := ValidateName(s.Name); err != nil {

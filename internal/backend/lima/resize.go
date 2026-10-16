@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	limactl "github.com/itlabs-gmbh/cracklet/internal/lima"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	limactl "github.com/itlabs-gmbh/skiff/internal/lima"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 // ResizeFor returns the changes the explicitly requested size makes to inst.
@@ -34,7 +34,7 @@ func ResizeFor(o backend.PrepareOptions, inst limactl.Instance) (limactl.Resize,
 	if o.Explicit.Disk && gibBytes(o.DiskGiB) != inst.Disk {
 		if gibBytes(o.DiskGiB) < inst.Disk {
 			return limactl.Resize{}, fmt.Errorf("the Lima VM disk is %d GiB and cannot shrink to %d GiB; "+
-				"recreate the VM with 'limactl delete -f %s' and 'cracklet prepare --disk %d' instead",
+				"recreate the VM with 'limactl delete -f %s' and 'skiff prepare --disk %d' instead",
 				inst.Disk>>30, o.DiskGiB, config.Instance, o.DiskGiB)
 		}
 		r.DiskGiB = o.DiskGiB
@@ -67,7 +67,7 @@ func (b *Backend) resizeInstance(ctx context.Context, inst limactl.Instance, r l
 	}
 	b.printf("==> Starting Lima VM %q\n", config.Instance)
 	if err := b.lima.Start(ctx); err != nil {
-		return fmt.Errorf("%w; the new size is saved, re-run 'cracklet prepare' to start the Lima VM", err)
+		return fmt.Errorf("%w; the new size is saved, re-run 'skiff prepare' to start the Lima VM", err)
 	}
 	return nil
 }
@@ -85,7 +85,7 @@ func (b *Backend) refuseWhileMicroVMsRun(ctx context.Context) error {
 	}
 	if len(running) > 0 {
 		return fmt.Errorf("resizing restarts the Lima VM, which would kill the running microVMs %s; "+
-			"stop them with 'cracklet stop NAME' and run prepare again", strings.Join(running, ", "))
+			"stop them with 'skiff stop NAME' and run prepare again", strings.Join(running, ", "))
 	}
 	return nil
 }

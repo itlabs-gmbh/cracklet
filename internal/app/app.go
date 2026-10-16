@@ -1,4 +1,4 @@
-// Package app implements the cracklet workflows on top of a backend that
+// Package app implements the skiff workflows on top of a backend that
 // creates the microVMs and the guest they expose over ssh.
 package app
 
@@ -10,12 +10,12 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/backend/container"
-	"github.com/itlabs-gmbh/cracklet/internal/backend/lima"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/host"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/backend/container"
+	"github.com/itlabs-gmbh/skiff/internal/backend/lima"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/host"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
 // App bundles the collaborators every command needs.
@@ -34,7 +34,7 @@ type App struct {
 	portBusy   PortCheck
 	envd       EnvdSource
 	tunnel     Tunnel
-	// tunnelRetry is the pause before `cracklet tunnel` reconnects.
+	// tunnelRetry is the pause before `skiff tunnel` reconnects.
 	tunnelRetry time.Duration
 	// brokerWatch is how often a session sharing another session's broker
 	// checks whether it is still there.
@@ -43,7 +43,7 @@ type App struct {
 	now func() time.Time
 }
 
-// EnvdSource yields the linux/arm64 cracklet-envd binary that the Lima
+// EnvdSource yields the linux/arm64 skiff-envd binary that the Lima
 // backend ships into its VM.
 type EnvdSource = lima.EnvdSource
 

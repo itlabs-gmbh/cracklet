@@ -6,13 +6,13 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/itlabs-gmbh/cracklet/internal/secret"
+	"github.com/itlabs-gmbh/skiff/internal/secret"
 )
 
 var secretNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 // SecretSet stores a value in the macOS Keychain for caps to reference as
-// keychain:cracklet/<name>.
+// keychain:skiff/<name>.
 func (a *App) SecretSet(ctx context.Context, name, value string) error {
 	if !secretNameRe.MatchString(name) {
 		return fmt.Errorf("secret name %q must be lowercase letters, digits and dashes", name)

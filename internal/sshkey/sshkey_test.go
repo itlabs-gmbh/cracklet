@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
 func TestEnsureGeneratesMissingKey(t *testing.T) {
 	fake := runner.NewFake(func(string, []string) ([]byte, error) { return nil, nil })
-	paths := config.Paths{Home: filepath.Join(t.TempDir(), "cracklet")}
+	paths := config.Paths{Home: filepath.Join(t.TempDir(), "skiff")}
 	out := &bytes.Buffer{}
 	if err := Ensure(context.Background(), fake, paths, out); err != nil {
 		t.Fatal(err)

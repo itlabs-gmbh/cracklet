@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 // dialAttempt bounds one connection attempt while a machine boots; a SYN to
 // an address that is not up yet would otherwise block for the OS timeout.
 const dialAttempt = 2 * time.Second
 
-// errStoppedWhileBooting reports a deliberate `cracklet stop` during a boot;
+// errStoppedWhileBooting reports a deliberate `skiff stop` during a boot;
 // the VM is kept, its disk included.
 var errStoppedWhileBooting = errors.New("stopped while it booted")
 
@@ -98,7 +98,7 @@ func (b *Backend) restoreMachines(ctx context.Context) error {
 		b.statusf("==> Restarted microVMs: %s\n", strings.Join(started, ", "))
 	}
 	for _, name := range failed {
-		b.statusf("  [WARN] %s did not come back; run 'cracklet start %s'\n", name, name)
+		b.statusf("  [WARN] %s did not come back; run 'skiff start %s'\n", name, name)
 	}
 	return nil
 }

@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/itlabs-gmbh/cracklet/internal/app"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/app"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 func newNewCmd(get func() *app.App) *cobra.Command {
@@ -40,11 +40,11 @@ func newNewCmd(get func() *app.App) *cobra.Command {
 	cmd.Flags().IntVar(&spec.MemMiB, "mem", config.DefaultMemMiB, "memory in MiB")
 	cmd.Flags().StringVar(&spec.Disk, "disk", "", "root disk size, e.g. 4G (default: the profile's image size; anything else cold-boots)")
 	cmd.Flags().StringVar(&spec.Profile, "profile", vm.ProfileBase,
-		"guest image: "+strings.Join(vm.ProfileNames(), ", ")+" (build it first with 'cracklet prepare --profile')")
+		"guest image: "+strings.Join(vm.ProfileNames(), ", ")+" (build it first with 'skiff prepare --profile')")
 	cmd.Flags().StringArrayVarP(&spec.Forwards, "port", "p", nil, "forward localhost:[HOST:]GUEST to the VM (repeatable)")
 	cmd.Flags().BoolVar(&spec.Fresh, "fresh", false, "cold-boot instead of restoring the golden snapshot")
 	cmd.Flags().StringArrayVar(&spec.Grants, "grant", nil, "grant a capability right away, e.g. claude or github (repeatable)")
-	cmd.Flags().StringVar(&spec.Owner, "owner", "", "label the tool or person managing the VM; owned VMs can be collected by 'cracklet gc'")
+	cmd.Flags().StringVar(&spec.Owner, "owner", "", "label the tool or person managing the VM; owned VMs can be collected by 'skiff gc'")
 	cmd.Flags().StringVar(&spec.Slot, "slot", "", "the VM's position in its owner's pool, e.g. 3 (needs --owner)")
 	return cmd
 }
@@ -53,8 +53,8 @@ func newForwardCmd(get func() *app.App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "forward NAME [[HOST:]GUEST...]",
 		Short: "Expose VM ports on localhost (lists forwards when no ports are given)",
-		Example: "  cracklet forward web 8080        # localhost:8080 -> web:8080\n" +
-			"  cracklet forward web 3000:80     # localhost:3000 -> web:80",
+		Example: "  skiff forward web 8080        # localhost:8080 -> web:8080\n" +
+			"  skiff forward web 3000:80     # localhost:3000 -> web:80",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			info, err := get().Forward(cmd.Context(), args[0], args[1:])
@@ -271,8 +271,8 @@ func newTunnelCmd(get func() *app.App) *cobra.Command {
 		Short: "Serve a microVM's broker without an interactive session",
 		Long: `tunnel holds the broker forward into NAME until it is interrupted or NAME
 stops, reconnecting when the connection drops. Use it when the guest is
-reached by something other than 'cracklet ssh', e.g. an editor or agent
-runner with its own ssh session. 'cracklet ssh NAME' keeps working alongside.`,
+reached by something other than 'skiff ssh', e.g. an editor or agent
+runner with its own ssh session. 'skiff ssh NAME' keeps working alongside.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return get().Tunnel(cmd.Context(), args[0])
@@ -285,12 +285,12 @@ func newExecCmd(get func() *app.App) *cobra.Command {
 		Use:   "exec NAME -- command [arg...]",
 		Short: "Run a command in a microVM with its arguments passed verbatim",
 		Long: `exec runs a command in a microVM with every argument quoted, so the guest
-receives exactly the argument vector given here. Unlike 'cracklet ssh NAME cmd',
+receives exactly the argument vector given here. Unlike 'skiff ssh NAME cmd',
 no word is re-split or expanded by the guest shell; scripts and plugins can pass
 untrusted strings safely. Stdin, stdout, stderr and the exit status are
 forwarded like with ssh.`,
-		Example: "  cracklet exec dev -- sh -c 'echo $HOME | wc -c'\n" +
-			"  cracklet exec dev -- git commit -m \"it's done\"",
+		Example: "  skiff exec dev -- sh -c 'echo $HOME | wc -c'\n" +
+			"  skiff exec dev -- git commit -m \"it's done\"",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return get().Exec(cmd.Context(), args[0], remoteArgs(args))
@@ -301,7 +301,7 @@ forwarded like with ssh.`,
 }
 
 // remoteArgs returns everything after NAME. A single leading "--" is
-// cracklet's own separator (`cracklet ssh NAME -- cmd`); a later one belongs
+// skiff's own separator (`skiff ssh NAME -- cmd`); a later one belongs
 // to the remote command.
 func remoteArgs(args []string) []string {
 	remote := args[1:]

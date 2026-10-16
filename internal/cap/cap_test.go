@@ -66,8 +66,8 @@ func TestParseRejectsProblems(t *testing.T) {
 }
 
 func TestSecretRefsRequireLiterals(t *testing.T) {
-	refs, err := SecretRefs(`Bearer {{ secret "keychain:cracklet/a" }} {{ if .VM }}{{ secret "env:B" }}{{ end }}`)
-	if err != nil || strings.Join(refs, ",") != "keychain:cracklet/a,env:B" {
+	refs, err := SecretRefs(`Bearer {{ secret "keychain:skiff/a" }} {{ if .VM }}{{ secret "env:B" }}{{ end }}`)
+	if err != nil || strings.Join(refs, ",") != "keychain:skiff/a,env:B" {
 		t.Fatalf("refs = %v, %v", refs, err)
 	}
 	refs, err = SecretRefs(`{{ define "h" }}{{ secret "env:H" }}{{ end }}{{ template "h" . }}`)
@@ -129,7 +129,7 @@ func TestEmbeddedDefaultsAreValid(t *testing.T) {
 	if !ok || api.Upstream != "https://api.github.com" {
 		t.Fatalf("github should route api.github.com, got %+v, %v", api, ok)
 	}
-	if refs := set["github"].Proxy.SecretRefs(); strings.Join(refs, ",") != "keychain:cracklet/github-token,keychain:cracklet/github-token" {
+	if refs := set["github"].Proxy.SecretRefs(); strings.Join(refs, ",") != "keychain:skiff/github-token,keychain:skiff/github-token" {
 		t.Errorf("git and gh must share the one token, got %v", refs)
 	}
 	g := set["github"].Guest
@@ -152,10 +152,10 @@ func TestEmbeddedDefaultsAreValid(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"github.com.users.cracklet.oauth_token": "tok",
-		"github.com.git_protocol":               "https",
-		"github.com.user":                       "cracklet",
-		"github.com.oauth_token":                "tok",
+		"github.com.users.skiff.oauth_token": "tok",
+		"github.com.git_protocol":            "https",
+		"github.com.user":                    "skiff",
+		"github.com.oauth_token":             "tok",
 	}
 	if got := yamlLeaves(t, hosts); !maps.Equal(got, want) {
 		t.Errorf("hosts.yml block has the wrong shape:\n got %v\nwant %v\n%s", got, want, hosts)
@@ -199,9 +199,9 @@ func yamlLeaves(t *testing.T, text string) map[string]string {
 }
 
 func TestYAMLLeavesSeesNesting(t *testing.T) {
-	// The token one level too shallow must not pass for users.cracklet.oauth_token.
-	got := yamlLeaves(t, "github.com:\n    users:\n        cracklet:\n    oauth_token: tok\n")
-	if _, ok := got["github.com.users.cracklet.oauth_token"]; ok || got["github.com.oauth_token"] != "tok" {
+	// The token one level too shallow must not pass for users.skiff.oauth_token.
+	got := yamlLeaves(t, "github.com:\n    users:\n        skiff:\n    oauth_token: tok\n")
+	if _, ok := got["github.com.users.skiff.oauth_token"]; ok || got["github.com.oauth_token"] != "tok" {
 		t.Errorf("misnested token read as %v", got)
 	}
 }
@@ -326,7 +326,7 @@ func TestSetNamesSorted(t *testing.T) {
 func TestRenderSurfacesResolverError(t *testing.T) {
 	data := TemplateData{VM: "v", BrokerURL: "http://b", PseudoToken: "t"}
 	secret := func(ref string) (string, error) { return "", errors.New("keychain item missing") }
-	_, err := Render(`Bearer {{ secret "keychain:cracklet/x" }}`, data, secret)
+	_, err := Render(`Bearer {{ secret "keychain:skiff/x" }}`, data, secret)
 	if err == nil || err.Error() != "keychain item missing" {
 		t.Fatalf("want the resolver's message, got %v", err)
 	}

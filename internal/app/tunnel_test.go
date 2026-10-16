@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/broker"
-	"github.com/itlabs-gmbh/cracklet/internal/grant"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/broker"
+	"github.com/itlabs-gmbh/skiff/internal/grant"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
 // tunnelScript scripts the VM states `ls` reports and what each `ssh -N`
@@ -99,7 +99,7 @@ func TestTunnelHoldsForwardUntilCancelled(t *testing.T) {
 			t.Errorf("missing %q in %s", want, calls[0])
 		}
 	}
-	if !strings.HasSuffix(calls[0], "agent1.cracklet") || strings.Contains(calls[0], " -A ") {
+	if !strings.HasSuffix(calls[0], "agent1.skiff") || strings.Contains(calls[0], " -A ") {
 		t.Errorf("tunnel must run no command and forward no agent: %s", calls[0])
 	}
 	audit, err := os.ReadFile(app.paths.AuditLog())
@@ -136,7 +136,7 @@ func TestTunnelReconnectsUntilVMStops(t *testing.T) {
 func TestTunnelRequiresRunningVM(t *testing.T) {
 	app, fake := newTunnelApp(t, &tunnelScript{states: []string{"stopped"}}, "claude")
 	err := app.Tunnel(context.Background(), "agent1")
-	if err == nil || !strings.Contains(err.Error(), "cracklet start agent1") {
+	if err == nil || !strings.Contains(err.Error(), "skiff start agent1") {
 		t.Errorf("want a start hint, got %v", err)
 	}
 	if len(tunnelCalls(fake)) != 0 {
@@ -148,7 +148,7 @@ func TestTunnelNeedsBrokerGrant(t *testing.T) {
 	for _, grants := range [][]string{nil, {"ssh-agent"}} {
 		app, _ := newTunnelApp(t, &tunnelScript{states: []string{"running"}}, grants...)
 		err := app.Tunnel(context.Background(), "agent1")
-		if err == nil || !strings.Contains(err.Error(), "cracklet grant agent1") {
+		if err == nil || !strings.Contains(err.Error(), "skiff grant agent1") {
 			t.Errorf("grants %v: want a grant hint, got %v", grants, err)
 		}
 	}

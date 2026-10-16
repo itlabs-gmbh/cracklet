@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/agent"
-	"github.com/itlabs-gmbh/cracklet/internal/app"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/agent"
+	"github.com/itlabs-gmbh/skiff/internal/app"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
 func fakeHandler(t *testing.T) runner.FakeHandler {
@@ -21,7 +21,7 @@ func fakeHandler(t *testing.T) runner.FakeHandler {
 		joined := name + " " + strings.Join(args, " ")
 		switch {
 		case strings.HasPrefix(joined, "limactl list"):
-			return []byte(`{"name":"cracklet","status":"Running"}` + "\n"), nil
+			return []byte(`{"name":"skiff","status":"Running"}` + "\n"), nil
 		case strings.Contains(joined, "sha256sum"):
 			return []byte(agent.Checksum() + "\n"), nil
 		case strings.Contains(joined, config.AgentPath+" ls"):
@@ -66,7 +66,7 @@ func TestNewPassesFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	if !fake.Called("limactl shell cracklet -- sudo " + config.AgentPath + " new box 3 2048 4G snapshot base") {
+	if !fake.Called("limactl shell skiff -- sudo " + config.AgentPath + " new box 3 2048 4G snapshot base") {
 		t.Errorf("flags not forwarded (disk must be canonical):\n%s", fake.Dump())
 	}
 }
@@ -76,7 +76,7 @@ func TestNewDefaultsAndAutoName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	if !fake.Called("limactl shell cracklet -- sudo " + config.AgentPath + " new - 2 1024 2G snapshot base") {
+	if !fake.Called("limactl shell skiff -- sudo " + config.AgentPath + " new - 2 1024 2G snapshot base") {
 		t.Errorf("defaults not applied:\n%s", fake.Dump())
 	}
 }
@@ -92,7 +92,7 @@ func TestRmCallsAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rm: %v", err)
 	}
-	if !fake.Called("limactl shell cracklet -- sudo " + config.AgentPath + " rm vm1") {
+	if !fake.Called("limactl shell skiff -- sudo " + config.AgentPath + " rm vm1") {
 		t.Errorf("rm not forwarded:\n%s", fake.Dump())
 	}
 }
@@ -104,7 +104,7 @@ func TestSSHForwardsCommandWithFlags(t *testing.T) {
 	}
 	found := false
 	for _, c := range fake.Calls() {
-		if strings.HasPrefix(c, "ssh -F ") && strings.HasSuffix(c, " vm1.cracklet -- ls -la") {
+		if strings.HasPrefix(c, "ssh -F ") && strings.HasSuffix(c, " vm1.skiff -- ls -la") {
 			found = true
 		}
 	}
@@ -118,7 +118,7 @@ func TestSSHStripsLeadingSeparator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ssh: %v", err)
 	}
-	if !fake.CalledWithSuffix(" vm1.cracklet -- echo hi") || fake.CalledWithSuffix(" vm1.cracklet -- -- echo hi") {
+	if !fake.CalledWithSuffix(" vm1.skiff -- echo hi") || fake.CalledWithSuffix(" vm1.skiff -- -- echo hi") {
 		t.Errorf("a user-supplied -- must not be doubled:\n%s", fake.Dump())
 	}
 }
@@ -227,7 +227,7 @@ func TestPrepareResizesOnlyExplicitFlags(t *testing.T) {
 		case joined == "sysctl -n kern.hv_support":
 			return []byte("1\n"), nil
 		case strings.HasPrefix(joined, "limactl list"):
-			return []byte(`{"name":"cracklet","status":"Running","cpus":6,"memory":8589934592,"disk":42949672960}` + "\n"), nil
+			return []byte(`{"name":"skiff","status":"Running","cpus":6,"memory":8589934592,"disk":42949672960}` + "\n"), nil
 		case strings.Contains(joined, "sha256sum"):
 			return []byte(agent.Checksum() + "\n"), nil
 		case strings.Contains(joined, config.AgentPath+" ls"):
@@ -255,13 +255,13 @@ func TestPrepareResizesOnlyExplicitFlags(t *testing.T) {
 		t.Fatalf("prepare: %v", err)
 	}
 	// --cpus defaults to 4 but was not given, so the 6-CPU VM keeps its CPUs.
-	if !fake.Called("limactl edit --tty=false --memory 16 cracklet") {
+	if !fake.Called("limactl edit --tty=false --memory 16 skiff") {
 		t.Errorf("only the explicit --memory may be applied:\n%s", fake.Dump())
 	}
 }
 
 func TestDefaultBuilder(t *testing.T) {
-	t.Setenv("CRACKLET_HOME", t.TempDir())
+	t.Setenv("SKIFF_HOME", t.TempDir())
 	if a, err := defaultBuilder(io.Discard, ""); err != nil || a == nil {
 		t.Fatalf("defaultBuilder: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestTunnelWiring(t *testing.T) {
 		t.Error("tunnel without a name must fail")
 	}
 	_, fake, err := run(t, "tunnel", "vm1")
-	if err == nil || !strings.Contains(err.Error(), "cracklet grant vm1") {
+	if err == nil || !strings.Contains(err.Error(), "skiff grant vm1") {
 		t.Errorf("tunnel without broker grants should hint at grant, got %v", err)
 	}
 	for _, c := range fake.Calls() {

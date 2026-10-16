@@ -1,4 +1,4 @@
-// Package backend is the seam between the cracklet workflows (app) and the
+// Package backend is the seam between the skiff workflows (app) and the
 // runtime that actually creates microVMs. It exists to move from Lima with
 // nested Firecracker to apple/container; see docs/design/container-backend.md.
 // Everything that is the same for every runtime (grants, broker, caps, the
@@ -11,7 +11,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 // PrepareOptions size a shared runtime VM (Lima) and pick the guest image
@@ -52,7 +52,7 @@ type Conn interface {
 var ErrNoDial = errors.New("direct connections to guests are not supported")
 
 // ForwardRelay is implemented by backends whose port forwards are served on
-// the Mac by `cracklet _relay` (a detached child process of the command that
+// the Mac by `skiff _relay` (a detached child process of the command that
 // needed it) rather than inside a runtime VM. ServeForwards listens on every recorded forward until ctx ends or the
 // backend decides the relay has nothing left to do.
 type ForwardRelay interface {
@@ -66,7 +66,7 @@ type Capabilities struct {
 	Snapshots bool
 	// Profiles means a profile sizes the root disk.
 	Profiles bool
-	// Forwards means `cracklet forward` works.
+	// Forwards means `skiff forward` works.
 	Forwards bool
 	// GuestFirewall means guests are confined to internet-only.
 	GuestFirewall bool
@@ -92,7 +92,7 @@ type Backend interface {
 	// keys. It validates o before it runs anything.
 	Prepare(ctx context.Context, o PrepareOptions) error
 	// Doctor prints the host and runtime state without changing anything and
-	// fails when the host cannot run cracklet.
+	// fails when the host cannot run skiff.
 	Doctor(ctx context.Context) error
 	// Ready brings the runtime up for a foreground command (Lima: start a
 	// stopped instance and restore its microVMs) and fails with a hint when
@@ -125,14 +125,14 @@ type Backend interface {
 	Unforward(ctx context.Context, name string, hostPorts []int) (vm.Info, error)
 
 	// SSHProxyCommand is the ProxyCommand line rendered into ssh_config, with
-	// ssh's %h and %p placeholders (e.g. "cracklet _dial %h %p").
+	// ssh's %h and %p placeholders (e.g. "skiff _dial %h %p").
 	SSHProxyCommand() string
 	// KnownHostsFile is the file with the pinned host key of every microVM,
 	// rendered into ssh_config with strict host key checking; empty when the
 	// backend does not pin keys.
 	KnownHostsFile() string
 	// Dial opens a TCP connection to port inside the named VM. It backs
-	// `cracklet _dial` and the forward relay; backends without a direct path
+	// `skiff _dial` and the forward relay; backends without a direct path
 	// return ErrNoDial.
 	Dial(ctx context.Context, name string, port int) (Conn, error)
 }

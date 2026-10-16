@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
-const testVersion = "v0.0.0-20261006143901-0b5ed29f8468"
+const testVersion = "v0.0.0-20261015181303-cc10579fd691"
 
 func goFound(name string) (string, error) {
 	if name == "go" {
@@ -140,7 +140,7 @@ func TestBuildSurfacesCompileFailure(t *testing.T) {
 	})
 	b := Builder{Runner: fake, LookPath: goFound, Version: testVersion, TempDir: t.TempDir()}
 	_, err := b.Build(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "cross-compile cracklet-envd") || !strings.Contains(err.Error(), "undefined: foo") {
+	if err == nil || !strings.Contains(err.Error(), "cross-compile skiff-envd") || !strings.Contains(err.Error(), "undefined: foo") {
 		t.Errorf("want wrapped compiler error, got %v", err)
 	}
 }
@@ -163,7 +163,7 @@ func TestModuleDirRejectsBadToolOutput(t *testing.T) {
 
 func TestBuildFailsWhenTempDirUnwritable(t *testing.T) {
 	b := Builder{Runner: runner.NewFake(toolchain(t, t.TempDir(), 4096)), LookPath: goFound, Version: testVersion,
-		TempDir: "/nonexistent/cracklet"}
+		TempDir: "/nonexistent/skiff"}
 	if _, err := b.Build(context.Background()); err == nil || !strings.Contains(err.Error(), "build directory") {
 		t.Errorf("want build directory error, got %v", err)
 	}

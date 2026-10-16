@@ -8,17 +8,17 @@ import (
 	"os/exec"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
 // TestBuildWithRealToolchain exercises the `go install ...@latest` path end to
 // end: resolve a published module version and cross-compile the daemon from the
 // module cache. It needs network and a Go toolchain, so it only runs on demand:
 //
-//	CRACKLET_REAL_TOOLCHAIN=1 go test -run TestBuildWithRealToolchain ./internal/envdbin/
+//	SKIFF_REAL_TOOLCHAIN=1 go test -run TestBuildWithRealToolchain ./internal/envdbin/
 func TestBuildWithRealToolchain(t *testing.T) {
-	if os.Getenv("CRACKLET_REAL_TOOLCHAIN") == "" {
-		t.Skip("set CRACKLET_REAL_TOOLCHAIN=1 to run")
+	if os.Getenv("SKIFF_REAL_TOOLCHAIN") == "" {
+		t.Skip("set SKIFF_REAL_TOOLCHAIN=1 to run")
 	}
 	var stderr bytes.Buffer
 	r := &runner.Exec{Stdin: bytes.NewReader(nil), Stdout: io.Discard, Stderr: &stderr}

@@ -6,29 +6,29 @@ import (
 )
 
 func TestDefaultPathsHonourEnv(t *testing.T) {
-	t.Setenv("CRACKLET_HOME", "/custom/cracklet")
+	t.Setenv("SKIFF_HOME", "/custom/skiff")
 	t.Setenv("LIMA_HOME", "/custom/lima")
 	p, err := DefaultPaths()
 	if err != nil {
 		t.Fatalf("DefaultPaths: %v", err)
 	}
-	if p.Home != "/custom/cracklet" || p.LimaHome != "/custom/lima" {
+	if p.Home != "/custom/skiff" || p.LimaHome != "/custom/lima" {
 		t.Errorf("unexpected paths: %+v", p)
 	}
-	if p.LimaSSHConfig("cracklet") != "/custom/lima/cracklet/ssh.config" {
-		t.Errorf("LimaSSHConfig = %q", p.LimaSSHConfig("cracklet"))
+	if p.LimaSSHConfig("skiff") != "/custom/lima/skiff/ssh.config" {
+		t.Errorf("LimaSSHConfig = %q", p.LimaSSHConfig("skiff"))
 	}
 }
 
 func TestDefaultPathsFallBackToHome(t *testing.T) {
-	t.Setenv("CRACKLET_HOME", "")
+	t.Setenv("SKIFF_HOME", "")
 	t.Setenv("LIMA_HOME", "")
 	t.Setenv("HOME", "/Users/test")
 	p, err := DefaultPaths()
 	if err != nil {
 		t.Fatalf("DefaultPaths: %v", err)
 	}
-	if p.Home != "/Users/test/.cracklet" || p.LimaHome != "/Users/test/.lima" {
+	if p.Home != "/Users/test/.skiff" || p.LimaHome != "/Users/test/.lima" {
 		t.Errorf("unexpected paths: %+v", p)
 	}
 }

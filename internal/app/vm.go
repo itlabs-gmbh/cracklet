@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 // cleanupTimeout bounds the best-effort removal of a VM whose creation was
@@ -74,7 +74,7 @@ func (a *App) NewVM(ctx context.Context, spec vm.Spec) (VMInfo, error) {
 			return info, fmt.Errorf("%s was created, but clearing grants left by an earlier VM of that name failed: %w", info.Name, err)
 		}
 	}
-	a.printf("%s is running at %s\n  cracklet ssh %s\n  ssh %s.%s\n", info.Name, info.IP, info.Name, info.Name, config.Instance)
+	a.printf("%s is running at %s\n  skiff ssh %s\n  ssh %s.%s\n", info.Name, info.IP, info.Name, info.Name, config.Instance)
 	if len(forwards) > 0 {
 		if info, err = a.forward(ctx, info, forwards); err != nil {
 			return info, err
@@ -179,13 +179,13 @@ func (a *App) InspectVM(ctx context.Context, name string) (VMInfo, error) {
 // rolls back on its own, so the removal is best-effort and waits for its lock.
 func (a *App) cleanupInterrupted(name string) {
 	if name == "" {
-		a.printf("creation interrupted; check 'cracklet ls' and remove leftovers with 'cracklet rm'\n")
+		a.printf("creation interrupted; check 'skiff ls' and remove leftovers with 'skiff rm'\n")
 		return
 	}
 	a.printf("creation of %s interrupted, cleaning up\n", name)
 	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 	defer cancel()
 	if _, err := a.backend.Remove(ctx, name, nil); err != nil {
-		a.printf("  cleanup did not complete (%v); check 'cracklet ls'\n", err)
+		a.printf("  cleanup did not complete (%v); check 'skiff ls'\n", err)
 	}
 }

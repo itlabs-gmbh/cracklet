@@ -1,4 +1,4 @@
-// Command cracklet-envd runs inside every cracklet microVM. It waits on vsock for the
+// Command skiff-envd runs inside every skiff microVM. It waits on vsock for the
 // identity message the host agent sends after a snapshot restore and applies
 // it (IP, route, hostname, clock, entropy).
 package main
@@ -10,14 +10,14 @@ import (
 	"log"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/envd"
+	"github.com/itlabs-gmbh/skiff/internal/envd"
 )
 
 const hostnameFile = "/etc/hostname"
 
 func main() {
 	log.SetFlags(0)
-	log.SetPrefix("cracklet-envd: ")
+	log.SetPrefix("skiff-envd: ")
 	ln, err := listen(envd.Port)
 	if err != nil {
 		log.Fatalf("listen on vsock port %d: %v", envd.Port, err)

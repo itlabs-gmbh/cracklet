@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
 )
 
 func TestDialIsHiddenAndValidatesPort(t *testing.T) {
@@ -25,16 +25,16 @@ func TestDialIsHiddenAndValidatesPort(t *testing.T) {
 	if !found {
 		t.Fatal("_dial not registered")
 	}
-	if _, _, err := run(t, "_dial", "vm1.cracklet", "abc"); err == nil || !strings.Contains(err.Error(), "invalid port") {
+	if _, _, err := run(t, "_dial", "vm1.skiff", "abc"); err == nil || !strings.Contains(err.Error(), "invalid port") {
 		t.Errorf("want invalid port, got %v", err)
 	}
-	if _, _, err := run(t, "_dial", "vm1.cracklet"); err == nil {
+	if _, _, err := run(t, "_dial", "vm1.skiff"); err == nil {
 		t.Error("_dial needs HOST and PORT")
 	}
 }
 
 func TestDialOnLimaExplainsItself(t *testing.T) {
-	_, fake, err := run(t, "_dial", "vm1.cracklet", "22")
+	_, fake, err := run(t, "_dial", "vm1.skiff", "22")
 	if !errors.Is(err, backend.ErrNoDial) {
 		t.Fatalf("the Lima backend has no direct path, got %v", err)
 	}

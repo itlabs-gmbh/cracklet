@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
-// GCOptions selects the microVMs `cracklet gc` removes. Only VMs with an
+// GCOptions selects the microVMs `skiff gc` removes. Only VMs with an
 // owner are ever collected; VMs made by hand have none. Without Owner and
 // OlderThan no VM is selected and gc only prunes host-side leftovers.
 type GCOptions struct {
@@ -53,7 +53,7 @@ func (o GCOptions) validate() error {
 	return nil
 }
 
-// stateCreating is what the agent reports while `cracklet new` builds a VM.
+// stateCreating is what the agent reports while `skiff new` builds a VM.
 const stateCreating = "creating"
 
 func (o GCOptions) collects(v VMInfo, now time.Time) bool {

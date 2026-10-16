@@ -88,7 +88,7 @@ func (e *Exec) RunWithInput(ctx context.Context, input io.Reader, name string, a
 }
 
 // newCommand wires context cancellation to a polite SIGINT followed by SIGKILL
-// after waitDelay, so Ctrl-C in cracklet also stops limactl and ssh.
+// after waitDelay, so Ctrl-C in skiff also stops limactl and ssh.
 func newCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }

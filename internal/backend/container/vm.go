@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 // machine is one entry of `container machine ls --format json`.
@@ -57,7 +57,7 @@ func (b *Backend) machines(ctx context.Context) (map[string]machine, error) {
 	return byName, nil
 }
 
-// List implements backend.Backend: the machines cracklet created (it keeps a
+// List implements backend.Backend: the machines skiff created (it keeps a
 // record for each), in record order. List is read-only; a record without a
 // machine is skipped, not deleted, because it may belong to a VM another
 // command is creating right now (pruneRecords handles leftovers under the
@@ -82,7 +82,7 @@ func (b *Backend) List(ctx context.Context) ([]vm.Info, error) {
 		}
 		r, _, err := b.loadRecord(name)
 		if errors.Is(err, errCorruptRecord) {
-			b.statusf("  [WARN] %v; 'cracklet rm %s' removes the VM\n", err, name)
+			b.statusf("  [WARN] %v; 'skiff rm %s' removes the VM\n", err, name)
 		} else if err != nil {
 			return nil, err
 		}
@@ -108,7 +108,7 @@ func (b *Backend) Create(ctx context.Context, spec vm.Spec, createdAt time.Time)
 	}
 	info, err := b.waitForSSH(ctx, name)
 	if errors.Is(err, errStoppedWhileBooting) {
-		return vm.Info{}, fmt.Errorf("%w and is kept; 'cracklet start %s' boots it", err, name)
+		return vm.Info{}, fmt.Errorf("%w and is kept; 'skiff start %s' boots it", err, name)
 	}
 	if err == nil {
 		err = b.pinHostKeys(ctx, name, id, info.IP)
@@ -196,11 +196,11 @@ func (b *Backend) discard(ctx context.Context, name string, err error) error {
 // discardLocked removes the machine (if the API created one) and the record
 // of a failed creation and folds a failed cleanup into err, so the user learns
 // about a leftover instead of finding an invisible machine later. A VM that
-// `cracklet stop` stopped while it was still booting is kept: its record says
+// `skiff stop` stopped while it was still booting is kept: its record says
 // so, and stop promises to keep the disk.
 func (b *Backend) discardLocked(ctx context.Context, name string, err error) error {
 	if rec, ok, recErr := b.loadRecord(name); recErr == nil && ok && !rec.Running {
-		return fmt.Errorf("%w; %s was stopped meanwhile and is kept, 'cracklet start %s' boots it", err, name, name)
+		return fmt.Errorf("%w; %s was stopped meanwhile and is kept, 'skiff start %s' boots it", err, name, name)
 	}
 	machines, lsErr := b.machines(ctx)
 	if lsErr != nil {
@@ -237,7 +237,7 @@ func (b *Backend) Start(ctx context.Context, name string) (vm.Info, error) {
 }
 
 // Stop implements backend.Backend. The record is updated first, so a stop
-// that the API completed but cracklet could not record never resurrects the
+// that the API completed but skiff could not record never resurrects the
 // VM on the next restart of the service.
 func (b *Backend) Stop(ctx context.Context, name string) (vm.Info, error) {
 	release, err := b.lock(ctx)
@@ -260,8 +260,8 @@ func (b *Backend) Stop(ctx context.Context, name string) (vm.Info, error) {
 	return b.describe(ctx, name)
 }
 
-// Remove implements backend.Backend. Only VMs cracklet created (those with a
-// record) are removed: `cracklet rm foo` must never delete a machine the user
+// Remove implements backend.Backend. Only VMs skiff created (those with a
+// record) are removed: `skiff rm foo` must never delete a machine the user
 // made with `container machine create`. With a guard, a VM whose record no
 // longer matches owner and creation time is a different VM under the same
 // name: it is left alone and reported as gone, like the Lima agent does.
@@ -301,7 +301,7 @@ func sameTime(a, b *time.Time) bool {
 	return a.Equal(*b)
 }
 
-// machine looks one of cracklet's machines up (read-only).
+// machine looks one of skiff's machines up (read-only).
 func (b *Backend) machine(ctx context.Context, name string) (machine, error) {
 	if _, ok, err := b.loadRecord(name); err != nil && !errors.Is(err, errCorruptRecord) {
 		return machine{}, err

@@ -9,10 +9,10 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/shquote"
-	"github.com/itlabs-gmbh/cracklet/internal/sshcfg"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/shquote"
+	"github.com/itlabs-gmbh/skiff/internal/sshcfg"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 // sshConnectionFailed is ssh's exit status for transport-level failures, as
@@ -51,7 +51,7 @@ func (a *App) Exec(ctx context.Context, name string, argv []string) error {
 		return err
 	}
 	if len(argv) == 0 {
-		return errors.New("exec needs a command to run, e.g. 'cracklet exec NAME -- uname -a'")
+		return errors.New("exec needs a command to run, e.g. 'skiff exec NAME -- uname -a'")
 	}
 	return a.session(ctx, name, []string{shquote.Join(argv)})
 }
@@ -80,7 +80,7 @@ func (a *App) session(ctx context.Context, name string, command []string) error 
 		sig := signalOf(exitErr)
 		return &RemoteExitError{Code: 128 + int(sig), Reason: fmt.Sprintf("ssh terminated by signal %s", sig)}
 	case code == sshConnectionFailed:
-		hint := "check that it is running with 'cracklet ls'"
+		hint := "check that it is running with 'skiff ls'"
 		if a.backend.KnownHostsFile() != "" {
 			hint += "; if ssh reported a host key problem, the VM predates key pinning or was replaced: recreate it"
 		}
@@ -108,7 +108,7 @@ func signalOf(err *exec.ExitError) syscall.Signal {
 	return syscall.SIGKILL
 }
 
-// ensureSSHConfig writes ~/.cracklet/ssh_config when it is missing or no
+// ensureSSHConfig writes ~/.skiff/ssh_config when it is missing or no
 // longer what the backend renders (an upgrade that pins host keys, a switch
 // of backends), so a session never runs with the settings of an older
 // version.

@@ -25,7 +25,7 @@ func TestParseAndString(t *testing.T) {
 func TestParseRejectsScopes(t *testing.T) {
 	for _, in := range []string{"github:*", "github:org/repo"} {
 		_, err := Parse(in)
-		if err == nil || !strings.Contains(err.Error(), "cracklet grant VM github") {
+		if err == nil || !strings.Contains(err.Error(), "skiff grant VM github") {
 			t.Errorf("Parse(%q) = %v; want an error that names the plain grant", in, err)
 		}
 	}
@@ -53,7 +53,7 @@ func TestSetOperationsAreImmutable(t *testing.T) {
 	if !added.Contains(Grant{Cap: "github"}) || added.Contains(Grant{Cap: "gitlab"}) {
 		t.Errorf("Contains is wrong for %v", added.Caps())
 	}
-	if Hint("vm1", "github") != "cracklet grant vm1 github" {
+	if Hint("vm1", "github") != "skiff grant vm1 github" {
 		t.Errorf("Hint = %q", Hint("vm1", "github"))
 	}
 }

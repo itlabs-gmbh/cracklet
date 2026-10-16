@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 func knownHosts(t *testing.T, b *Backend) string {
@@ -34,13 +34,13 @@ func TestCreatePinsTheHostKeyAndRemoveForgetsIt(t *testing.T) {
 	if err != nil || len(rec.HostKeys) != 1 || rec.HostKeys[0] != "ssh-ed25519 AAAA-dev-1" {
 		t.Fatalf("record = %+v, %v", rec, err)
 	}
-	if got, want := knownHosts(t, b), "dev.cracklet ssh-ed25519 AAAA-dev-1\n"; got != want {
+	if got, want := knownHosts(t, b), "dev.skiff ssh-ed25519 AAAA-dev-1\n"; got != want {
 		t.Errorf("known_hosts = %q, want %q", got, want)
 	}
 	if _, err := b.Create(ctx, vm.Spec{Name: "web", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if got := knownHosts(t, b); !strings.Contains(got, "dev.cracklet ssh-ed25519 AAAA-dev-1\n") || !strings.Contains(got, "web.cracklet ssh-ed25519 AAAA-web-2\n") {
+	if got := knownHosts(t, b); !strings.Contains(got, "dev.skiff ssh-ed25519 AAAA-dev-1\n") || !strings.Contains(got, "web.skiff ssh-ed25519 AAAA-web-2\n") {
 		t.Errorf("known_hosts = %q", got)
 	}
 	// A VM removed and recreated under the same name is a different machine
@@ -49,13 +49,13 @@ func TestCreatePinsTheHostKeyAndRemoveForgetsIt(t *testing.T) {
 	if _, err := b.Remove(ctx, "dev", nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := knownHosts(t, b); strings.Contains(got, "dev.cracklet") {
+	if got := knownHosts(t, b); strings.Contains(got, "dev.skiff") {
 		t.Errorf("known_hosts still has dev after rm: %q", got)
 	}
 	if _, err := b.Create(ctx, vm.Spec{Name: "dev", VCPUs: 1, MemMiB: 512, Disk: "2G"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := knownHosts(t, b), "dev.cracklet ssh-ed25519 AAAA-dev-3\nweb.cracklet ssh-ed25519 AAAA-web-2\n"; got != want {
+	if got, want := knownHosts(t, b), "dev.skiff ssh-ed25519 AAAA-dev-3\nweb.skiff ssh-ed25519 AAAA-web-2\n"; got != want {
 		t.Errorf("known_hosts = %q, want %q", got, want)
 	}
 }

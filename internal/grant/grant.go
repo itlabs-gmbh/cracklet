@@ -1,5 +1,5 @@
 // Package grant decides whether a microVM may use a capability. Grants are
-// the only policy cracklet has: a capability file says how something is
+// the only policy skiff has: a capability file says how something is
 // handed into the guest, a grant says whether. Default is deny.
 package grant
 
@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/itlabs-gmbh/cracklet/internal/cap"
+	"github.com/itlabs-gmbh/skiff/internal/cap"
 )
 
 // SSHAgent is a built-in grant with no cap file: it forwards the Mac's SSH
@@ -26,7 +26,7 @@ type Grant struct {
 // Parse reads a capability name.
 func Parse(s string) (Grant, error) {
 	if name, _, scoped := strings.Cut(s, ":"); scoped && cap.ValidateName(name) == nil {
-		return Grant{}, fmt.Errorf("grant %q: capabilities have no scopes; limit the credential instead and use 'cracklet grant VM %s'", s, name)
+		return Grant{}, fmt.Errorf("grant %q: capabilities have no scopes; limit the credential instead and use 'skiff grant VM %s'", s, name)
 	}
 	if err := cap.ValidateName(s); err != nil {
 		return Grant{}, fmt.Errorf("grant %q: %w", s, err)
@@ -92,5 +92,5 @@ func (s Set) Caps() []string {
 
 // Hint is the command that would allow a denied request.
 func Hint(vm, name string) string {
-	return "cracklet grant " + vm + " " + name
+	return "skiff grant " + vm + " " + name
 }

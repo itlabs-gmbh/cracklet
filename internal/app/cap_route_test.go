@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/cap"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/cap"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
 const routedBody = `name = "forge"
@@ -20,7 +20,7 @@ upstream = "https://forge.example"
 host = "api.forge.example"
 upstream = "https://api.forge.example"
 [proxy.routes.headers]
-Authorization = "token {{ secret \"keychain:cracklet/forge-api\" }}"
+Authorization = "token {{ secret \"keychain:skiff/forge-api\" }}"
 `
 
 func TestCapSummaryNamesRoutes(t *testing.T) {
@@ -32,7 +32,7 @@ func TestCapSummaryNamesRoutes(t *testing.T) {
 	for _, want := range []string{
 		"proxies guest requests to https://forge.example",
 		"answers requests for api.forge.example with https://api.forge.example",
-		"sends the secret keychain:cracklet/forge-api in the Authorization header",
+		"sends the secret keychain:skiff/forge-api in the Authorization header",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("summary lacks %q:\n%s", want, got)

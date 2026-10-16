@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/agent"
-	limabe "github.com/itlabs-gmbh/cracklet/internal/backend/lima"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/lima"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/agent"
+	limabe "github.com/itlabs-gmbh/skiff/internal/backend/lima"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/lima"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
 // sizedHandler reports a Lima instance of the given size and answers the
@@ -22,7 +22,7 @@ func sizedHandler(status string, cpus, memGiB, diskGiB int, vms string) runner.F
 		joined := name + " " + strings.Join(args, " ")
 		switch {
 		case strings.HasPrefix(joined, "limactl list"):
-			return []byte(fmt.Sprintf(`{"name":"cracklet","status":%q,"cpus":%d,"memory":%d,"disk":%d}`+"\n",
+			return []byte(fmt.Sprintf(`{"name":"skiff","status":%q,"cpus":%d,"memory":%d,"disk":%d}`+"\n",
 				status, cpus, int64(memGiB)<<30, int64(diskGiB)<<30)), nil
 		case strings.HasSuffix(joined, config.AgentPath+" ls"):
 			return []byte(vms), nil
@@ -52,9 +52,9 @@ func TestPrepareGrowsRunningInstance(t *testing.T) {
 	if err := app.Prepare(context.Background(), explicitSize(8, 16, 40)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	stop := callIndex(fake, "limactl stop cracklet")
-	edit := callIndex(fake, "limactl edit --tty=false --cpus 8 --memory 16 cracklet")
-	start := callIndex(fake, "limactl start --tty=false cracklet")
+	stop := callIndex(fake, "limactl stop skiff")
+	edit := callIndex(fake, "limactl edit --tty=false --cpus 8 --memory 16 skiff")
+	start := callIndex(fake, "limactl start --tty=false skiff")
 	if stop < 0 || edit < 0 || start < 0 || !(stop < edit && edit < start) {
 		t.Fatalf("expected stop, edit (unchanged disk left out), start in order:\n%s", fake.Dump())
 	}
@@ -72,11 +72,11 @@ func TestPrepareResizesStoppedInstanceWithoutCheckingVMs(t *testing.T) {
 	if err := app.Prepare(context.Background(), explicitSize(4, 8, 80)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if fake.Called("limactl stop cracklet") || fake.CalledWithSuffix(config.AgentPath+" ls") {
+	if fake.Called("limactl stop skiff") || fake.CalledWithSuffix(config.AgentPath+" ls") {
 		t.Errorf("a stopped instance needs neither stop nor a microVM check:\n%s", fake.Dump())
 	}
-	edit := callIndex(fake, "limactl edit --tty=false --disk 80 cracklet")
-	start := callIndex(fake, "limactl start --tty=false cracklet")
+	edit := callIndex(fake, "limactl edit --tty=false --disk 80 skiff")
+	start := callIndex(fake, "limactl start --tty=false skiff")
 	if edit < 0 || start < 0 || edit > start {
 		t.Errorf("expected edit, then start:\n%s", fake.Dump())
 	}
@@ -87,7 +87,7 @@ func TestPrepareRefusesResizeWhileMicroVMsRun(t *testing.T) {
 	app, fake, _, paths := prepareApp(t, sizedHandler("Running", 4, 8, 40, vms), true)
 	writeDummyKeys(t, paths)
 	err := app.Prepare(context.Background(), explicitSize(8, 8, 40))
-	if err == nil || !strings.Contains(err.Error(), "vm1, dev") || !strings.Contains(err.Error(), "cracklet stop") {
+	if err == nil || !strings.Contains(err.Error(), "vm1, dev") || !strings.Contains(err.Error(), "skiff stop") {
 		t.Fatalf("expected a refusal naming the running microVMs, got %v", err)
 	}
 	assertUntouched(t, fake)
@@ -121,7 +121,7 @@ func TestPrepareIgnoresDefaultSizingOnExistingInstance(t *testing.T) {
 	if err := app.Prepare(context.Background(), o); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if fake.Called("limactl stop cracklet") || fake.CalledWithSuffix(config.AgentPath+" ls") {
+	if fake.Called("limactl stop skiff") || fake.CalledWithSuffix(config.AgentPath+" ls") {
 		t.Errorf("defaults must not resize an existing instance:\n%s", fake.Dump())
 	}
 }
@@ -132,7 +132,7 @@ func TestPrepareSkipsResizeWhenSizeMatches(t *testing.T) {
 	if err := app.Prepare(context.Background(), explicitSize(8, 16, 80)); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if fake.Called("limactl stop cracklet") {
+	if fake.Called("limactl stop skiff") {
 		t.Errorf("re-running with the current size must not restart the instance:\n%s", fake.Dump())
 	}
 	if !strings.Contains(out.String(), "is running") {
@@ -207,7 +207,7 @@ func TestPrepareResizeFailuresExplainTheVMState(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "boom") || !strings.Contains(err.Error(), tc.wantMsg) {
 				t.Fatalf("want wrapped error mentioning %q, got %v", tc.wantMsg, err)
 			}
-			if got := fake.Called("limactl start --tty=false cracklet"); got != tc.startAfter {
+			if got := fake.Called("limactl start --tty=false skiff"); got != tc.startAfter {
 				t.Errorf("start called = %v, want %v:\n%s", got, tc.startAfter, fake.Dump())
 			}
 			if fake.CalledWithSuffix(config.RootfsSHA256 + " 2 1024") {
@@ -225,7 +225,7 @@ func TestPrepareResizeBlocksStartsBetweenCheckAndStop(t *testing.T) {
 	base := sizedHandler("Running", 4, 8, 40, "[]")
 	app, fake, _, paths := prepareApp(t, func(name string, args []string) ([]byte, error) {
 		if strings.HasSuffix(name+" "+strings.Join(args, " "), config.AgentPath+" ls") {
-			// a second cracklet process sharing ~/.cracklet tries to start a guest now
+			// a second skiff process sharing ~/.skiff tries to start a guest now
 			_, startErr = other.StartVM(context.Background(), "vm1")
 		}
 		return base(name, args)

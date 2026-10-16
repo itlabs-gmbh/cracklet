@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/host"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/host"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 func TestDoctorReportsVersionAndService(t *testing.T) {
@@ -183,7 +183,7 @@ func TestAutoNameSkipsUnrecordedMachines(t *testing.T) {
 	}
 }
 
-func TestRemoveOnlyTouchesCrackletsMachines(t *testing.T) {
+func TestRemoveOnlyTouchesSkiffsMachines(t *testing.T) {
 	f := newFake()
 	f.machines["theirs"] = &machine{ID: "theirs", Status: "running", IP: "192.168.64.60"}
 	b, fake, _ := newTestBackend(t, f)
@@ -244,8 +244,8 @@ func TestDialRefusesStoppedMachine(t *testing.T) {
 }
 
 func TestProxyCommandEscapesPercent(t *testing.T) {
-	b, _, _ := newTestBackend(t, newFake(), WithExecutable("/Users/a%b/cracklet"))
-	if got := b.SSHProxyCommand(); got != "/Users/a%%b/cracklet _dial %h %p" {
+	b, _, _ := newTestBackend(t, newFake(), WithExecutable("/Users/a%b/skiff"))
+	if got := b.SSHProxyCommand(); got != "/Users/a%%b/skiff _dial %h %p" {
 		t.Errorf("SSHProxyCommand = %q", got)
 	}
 }
@@ -354,7 +354,7 @@ func TestListHidesVanishedMachinesUntilPruned(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.mu.Lock()
-	delete(f.machines, "gone") // removed behind cracklet's back
+	delete(f.machines, "gone") // removed behind skiff's back
 	f.mu.Unlock()
 	list, err := b.List(context.Background())
 	if err != nil || len(list) != 0 {
@@ -409,7 +409,7 @@ func TestReadyStartsServiceAndRestoresRunningMachines(t *testing.T) {
 func TestDialAndProxyCommand(t *testing.T) {
 	f := newFake()
 	b, _, _ := newTestBackend(t, f)
-	if got, want := b.SSHProxyCommand(), "/usr/local/bin/cracklet _dial %h %p"; got != want {
+	if got, want := b.SSHProxyCommand(), "/usr/local/bin/skiff _dial %h %p"; got != want {
 		t.Errorf("SSHProxyCommand = %q, want %q", got, want)
 	}
 	if _, err := b.Dial(context.Background(), "nope", 22); err == nil {

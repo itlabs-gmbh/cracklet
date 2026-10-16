@@ -15,10 +15,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
-// record is what cracklet knows about a machine beyond what `container`
+// record is what skiff knows about a machine beyond what `container`
 // reports: the metadata gc needs and whether the VM should be running (so a
 // restart of the service brings it back). The Lima agent keeps the same facts
 // inside its VM; here they live on the Mac, next to the backend choice.
@@ -124,7 +124,7 @@ func (b *Backend) removeRecord(name string) error {
 	return b.writeKnownHosts()
 }
 
-// recordNames lists the VMs cracklet created, sorted.
+// recordNames lists the VMs skiff created, sorted.
 func (b *Backend) recordNames() ([]string, error) {
 	entries, err := os.ReadDir(b.paths.MachinesDir())
 	if errors.Is(err, fs.ErrNotExist) {
@@ -223,7 +223,7 @@ func (b *Backend) flock(ctx context.Context, path string) (func(), error) {
 	}
 }
 
-// infoFrom combines what `container` reports with cracklet's record.
+// infoFrom combines what `container` reports with skiff's record.
 func infoFrom(m machine, r record) vm.Info {
 	info := vm.Info{Name: m.ID, IP: m.addr(), State: m.state(), VCPUs: m.CPUs, MemMiB: int(m.Memory >> 20),
 		Profile: r.Profile, Forwards: []vm.Forward{}, Owner: r.Owner, Slot: r.Slot, CreatedAt: r.CreatedAt}

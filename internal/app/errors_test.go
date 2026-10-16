@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/agent"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/agent"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 // failingAt wraps a handler and fails the first invocation whose command line
@@ -49,7 +49,7 @@ func TestPrepareErrorBranches(t *testing.T) {
 }
 
 func TestPrepareStartFailureSurfaces(t *testing.T) {
-	app, _, _, paths := prepareApp(t, failingAt(hostHandler("Stopped", agent.Checksum()), "limactl start --tty=false cracklet"), true)
+	app, _, _, paths := prepareApp(t, failingAt(hostHandler("Stopped", agent.Checksum()), "limactl start --tty=false skiff"), true)
 	writeDummyKeys(t, paths)
 	if err := app.Prepare(context.Background(), PrepareOptions{CPUs: 4, MemoryGiB: 8, DiskGiB: 40}); err == nil {
 		t.Fatal("expected start failure")
@@ -92,8 +92,8 @@ func TestCommandsFailWhenInstanceMissing(t *testing.T) {
 		"rm":  app.RemoveVM(context.Background(), "vm1"),
 		"ssh": app.SSH(context.Background(), "vm1", nil),
 	} {
-		if err == nil || !strings.Contains(err.Error(), "cracklet prepare") {
-			t.Errorf("%s: expected hint to run cracklet prepare, got %v", label, err)
+		if err == nil || !strings.Contains(err.Error(), "skiff prepare") {
+			t.Errorf("%s: expected hint to run skiff prepare, got %v", label, err)
 		}
 	}
 	if _, err := app.ListVMs(context.Background()); err == nil {
@@ -166,7 +166,7 @@ func TestNewInterruptedWithoutNameOnlyHints(t *testing.T) {
 		return defaultHandler(nil)(name, args)
 	})
 	_, _ = app.NewVM(ctx, vm.Spec{VCPUs: 1, MemMiB: 256, Disk: "2G"})
-	if fake.CalledWithSuffix(" rm -") || !strings.Contains(out.String(), "cracklet ls") {
+	if fake.CalledWithSuffix(" rm -") || !strings.Contains(out.String(), "skiff ls") {
 		t.Errorf("unnamed VMs cannot be cleaned up blindly:\n%s\n%s", fake.Dump(), out.String())
 	}
 }

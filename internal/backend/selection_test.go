@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/config"
 )
 
 func TestSelectionDefaultsToLima(t *testing.T) {

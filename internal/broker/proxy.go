@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/itlabs-gmbh/cracklet/internal/cap"
+	"github.com/itlabs-gmbh/skiff/internal/cap"
 )
 
 // credentialHeaders are always removed from the guest's request so a guest

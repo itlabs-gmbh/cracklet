@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/app"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/app"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
 // runIn executes several commands against one state directory.
@@ -39,7 +39,7 @@ func TestGrantRevokeGrantsFlow(t *testing.T) {
 	if !strings.Contains(out, "vm1 may now use: claude, github") {
 		t.Errorf("output:\n%s", out)
 	}
-	if !fake.CalledWithSuffix("vm1.cracklet -- bash -s") {
+	if !fake.CalledWithSuffix("vm1.skiff -- bash -s") {
 		t.Errorf("guest should have been provisioned:\n%s", fake.Dump())
 	}
 	out, _, err = runIn(t, home, "", "grants", "vm1")
@@ -68,7 +68,7 @@ func TestSSHUsesTunnelAfterGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !fake.CalledWithSuffix("-R 127.0.0.1:7777:/tmp/t.sock -F " + filepath.Join(home, "ssh_config") + " vm1.cracklet") {
+	if !fake.CalledWithSuffix("-R 127.0.0.1:7777:/tmp/t.sock -F " + filepath.Join(home, "ssh_config") + " vm1.skiff") {
 		t.Errorf("tunnel missing:\n%s", fake.Dump())
 	}
 }
@@ -135,7 +135,7 @@ func TestSecretCommandsReadStdin(t *testing.T) {
 		t.Errorf("empty secret must fail")
 	}
 	out, fake, err = runIn(t, home, "", "secret", "rm", "claude-token")
-	if err != nil || !fake.Called("security delete-generic-password -s cracklet -a claude-token") {
+	if err != nil || !fake.Called("security delete-generic-password -s skiff -a claude-token") {
 		t.Errorf("secret rm: %v\n%s", err, fake.Dump())
 	}
 }

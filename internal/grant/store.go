@@ -12,13 +12,13 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/itlabs-gmbh/cracklet/internal/cap"
+	"github.com/itlabs-gmbh/skiff/internal/cap"
 )
 
 // Store keeps per-VM grants and placeholder tokens on the Mac, where the
 // broker runs, so policy and enforcement live in the same place.
 type Store struct {
-	// Dir is the root, usually ~/.cracklet/vms.
+	// Dir is the root, usually ~/.skiff/vms.
 	Dir string
 }
 

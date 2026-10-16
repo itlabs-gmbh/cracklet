@@ -3,7 +3,7 @@ package lima
 import "testing"
 
 const ndjson = `{"name":"default","status":"Stopped","dir":"/Users/me/.lima/default","sshLocalPort":60022}
-{"name":"cracklet","status":"Running","dir":"/Users/me/.lima/cracklet","sshLocalPort":60023}
+{"name":"skiff","status":"Running","dir":"/Users/me/.lima/skiff","sshLocalPort":60023}
 `
 
 func TestParseListNDJSON(t *testing.T) {
@@ -14,13 +14,13 @@ func TestParseListNDJSON(t *testing.T) {
 	if len(instances) != 2 {
 		t.Fatalf("expected 2 instances, got %d", len(instances))
 	}
-	if instances[1].Name != "cracklet" || instances[1].Status != StatusRunning || instances[1].Dir != "/Users/me/.lima/cracklet" {
+	if instances[1].Name != "skiff" || instances[1].Status != StatusRunning || instances[1].Dir != "/Users/me/.lima/skiff" {
 		t.Errorf("unexpected instance: %+v", instances[1])
 	}
 }
 
 func TestParseListArray(t *testing.T) {
-	instances, err := ParseList([]byte(`[{"name":"cracklet","status":"Stopped"}]`))
+	instances, err := ParseList([]byte(`[{"name":"skiff","status":"Stopped"}]`))
 	if err != nil {
 		t.Fatalf("ParseList: %v", err)
 	}
@@ -44,8 +44,8 @@ func TestParseListGarbage(t *testing.T) {
 
 func TestFindInstance(t *testing.T) {
 	instances, _ := ParseList([]byte(ndjson))
-	if inst, ok := Find(instances, "cracklet"); !ok || inst.Name != "cracklet" {
-		t.Errorf("Find(cracklet) = %+v, %v", inst, ok)
+	if inst, ok := Find(instances, "skiff"); !ok || inst.Name != "skiff" {
+		t.Errorf("Find(skiff) = %+v, %v", inst, ok)
 	}
 	if _, ok := Find(instances, "nope"); ok {
 		t.Error("Find(nope) should not match")
@@ -53,7 +53,7 @@ func TestFindInstance(t *testing.T) {
 }
 
 func TestParseListReadsSize(t *testing.T) {
-	instances, err := ParseList([]byte(`{"name":"cracklet","status":"Running","cpus":4,"memory":8589934592,"disk":42949672960}`))
+	instances, err := ParseList([]byte(`{"name":"skiff","status":"Running","cpus":4,"memory":8589934592,"disk":42949672960}`))
 	if err != nil {
 		t.Fatalf("ParseList: %v", err)
 	}

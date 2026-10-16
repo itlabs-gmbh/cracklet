@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
-// probeTimeout bounds each system query so a hung tool cannot stall cracklet.
+// probeTimeout bounds each system query so a hung tool cannot stall skiff.
 const probeTimeout = 15 * time.Second
 
 // LookPathFunc resolves an executable name; it mirrors exec.LookPath.

@@ -8,13 +8,13 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/broker"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/broker"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 const (
-	// defaultTunnelRetry is the first pause before `cracklet tunnel`
+	// defaultTunnelRetry is the first pause before `skiff tunnel`
 	// reconnects after the ssh connection dropped.
 	defaultTunnelRetry = 5 * time.Second
 	// maxTunnelRetry caps the backoff: a guest port held by another session
@@ -50,14 +50,14 @@ func (a *App) Tunnel(ctx context.Context, name string) error {
 		return err
 	}
 	if !needsBroker(set) {
-		return fmt.Errorf("%s has no grants served by the broker; add one with 'cracklet grant %s CAP'", name, name)
+		return fmt.Errorf("%s has no grants served by the broker; add one with 'skiff grant %s CAP'", name, name)
 	}
 	running, err := a.vmRunning(ctx, name)
 	if err != nil {
 		return err
 	}
 	if !running {
-		return fmt.Errorf("%s is not running; start it with 'cracklet start %s'", name, name)
+		return fmt.Errorf("%s is not running; start it with 'skiff start %s'", name, name)
 	}
 	a.printf("broker tunnel for %s on guest 127.0.0.1:%d; stop it with Ctrl-C\n", name, config.BrokerGuestPort)
 	return a.holdTunnel(ctx, name)
@@ -193,7 +193,7 @@ func (a *App) vmRunning(ctx context.Context, name string) (bool, error) {
 func (a *App) auditTunnel(name, event, reason string) {
 	f, err := os.OpenFile(a.paths.AuditLog(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		a.printf("cracklet: warning: audit log: %v\n", err)
+		a.printf("skiff: warning: audit log: %v\n", err)
 		return
 	}
 	defer f.Close()
@@ -202,7 +202,7 @@ func (a *App) auditTunnel(name, event, reason string) {
 		line += fmt.Sprintf(" reason=%q", reason)
 	}
 	if _, err := fmt.Fprintln(f, line); err != nil {
-		a.printf("cracklet: warning: audit log: %v\n", err)
+		a.printf("skiff: warning: audit log: %v\n", err)
 	}
 }
 

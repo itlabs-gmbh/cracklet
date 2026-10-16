@@ -17,16 +17,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/host"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
-	"github.com/itlabs-gmbh/cracklet/internal/sshkey"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/host"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/sshkey"
 )
 
 const (
 	// cmdTimeout bounds every `container` call that should answer at once, so
-	// a wedged apiserver cannot hang cracklet.
+	// a wedged apiserver cannot hang skiff.
 	cmdTimeout = 30 * time.Second
 	// MinVersion is the first `container` release the backend was tested with
 	// (machine subcommand, build context fix).
@@ -45,7 +45,7 @@ type Backend struct {
 	lookPath host.LookPathFunc
 	gather   func(ctx context.Context) host.Facts
 	dial     Dialer
-	exe      string // the cracklet binary, for the ssh ProxyCommand and the relay
+	exe      string // the skiff binary, for the ssh ProxyCommand and the relay
 	sshWait  time.Duration
 	poll     time.Duration
 	// relayPoll and relayIdle pace ServeForwards; addrs is its address
@@ -87,7 +87,7 @@ func WithSSHWait(wait, poll time.Duration) Option {
 // New wires a Backend. out receives command output, status progress notes.
 func New(r runner.Runner, paths config.Paths, out, status io.Writer, opts ...Option) *Backend {
 	b := &Backend{r: r, paths: paths, out: out, status: status, lookPath: exec.LookPath,
-		dial: tcpDial, exe: "cracklet", sshWait: 60 * time.Second, poll: 100 * time.Millisecond,
+		dial: tcpDial, exe: "skiff", sshWait: 60 * time.Second, poll: 100 * time.Millisecond,
 		relayPoll: defaultRelayPoll, relayIdle: defaultRelayIdle, spawn: spawnRelay}
 	if exe, err := os.Executable(); err == nil {
 		b.exe = exe
@@ -148,7 +148,7 @@ func (b *Backend) runLong(ctx context.Context, args ...string) ([]byte, error) {
 func checkHost(f host.Facts) []host.Problem {
 	if f.OS != "darwin" || f.Arch != "arm64" {
 		return []host.Problem{{Code: "platform", Fatal: true,
-			Message: fmt.Sprintf("cracklet needs macOS on Apple Silicon, found %s/%s", f.OS, f.Arch)}}
+			Message: fmt.Sprintf("skiff needs macOS on Apple Silicon, found %s/%s", f.OS, f.Arch)}}
 	}
 	var problems []host.Problem
 	if major, err := host.MajorVersion(f.MacOSVersion); err != nil || major < 26 {
@@ -191,7 +191,7 @@ func (b *Backend) systemStatus(ctx context.Context) (map[string]string, error) {
 func (b *Backend) Alive(ctx context.Context) error {
 	st, err := b.systemStatus(ctx)
 	if err != nil {
-		return fmt.Errorf("the container system service is not running, run 'cracklet prepare' or 'container system start' (%w)", err)
+		return fmt.Errorf("the container system service is not running, run 'skiff prepare' or 'container system start' (%w)", err)
 	}
 	if st["status"] != "running" {
 		return fmt.Errorf("the container system service is %q, run 'container system start'", st["status"])
@@ -200,9 +200,9 @@ func (b *Backend) Alive(ctx context.Context) error {
 }
 
 // --enable-kernel-install lets `container system start` fetch Apple's default
-// guest kernel. cracklet does not pin a digest for it, unlike the Firecracker
+// guest kernel. skiff does not pin a digest for it, unlike the Firecracker
 // artifacts of the Lima backend: the kernel comes from the same signed Apple
-// release as the CLI that cracklet already trusts to run the VMs, and the CLI
+// release as the CLI that skiff already trusts to run the VMs, and the CLI
 // verifies the download itself. Pinning our own kernel is a Phase 4 option.
 var systemStartArgs = []string{"system", "start", "--enable-kernel-install"}
 
@@ -231,7 +231,7 @@ func (b *Backend) Ready(ctx context.Context) error {
 	}
 	if err := b.restoreMachines(ctx); err != nil {
 		b.statusf("  [WARN] the service is running again, but restarting its microVMs failed: %v\n"+
-			"         check 'cracklet ls' and start them with 'cracklet start NAME'\n", err)
+			"         check 'skiff ls' and start them with 'skiff start NAME'\n", err)
 	}
 	return b.keepHostState(ctx, lockHeld)
 }
@@ -293,7 +293,7 @@ func (b *Backend) Doctor(ctx context.Context) error {
 		b.printf("  [%s] %s\n", severity(p), p.Message)
 	}
 	if host.HasFatal(problems) {
-		return errors.New("host is not ready for cracklet")
+		return errors.New("host is not ready for skiff")
 	}
 	if !facts.HasContainer {
 		return nil
@@ -305,7 +305,7 @@ func (b *Backend) Doctor(ctx context.Context) error {
 	b.printf("container %s (needs %s or newer)\n", version, MinVersion)
 	st, err := b.systemStatus(ctx)
 	if err != nil {
-		b.printf("container system service: not running (run 'cracklet prepare')\n")
+		b.printf("container system service: not running (run 'skiff prepare')\n")
 		return nil
 	}
 	b.printf("container system service: %s\n", st["status"])
@@ -316,7 +316,7 @@ func (b *Backend) Doctor(ctx context.Context) error {
 // image. Idempotent; the image is rebuilt only when its labels do not match.
 func (b *Backend) Prepare(ctx context.Context, o backend.PrepareOptions) error {
 	if o.Explicit != (backend.SizeFlags{}) {
-		return fmt.Errorf("--cpus, --memory and --disk size the shared Lima VM; the container backend has none (size VMs with 'cracklet new --vcpus/--mem')")
+		return fmt.Errorf("--cpus, --memory and --disk size the shared Lima VM; the container backend has none (size VMs with 'skiff new --vcpus/--mem')")
 	}
 	if len(o.Profiles) > 0 {
 		b.printf("  note: profiles size the root disk of Firecracker images; container machines get a sparse disk and ignore --profile\n")
@@ -343,7 +343,7 @@ func (b *Backend) preflight(ctx context.Context) error {
 		b.printf("  [%s] %s\n", severity(p), p.Message)
 	}
 	if host.HasFatal(problems) {
-		return errors.New("host is not ready for cracklet")
+		return errors.New("host is not ready for skiff")
 	}
 	if !facts.HasContainer {
 		b.printf("==> Installing Apple's container CLI\n")
@@ -360,7 +360,7 @@ func (b *Backend) preflight(ctx context.Context) error {
 		return err
 	}
 	if older {
-		return fmt.Errorf("container %s is too old, cracklet needs %s or newer (brew upgrade container)", version, MinVersion)
+		return fmt.Errorf("container %s is too old, skiff needs %s or newer (brew upgrade container)", version, MinVersion)
 	}
 	return nil
 }

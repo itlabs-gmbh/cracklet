@@ -6,14 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
 func TestGetFindsInstance(t *testing.T) {
 	fake := runner.NewFake(func(name string, args []string) ([]byte, error) {
-		return []byte(`{"name":"cracklet","status":"Running","dir":"/x"}` + "\n"), nil
+		return []byte(`{"name":"skiff","status":"Running","dir":"/x"}` + "\n"), nil
 	})
-	inst, ok, err := NewClient(fake, "cracklet").Get(context.Background())
+	inst, ok, err := NewClient(fake, "skiff").Get(context.Background())
 	if err != nil || !ok || inst.Status != StatusRunning {
 		t.Fatalf("Get = %+v, %v, %v", inst, ok, err)
 	}
@@ -24,7 +24,7 @@ func TestGetFindsInstance(t *testing.T) {
 
 func TestGetMissingInstance(t *testing.T) {
 	fake := runner.NewFake(func(string, []string) ([]byte, error) { return []byte(""), nil })
-	_, ok, err := NewClient(fake, "cracklet").Get(context.Background())
+	_, ok, err := NewClient(fake, "skiff").Get(context.Background())
 	if err != nil || ok {
 		t.Fatalf("expected not found, got ok=%v err=%v", ok, err)
 	}
@@ -32,40 +32,40 @@ func TestGetMissingInstance(t *testing.T) {
 
 func TestGetPropagatesErrors(t *testing.T) {
 	fake := runner.NewFake(func(string, []string) ([]byte, error) { return nil, errors.New("boom") })
-	if _, _, err := NewClient(fake, "cracklet").Get(context.Background()); err == nil {
+	if _, _, err := NewClient(fake, "skiff").Get(context.Background()); err == nil {
 		t.Fatal("expected error")
 	}
 }
 
 func TestCommandLines(t *testing.T) {
 	fake := runner.NewFake(func(string, []string) ([]byte, error) { return nil, nil })
-	c := NewClient(fake, "cracklet")
+	c := NewClient(fake, "skiff")
 	ctx := context.Background()
 	_ = c.Create(ctx, "/tmp/lima.yaml")
 	_ = c.Start(ctx)
 	_ = c.Shell(ctx, "sudo", "true")
 	_, _ = c.ShellOutput(ctx, "cat", "/etc/hostname")
-	_ = c.WriteFile(ctx, strings.NewReader("x"), "/usr/local/lib/cracklet/agent.sh", "0755")
+	_ = c.WriteFile(ctx, strings.NewReader("x"), "/usr/local/lib/skiff/agent.sh", "0755")
 
 	for _, want := range []string{
-		"limactl start --tty=false --name cracklet /tmp/lima.yaml",
-		"limactl start --tty=false cracklet",
-		"limactl shell cracklet -- sudo true",
-		"limactl shell cracklet -- cat /etc/hostname",
-		"limactl shell cracklet -- sudo sh -c " + writeScript + " sh /usr/local/lib/cracklet/agent.sh 0755",
+		"limactl start --tty=false --name skiff /tmp/lima.yaml",
+		"limactl start --tty=false skiff",
+		"limactl shell skiff -- sudo true",
+		"limactl shell skiff -- cat /etc/hostname",
+		"limactl shell skiff -- sudo sh -c " + writeScript + " sh /usr/local/lib/skiff/agent.sh 0755",
 	} {
 		if !fake.Called(want) {
 			t.Errorf("missing call %q in:\n%s", want, fake.Dump())
 		}
 	}
-	if in, ok := fake.Input("sh /usr/local/lib/cracklet/agent.sh 0755"); !ok || in != "x" {
+	if in, ok := fake.Input("sh /usr/local/lib/skiff/agent.sh 0755"); !ok || in != "x" {
 		t.Errorf("content must be streamed to stdin, got %q ok=%v", in, ok)
 	}
 }
 
 func TestWriteFileValidatesArguments(t *testing.T) {
 	fake := runner.NewFake(func(string, []string) ([]byte, error) { return nil, nil })
-	c := NewClient(fake, "cracklet")
+	c := NewClient(fake, "skiff")
 	ctx := context.Background()
 	if err := c.WriteFile(ctx, strings.NewReader(""), "relative/path", "0644"); err == nil {
 		t.Error("relative guest paths must be rejected")
@@ -88,7 +88,7 @@ func TestWriteScriptKeepsArgumentsPositional(t *testing.T) {
 
 func TestErrorsAreWrapped(t *testing.T) {
 	fake := runner.NewFake(func(string, []string) ([]byte, error) { return nil, errors.New("boom") })
-	c := NewClient(fake, "cracklet")
+	c := NewClient(fake, "skiff")
 	ctx := context.Background()
 	for name, err := range map[string]error{
 		"create": c.Create(ctx, "/tmp/x"),
@@ -103,7 +103,7 @@ func TestErrorsAreWrapped(t *testing.T) {
 
 func TestStopAndEditCommandLines(t *testing.T) {
 	fake := runner.NewFake(func(string, []string) ([]byte, error) { return nil, nil })
-	c := NewClient(fake, "cracklet")
+	c := NewClient(fake, "skiff")
 	ctx := context.Background()
 	if err := c.Stop(ctx); err != nil {
 		t.Fatalf("Stop: %v", err)
@@ -115,9 +115,9 @@ func TestStopAndEditCommandLines(t *testing.T) {
 		t.Fatalf("Edit: %v", err)
 	}
 	for _, want := range []string{
-		"limactl stop cracklet",
-		"limactl edit --tty=false --cpus 8 --memory 16 --disk 80 cracklet",
-		"limactl edit --tty=false --memory 12 cracklet",
+		"limactl stop skiff",
+		"limactl edit --tty=false --cpus 8 --memory 16 --disk 80 skiff",
+		"limactl edit --tty=false --memory 12 skiff",
 	} {
 		if !fake.Called(want) {
 			t.Errorf("missing call %q in:\n%s", want, fake.Dump())
@@ -127,7 +127,7 @@ func TestStopAndEditCommandLines(t *testing.T) {
 
 func TestEditWithoutChangesRunsNothing(t *testing.T) {
 	fake := runner.NewFake(func(string, []string) ([]byte, error) { return nil, nil })
-	if err := NewClient(fake, "cracklet").Edit(context.Background(), Resize{}); err != nil {
+	if err := NewClient(fake, "skiff").Edit(context.Background(), Resize{}); err != nil {
 		t.Fatalf("Edit: %v", err)
 	}
 	if len(fake.Calls()) != 0 {
@@ -137,7 +137,7 @@ func TestEditWithoutChangesRunsNothing(t *testing.T) {
 
 func TestStopAndEditWrapErrors(t *testing.T) {
 	fake := runner.NewFake(func(string, []string) ([]byte, error) { return nil, errors.New("boom") })
-	c := NewClient(fake, "cracklet")
+	c := NewClient(fake, "skiff")
 	ctx := context.Background()
 	for name, err := range map[string]error{
 		"stop": c.Stop(ctx),

@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/agent"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/envdbin"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/agent"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/envdbin"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
 // hostHandler answers the macOS probes and records everything else.
@@ -32,7 +32,7 @@ func hostHandler(limaStatus string, agentChecksum string) runner.FakeHandler {
 			if limaStatus == "" {
 				return []byte(""), nil
 			}
-			return []byte(`{"name":"cracklet","status":"` + limaStatus + `"}` + "\n"), nil
+			return []byte(`{"name":"skiff","status":"` + limaStatus + `"}` + "\n"), nil
 		case strings.Contains(joined, "sha256sum"):
 			return []byte(agentChecksum + "\n"), nil
 		}
@@ -64,7 +64,7 @@ func prepareApp(t *testing.T, handler runner.FakeHandler, hasLima bool, opts ...
 		return "/usr/local/bin/" + name, nil
 	}
 	// Pin the platform so the suite behaves identically on Linux CI runners
-	// and on the Apple Silicon Macs cracklet actually targets.
+	// and on the Apple Silicon Macs skiff actually targets.
 	opts = append([]Option{WithPlatform("darwin", "arm64"), WithLookPath(lookPath), WithEnvd(fakeEnvd)}, opts...)
 	return New(fake, paths, out, opts...), fake, out, paths
 }
@@ -78,8 +78,8 @@ func TestPrepareCreatesInstanceAndImages(t *testing.T) {
 		t.Fatalf("Prepare: %v", err)
 	}
 	for _, want := range []string{
-		"limactl start --tty=false --name cracklet " + paths.LimaTemplatePath(),
-		"limactl shell cracklet -- sudo " + config.AgentPath + " prepare " +
+		"limactl start --tty=false --name skiff " + paths.LimaTemplatePath(),
+		"limactl shell skiff -- sudo " + config.AgentPath + " prepare " +
 			config.FirecrackerVersion + " " + config.FirecrackerSHA256 + " " +
 			config.KernelURL + " " + config.KernelSHA256 + " " +
 			config.RootfsURL + " " + config.RootfsSHA256 + " 2 1024",
@@ -95,7 +95,7 @@ func TestPrepareCreatesInstanceAndImages(t *testing.T) {
 		t.Errorf("public key must be streamed with mode 0644:\n%s", fake.Dump())
 	}
 	if in, ok := fake.Input("sh " + config.GuestEnvdPath + " 0755"); !ok || len(in) < 1024 {
-		t.Errorf("cracklet-envd binary must be streamed with mode 0755 (got %d bytes, ok=%v)", len(in), ok)
+		t.Errorf("skiff-envd binary must be streamed with mode 0755 (got %d bytes, ok=%v)", len(in), ok)
 	}
 	if fake.Called("brew install lima") {
 		t.Error("lima is present, brew must not run")
@@ -143,7 +143,7 @@ func TestPrepareStartsStoppedInstanceAndInstallsLima(t *testing.T) {
 	if !fake.Called("brew install lima") {
 		t.Errorf("expected brew install, got:\n%s", fake.Dump())
 	}
-	if !fake.Called("limactl start --tty=false cracklet") {
+	if !fake.Called("limactl start --tty=false skiff") {
 		t.Errorf("expected instance start, got:\n%s", fake.Dump())
 	}
 }
@@ -161,7 +161,7 @@ func TestPrepareGeneratesKeyWhenMissing(t *testing.T) {
 	if err := app.Prepare(context.Background(), PrepareOptions{CPUs: 4, MemoryGiB: 8, DiskGiB: 40}); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if !fake.Called("ssh-keygen -q -t ed25519 -N  -C cracklet -f " + paths.KeyPath()) {
+	if !fake.Called("ssh-keygen -q -t ed25519 -N  -C skiff -f " + paths.KeyPath()) {
 		t.Errorf("expected ssh-keygen, got:\n%s", fake.Dump())
 	}
 }
@@ -251,7 +251,7 @@ func TestSSHWritesConfigAndRunsSSH(t *testing.T) {
 	if err := app.SSH(context.Background(), "vm1", []string{"true"}); err != nil {
 		t.Fatalf("SSH: %v", err)
 	}
-	if !fake.Called("ssh -F " + paths.SSHConfigPath() + " vm1.cracklet -- true") {
+	if !fake.Called("ssh -F " + paths.SSHConfigPath() + " vm1.skiff -- true") {
 		t.Errorf("expected ssh call, got:\n%s", fake.Dump())
 	}
 	if _, err := os.Stat(filepath.Join(paths.Home, "ssh_config")); err != nil {
@@ -274,8 +274,8 @@ func TestLifecycleCommands(t *testing.T) {
 		t.Fatalf("StopVM: %v", err)
 	}
 	for _, want := range []string{
-		"limactl shell cracklet -- sudo " + config.AgentPath + " start vm1",
-		"limactl shell cracklet -- sudo " + config.AgentPath + " stop vm1",
+		"limactl shell skiff -- sudo " + config.AgentPath + " start vm1",
+		"limactl shell skiff -- sudo " + config.AgentPath + " stop vm1",
 	} {
 		if !fake.Called(want) {
 			t.Errorf("missing %q in:\n%s", want, fake.Dump())
@@ -295,8 +295,8 @@ func TestSSHExplainsConnectionFailures(t *testing.T) {
 		return hostHandler("Running", agent.Checksum())(name, args)
 	}, true)
 	err := app.SSH(context.Background(), "vm1", nil)
-	if err == nil || !strings.Contains(err.Error(), "cracklet ls") {
-		t.Fatalf("expected a hint pointing at 'cracklet ls', got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "skiff ls") {
+		t.Fatalf("expected a hint pointing at 'skiff ls', got %v", err)
 	}
 }
 

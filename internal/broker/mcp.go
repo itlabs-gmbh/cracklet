@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/cap"
+	"github.com/itlabs-gmbh/skiff/internal/cap"
 )
 
 const (
@@ -264,7 +264,7 @@ func (b *mcpBridge) rejectServerRequest(id json.RawMessage) {
 	}
 	msg, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0", "id": id,
-		"error": map[string]any{"code": -32601, "message": "server-initiated requests are not supported by the cracklet bridge"},
+		"error": map[string]any{"code": -32601, "message": "server-initiated requests are not supported by the skiff bridge"},
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), mcpResponseTimeout)
 	defer cancel()

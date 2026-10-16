@@ -10,7 +10,7 @@ import (
 // It walks the parsed template rather than executing it, and insists that
 // secret is only ever called with a literal string: a reference computed from
 // data (such as .VM) could resolve to one secret during review and another at
-// runtime, which would let a capability file bypass what `cracklet cap add`
+// runtime, which would let a capability file bypass what `skiff cap add`
 // showed before installation.
 func SecretRefs(text string) ([]string, error) {
 	tmpl, err := template.New("cap").Funcs(funcs(func(string) string { return "" })).Parse(text)

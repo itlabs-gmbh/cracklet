@@ -8,7 +8,7 @@ import (
 )
 
 func TestClaimIsExclusive(t *testing.T) {
-	dir, err := os.MkdirTemp("/tmp", "cracklet-")
+	dir, err := os.MkdirTemp("/tmp", "skiff-")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -46,7 +46,7 @@ func firstLine(s string) string {
 	return s
 }
 
-// runAgentFuncs sources the agent with CRACKLET_ROOT pointed at a temp dir and runs
+// runAgentFuncs sources the agent with SKIFF_ROOT pointed at a temp dir and runs
 // snippet with the pure helper functions available. Works with bash 3.2.
 func runAgentFuncs(t *testing.T, root, snippet string) (string, error) {
 	t.Helper()
@@ -59,7 +59,7 @@ func runAgentFuncs(t *testing.T, root, snippet string) (string, error) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(bash, "-c", `set -euo pipefail; source "$1"; unit_active() { return 1; }; fwd_active() { [[ $2 == 8080 ]]; }; `+snippet, "bash", script)
-	cmd.Env = append(os.Environ(), "CRACKLET_ROOT="+root)
+	cmd.Env = append(os.Environ(), "SKIFF_ROOT="+root)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
@@ -91,7 +91,7 @@ func TestAgentIndexAndNameAllocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("agent helpers failed: %v\n%s", err, out)
 	}
-	if out != "3\nvm2\n06:00:AC:10:0A:02\n172.16.3.2\ncracklet3" {
+	if out != "3\nvm2\n06:00:AC:10:0A:02\n172.16.3.2\nskiff3" {
 		t.Errorf("unexpected helper output:\n%s", out)
 	}
 }
@@ -106,7 +106,7 @@ func TestAgentWriteConfig(t *testing.T) {
 	}
 	out, err := runAgentFuncs(t, root, `write_config box 7 2 1024;
 		jq -r '."boot-source".boot_args, ."network-interfaces"[0].guest_mac, ."network-interfaces"[0].host_dev_name,
-		       ."machine-config".vcpu_count, .drives[0].path_on_host, .vsock.uds_path' "$CRACKLET_ROOT/vms/box/config.json"`)
+		       ."machine-config".vcpu_count, .drives[0].path_on_host, .vsock.uds_path' "$SKIFF_ROOT/vms/box/config.json"`)
 	if err != nil {
 		t.Fatalf("write_config failed: %v\n%s", err, out)
 	}
@@ -117,7 +117,7 @@ func TestAgentWriteConfig(t *testing.T) {
 	for i, want := range []string{
 		"quiet loglevel=3 systemd.show_status=0 ip=172.16.7.2::172.16.7.1:255.255.255.252:box:eth0:off systemd.hostname=box",
 		"06:00:AC:10:07:02",
-		"cracklet7",
+		"skiff7",
 		"2",
 		"./rootfs.ext4", // relative on purpose: snapshots are restored in other directories
 		"./v.sock",
@@ -150,7 +150,7 @@ func TestAgentVMJSONReportsBrokenEntries(t *testing.T) {
 
 func TestAgentValidateLabel(t *testing.T) {
 	root := t.TempDir()
-	if _, err := runAgentFuncs(t, root, `validate_label paseo-cracklet owner; validate_label 3 slot; validate_label - slot`); err != nil {
+	if _, err := runAgentFuncs(t, root, `validate_label paseo-skiff owner; validate_label 3 slot; validate_label - slot`); err != nil {
 		t.Errorf("valid labels rejected: %v", err)
 	}
 	for _, bad := range []string{"", "-x", "a b", "a;b", "a/b", "$(id)"} {
@@ -360,10 +360,10 @@ func TestAgentForwardBookkeeping(t *testing.T) {
 	out, err := runAgentFuncs(t, root, `
 		save_forward web 8080 80; save_forward web 3000 3000; save_forward web 8080 81   # replaces 8080
 		save_forward db 5432 5432
-		cat "$CRACKLET_ROOT/vms/web/forwards" | tr '\n' ' '; echo
+		cat "$SKIFF_ROOT/vms/web/forwards" | tr '\n' ' '; echo
 		forward_owner 5432; forward_owner 9999; echo "(none)"
 		forwards_json web
-		drop_forward web 3000; cat "$CRACKLET_ROOT/vms/web/forwards"`)
+		drop_forward web 3000; cat "$SKIFF_ROOT/vms/web/forwards"`)
 	if err != nil {
 		t.Fatalf("bookkeeping failed: %v\n%s", err, out)
 	}
@@ -411,25 +411,25 @@ func TestAgentHostNetworkIsolatesGuests(t *testing.T) {
 	for _, want := range []string{
 		"iptables-restore --noflush -w",
 		"*filter",
-		":CRACKLET-FORWARD - [0:0]",
-		":CRACKLET-INPUT - [0:0]",
-		"-A CRACKLET-FORWARD -i cracklet+ ! -s 172.16.0.0/16 -j DROP",
-		"-A CRACKLET-FORWARD -i cracklet+ -o cracklet+ -j DROP",
-		"-A CRACKLET-FORWARD -i cracklet+ -d 192.168.5.2 -j REJECT",
-		"-A CRACKLET-FORWARD -i cracklet+ -d 10.0.0.0/8 -j REJECT",
-		"-A CRACKLET-FORWARD -i cracklet+ -d 172.16.0.0/12 -j REJECT",
-		"-A CRACKLET-FORWARD -i cracklet+ -d 192.168.0.0/16 -j REJECT",
-		"-A CRACKLET-FORWARD -i cracklet+ -d 100.64.0.0/10 -j REJECT",
-		"-A CRACKLET-FORWARD -i cracklet+ -d 169.254.0.0/16 -j REJECT",
-		"-A CRACKLET-FORWARD -i cracklet+ -d 127.0.0.0/8 -j REJECT",
-		"-A CRACKLET-FORWARD -i cracklet+ -o eth0 -j ACCEPT",
-		"-A CRACKLET-FORWARD -o cracklet+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
-		"-A CRACKLET-FORWARD -i cracklet+ -j DROP",
-		"-A CRACKLET-INPUT -i cracklet+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
-		"-A CRACKLET-INPUT -i cracklet+ -j DROP",
+		":SKIFF-FORWARD - [0:0]",
+		":SKIFF-INPUT - [0:0]",
+		"-A SKIFF-FORWARD -i skiff+ ! -s 172.16.0.0/16 -j DROP",
+		"-A SKIFF-FORWARD -i skiff+ -o skiff+ -j DROP",
+		"-A SKIFF-FORWARD -i skiff+ -d 192.168.5.2 -j REJECT",
+		"-A SKIFF-FORWARD -i skiff+ -d 10.0.0.0/8 -j REJECT",
+		"-A SKIFF-FORWARD -i skiff+ -d 172.16.0.0/12 -j REJECT",
+		"-A SKIFF-FORWARD -i skiff+ -d 192.168.0.0/16 -j REJECT",
+		"-A SKIFF-FORWARD -i skiff+ -d 100.64.0.0/10 -j REJECT",
+		"-A SKIFF-FORWARD -i skiff+ -d 169.254.0.0/16 -j REJECT",
+		"-A SKIFF-FORWARD -i skiff+ -d 127.0.0.0/8 -j REJECT",
+		"-A SKIFF-FORWARD -i skiff+ -o eth0 -j ACCEPT",
+		"-A SKIFF-FORWARD -o skiff+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+		"-A SKIFF-FORWARD -i skiff+ -j DROP",
+		"-A SKIFF-INPUT -i skiff+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+		"-A SKIFF-INPUT -i skiff+ -j DROP",
 		"COMMIT",
-		"iptables -w -I INPUT -j CRACKLET-INPUT",
-		"iptables -w -I FORWARD -j CRACKLET-FORWARD",
+		"iptables -w -I INPUT -j SKIFF-INPUT",
+		"iptables -w -I FORWARD -j SKIFF-FORWARD",
 		"iptables -w -t nat -A POSTROUTING -s 172.16.0.0/16 ! -d 172.16.0.0/16 -j MASQUERADE",
 	} {
 		if !strings.Contains(out, want) {
@@ -438,16 +438,16 @@ func TestAgentHostNetworkIsolatesGuests(t *testing.T) {
 	}
 	// The terminal DROP must come after the ACCEPT rules of its chain.
 	for chain, accept := range map[string]string{
-		"CRACKLET-FORWARD": "-A CRACKLET-FORWARD -i cracklet+ -o eth0 -j ACCEPT",
-		"CRACKLET-INPUT":   "-A CRACKLET-INPUT -i cracklet+ -m conntrack",
+		"SKIFF-FORWARD": "-A SKIFF-FORWARD -i skiff+ -o eth0 -j ACCEPT",
+		"SKIFF-INPUT":   "-A SKIFF-INPUT -i skiff+ -m conntrack",
 	} {
-		a, d := strings.LastIndex(out, accept), strings.LastIndex(out, "-A "+chain+" -i cracklet+ -j DROP")
+		a, d := strings.LastIndex(out, accept), strings.LastIndex(out, "-A "+chain+" -i skiff+ -j DROP")
 		if a < 0 || d < a {
 			t.Errorf("%s: terminal DROP must follow the ACCEPT rules:\n%s", chain, out)
 		}
 	}
 	// The hooks must be installed only after the chains carry their rules.
-	if strings.Index(out, "COMMIT") > strings.Index(out, "-I FORWARD -j CRACKLET-FORWARD") {
+	if strings.Index(out, "COMMIT") > strings.Index(out, "-I FORWARD -j SKIFF-FORWARD") {
 		t.Errorf("hook into FORWARD must come after the atomic chain commit:\n%s", out)
 	}
 	if b, err := os.ReadFile(filepath.Join(root, "sysctl.conf")); err != nil || !strings.Contains(string(b), "ip_forward=1") {
@@ -473,21 +473,21 @@ func TestAgentCreateTapDisablesIPv6(t *testing.T) {
 		t.Fatalf("create_tap failed: %v\n%s", err, out)
 	}
 	for _, want := range []string{
-		"ip tuntap add dev cracklet3 mode tap",
-		"sysctl -q -w net.ipv6.conf.cracklet3.disable_ipv6=1",
-		"ip link set dev cracklet3 up",
+		"ip tuntap add dev skiff3 mode tap",
+		"sysctl -q -w net.ipv6.conf.skiff3.disable_ipv6=1",
+		"ip link set dev skiff3 up",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
-	if strings.Index(out, "disable_ipv6=1") > strings.Index(out, "set dev cracklet3 up") {
+	if strings.Index(out, "disable_ipv6=1") > strings.Index(out, "set dev skiff3 up") {
 		t.Errorf("IPv6 must be disabled before the tap comes up:\n%s", out)
 	}
 }
 
 // TestAgentInstallMotdReplacesUbuntuBanner checks that the guest greets with a
-// cracklet banner instead of Ubuntu's "minimized" and Landscape notices, and
+// skiff banner instead of Ubuntu's "minimized" and Landscape notices, and
 // that the banner script runs even on a host without /proc or hostname -I.
 func TestAgentInstallMotdReplacesUbuntuBanner(t *testing.T) {
 	root := t.TempDir()
@@ -510,10 +510,10 @@ func TestAgentInstallMotdReplacesUbuntuBanner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Name() != "00-cracklet" {
-		t.Fatalf("update-motd.d should only contain 00-cracklet, got %v", entries)
+	if len(entries) != 1 || entries[0].Name() != "00-skiff" {
+		t.Fatalf("update-motd.d should only contain 00-skiff, got %v", entries)
 	}
-	script := filepath.Join(motdDir, "00-cracklet")
+	script := filepath.Join(motdDir, "00-skiff")
 	if info, err := os.Stat(script); err != nil || info.Mode()&0o111 == 0 {
 		t.Fatalf("banner script must be executable: %v %v", err, info)
 	}
@@ -525,7 +525,7 @@ func TestAgentInstallMotdReplacesUbuntuBanner(t *testing.T) {
 		t.Fatalf("banner script failed: %v\n%s", err, out)
 	}
 	host, _ := os.Hostname()
-	for _, want := range []string{"cracklet", host, "ip", "vcpus", "memory", "up"} {
+	for _, want := range []string{"skiff", host, "ip", "vcpus", "memory", "up"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("banner missing %q:\n%s", want, out)
 		}
@@ -633,17 +633,17 @@ func TestAgentPaseoUnitInstalledButDisabled(t *testing.T) {
 }
 
 // TestAgentProfileCurrent ensures `new --profile` refuses an image built from
-// an older base (old cracklet-envd and authorized_keys).
+// an older base (old skiff-envd and authorized_keys).
 func TestAgentProfileCurrent(t *testing.T) {
 	root := t.TempDir()
 	out, err := runAgentFuncs(t, root, `
-		mkdir -p "$CRACKLET_ROOT/images"
-		echo 'b1' > "$CRACKLET_ROOT/images/rootfs-base.stamp"
-		rootfs_stamp paseo b1 > "$CRACKLET_ROOT/images/rootfs-paseo.stamp"
+		mkdir -p "$SKIFF_ROOT/images"
+		echo 'b1' > "$SKIFF_ROOT/images/rootfs-base.stamp"
+		rootfs_stamp paseo b1 > "$SKIFF_ROOT/images/rootfs-paseo.stamp"
 		profile_current paseo && echo current
-		echo 'b2' > "$CRACKLET_ROOT/images/rootfs-base.stamp"
+		echo 'b2' > "$SKIFF_ROOT/images/rootfs-base.stamp"
 		profile_current paseo || echo stale
-		rm "$CRACKLET_ROOT/images/rootfs-paseo.stamp"
+		rm "$SKIFF_ROOT/images/rootfs-paseo.stamp"
 		profile_current paseo || echo missing`)
 	if err != nil || out != "current\nstale\nmissing" {
 		t.Errorf("profile_current: %q, %v", out, err)
@@ -655,7 +655,7 @@ func TestAgentProfileCurrent(t *testing.T) {
 func TestAgentReleaseStaleMountsWithoutLeftovers(t *testing.T) {
 	root := t.TempDir()
 	out, err := runAgentFuncs(t, root, `
-		findmnt() { echo /; echo /dev; echo "$CRACKLET_ROOT/images/build.abc/root/dev"; }
+		findmnt() { echo /; echo /dev; echo "$SKIFF_ROOT/images/build.abc/root/dev"; }
 		umount() { echo "umount $*"; }
 		release_stale_mounts; echo done
 		findmnt() { echo /; }

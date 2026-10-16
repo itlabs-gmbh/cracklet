@@ -1,8 +1,8 @@
 # GitHub through the broker, for git and the gh CLI:
-#   cracklet grant <vm> github
+#   skiff grant <vm> github
 #
 # Store a token once:
-#   cracklet secret set github-token
+#   skiff secret set github-token
 # The token is the only limit on what the VM can reach: the broker checks
 # that github is granted, not which repository a request names. Use a
 # fine-grained token restricted to the repositories the agent should work on
@@ -13,7 +13,7 @@
 # https://github.com/ and git@github.com: to the broker, so plain
 # `git clone https://github.com/org/repo` and `git push` just work, also in
 # sessions that were already open. Other settings in that file are left alone
-# and `cracklet revoke` removes the section again.
+# and `skiff revoke` removes the section again.
 #
 # gh: http_unix_socket sends all of gh's API traffic to the broker socket in
 # the guest, still addressed to api.github.com; the broker replaces gh's
@@ -29,13 +29,13 @@ upstream = "https://github.com"
 [proxy.headers]
 # git over HTTPS only accepts Basic auth; GitHub ignores the user name for
 # tokens, x-access-token is the conventional one.
-Authorization = "Basic {{ secret \"keychain:cracklet/github-token\" | basicauth \"x-access-token\" }}"
+Authorization = "Basic {{ secret \"keychain:skiff/github-token\" | basicauth \"x-access-token\" }}"
 
 [[proxy.routes]]
 host = "api.github.com"
 upstream = "https://api.github.com"
 [proxy.routes.headers]
-Authorization = "Bearer {{ secret \"keychain:cracklet/github-token\" }}"
+Authorization = "Bearer {{ secret \"keychain:skiff/github-token\" }}"
 
 [[guest.blocks]]
 path = "/etc/gitconfig"
@@ -56,15 +56,15 @@ http_unix_socket: {{ .BrokerSocket }}
 # call, while a long-running process such as the Paseo daemon reads
 # /etc/environment only at start and would miss a later grant. The shape is
 # gh's multi-account format with a user name, so gh never migrates it (which
-# would ask the API for the user and rewrite the file behind cracklet's back).
+# would ask the API for the user and rewrite the file behind skiff's back).
 [[guest.blocks]]
 path = "/root/.config/gh/hosts.yml"
 content = """
 github.com:
     users:
-        cracklet:
+        skiff:
             oauth_token: {{ .PseudoToken }}
     git_protocol: https
-    user: cracklet
+    user: skiff
     oauth_token: {{ .PseudoToken }}
 """

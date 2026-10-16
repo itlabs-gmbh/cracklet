@@ -1,15 +1,15 @@
-BINARY := cracklet
+BINARY := skiff
 GOFLAGS ?=
 
-ENVD := internal/envdbin/bin/cracklet-envd
+ENVD := internal/envdbin/bin/skiff-envd
 
 .PHONY: build install test cover lint e2e clean envd
 
-# The guest identity daemon is cross-compiled for the microVMs and embedded into cracklet.
+# The guest identity daemon is cross-compiled for the microVMs and embedded into skiff.
 envd: $(ENVD)
 
-$(ENVD): $(wildcard cmd/cracklet-envd/*.go) $(wildcard internal/envd/*.go) go.mod
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o $(ENVD) ./cmd/cracklet-envd
+$(ENVD): $(wildcard cmd/skiff-envd/*.go) $(wildcard internal/envd/*.go) go.mod
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o $(ENVD) ./cmd/skiff-envd
 
 build: $(ENVD)
 	go build $(GOFLAGS) -o bin/$(BINARY) ./cmd/$(BINARY)
@@ -29,7 +29,7 @@ lint:
 	go vet ./...
 	shellcheck -s bash internal/agent/agent.sh
 
-# Boots a real microVM; needs a prepared host (cracklet prepare). Always cleans up.
+# Boots a real microVM; needs a prepared host (skiff prepare). Always cleans up.
 e2e: build
 	./bin/$(BINARY) new e2e-smoke --mem 512 \
 	  && ./bin/$(BINARY) ssh e2e-smoke uname -a \

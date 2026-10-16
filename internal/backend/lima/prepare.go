@@ -9,12 +9,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/host"
-	limactl "github.com/itlabs-gmbh/cracklet/internal/lima"
-	"github.com/itlabs-gmbh/cracklet/internal/sshkey"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/host"
+	limactl "github.com/itlabs-gmbh/skiff/internal/lima"
+	"github.com/itlabs-gmbh/skiff/internal/sshkey"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 func template(o backend.PrepareOptions) limactl.TemplateOptions {
@@ -91,10 +91,10 @@ func (b *Backend) Doctor(ctx context.Context) error {
 		b.printf("  [%s] %s\n", severity(p), p.Message)
 	}
 	if host.HasFatal(problems) {
-		return fmt.Errorf("host is not ready for cracklet")
+		return fmt.Errorf("host is not ready for skiff")
 	}
 	if !facts.HasLima {
-		b.printf("Lima instance %q: Lima is not installed yet (run 'cracklet prepare')\n", config.Instance)
+		b.printf("Lima instance %q: Lima is not installed yet (run 'skiff prepare')\n", config.Instance)
 		return nil
 	}
 	inst, ok, err := b.lima.Get(ctx)
@@ -102,7 +102,7 @@ func (b *Backend) Doctor(ctx context.Context) error {
 	case err != nil:
 		return err
 	case !ok:
-		b.printf("Lima instance %q: not created (run 'cracklet prepare')\n", config.Instance)
+		b.printf("Lima instance %q: not created (run 'skiff prepare')\n", config.Instance)
 	default:
 		b.printf("Lima instance %q: %s\n", config.Instance, inst.Status)
 	}
@@ -117,7 +117,7 @@ func (b *Backend) preflight(ctx context.Context) error {
 		b.printf("  [%s] %s\n", severity(p), p.Message)
 	}
 	if host.HasFatal(problems) {
-		return fmt.Errorf("host is not ready for cracklet")
+		return fmt.Errorf("host is not ready for skiff")
 	}
 	if !facts.HasLima {
 		b.printf("==> Installing Lima\n")

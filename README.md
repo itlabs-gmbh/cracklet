@@ -1,55 +1,55 @@
-# cracklet – Firecracker microVMs on your Mac
+# skiff – Firecracker microVMs on your Mac
 
-[![CI](https://github.com/itlabs-gmbh/cracklet/actions/workflows/ci.yml/badge.svg)](https://github.com/itlabs-gmbh/cracklet/actions/workflows/ci.yml)
+[![CI](https://github.com/itlabs-gmbh/skiff/actions/workflows/ci.yml/badge.svg)](https://github.com/itlabs-gmbh/skiff/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Go Reference](https://pkg.go.dev/badge/github.com/itlabs-gmbh/cracklet.svg)](https://pkg.go.dev/github.com/itlabs-gmbh/cracklet)
+[![Go Reference](https://pkg.go.dev/badge/github.com/itlabs-gmbh/skiff.svg)](https://pkg.go.dev/github.com/itlabs-gmbh/skiff)
 
-`cracklet` gives you the "ssh into a fresh microVM in a second" feeling on Apple
+`skiff` gives you the "ssh into a fresh microVM in a second" feeling on Apple
 Silicon. It runs **real, unmodified Firecracker** by placing a single Lima VM
 with nested virtualization between macOS and the microVMs:
 
 ```
-macOS (cracklet)
- └── Lima VM "cracklet"  (Ubuntu 24.04, vz driver, nestedVirtualization: true → /dev/kvm)
+macOS (skiff)
+ └── Lima VM "skiff"  (Ubuntu 24.04, vz driver, nestedVirtualization: true → /dev/kvm)
       ├── firecracker v1.17.0 + guest kernel + Ubuntu 24.04 base image
-      ├── microVM vm1  (tap cracklet1, 172.16.1.2, systemd unit cracklet-vm-vm1)
-      ├── microVM vm2  (tap cracklet2, 172.16.2.2, systemd unit cracklet-vm-vm2)
+      ├── microVM vm1  (tap skiff1, 172.16.1.2, systemd unit skiff-vm-vm1)
+      ├── microVM vm2  (tap skiff2, 172.16.2.2, systemd unit skiff-vm-vm2)
       └── ...
 ```
 
 Every microVM gets its own kernel, root disk, IP address and SSH access. The
-host side (`cracklet`) is a small Go CLI; the guest side is a bash agent that cracklet
+host side (`skiff`) is a small Go CLI; the guest side is a bash agent that skiff
 installs into the Lima VM and keeps up to date automatically.
 
 ## Requirements
 
 - Apple M3 or newer (nested virtualization is a hardware feature of M3+)
 - macOS 15 or newer
-- Homebrew (cracklet installs Lima through it if needed)
-- Go 1.26+ to build cracklet
+- Homebrew (skiff installs Lima through it if needed)
+- Go 1.26+ to build skiff
 
-Check with `cracklet doctor`.
+Check with `skiff doctor`.
 
 ## Install
 
 ```sh
-go install github.com/itlabs-gmbh/cracklet/cmd/cracklet@latest
-cracklet prepare           # one-time setup, a few minutes
+go install github.com/itlabs-gmbh/skiff/cmd/skiff@latest
+skiff prepare           # one-time setup, a few minutes
 ```
 
-Or from a checkout: `make install` (go install ./cmd/cracklet → `$(go env GOPATH)/bin/cracklet`).
+Or from a checkout: `make install` (go install ./cmd/skiff → `$(go env GOPATH)/bin/skiff`).
 
-`cracklet prepare` is idempotent. It:
+`skiff prepare` is idempotent. It:
 
 1. verifies the host (chip, macOS version, Hypervisor framework, Lima),
-2. generates an SSH key pair in `~/.cracklet/`,
+2. generates an SSH key pair in `~/.skiff/`,
 3. creates and boots the Lima VM from an embedded template
    (`--cpus`, `--memory`, `--disk` size it; defaults 4 / 8 GiB / 40 GiB;
    see [Resizing the Lima VM](#resizing-the-lima-vm) to change an existing one),
 4. installs Firecracker, downloads the guest kernel and the Ubuntu rootfs
    (all three verified against SHA-256 digests pinned in `internal/config`),
    injects your public key and builds a sparse ext4 base image,
-5. writes `~/.cracklet/ssh_config`.
+5. writes `~/.skiff/ssh_config`.
 
 The Lima VM mounts nothing from the Mac; files travel over `limactl shell`.
 
@@ -59,53 +59,53 @@ All microVMs share the Lima VM's CPUs and memory, so the defaults fit about
 two or three parallel task VMs. Grow it in place, without rebuilding:
 
 ```sh
-cracklet stop vm1                 # resizing restarts the Lima VM
-cracklet prepare --cpus 8 --memory 16
+skiff stop vm1                 # resizing restarts the Lima VM
+skiff prepare --cpus 8 --memory 16
 ```
 
-Only the flags you pass are applied, so a later plain `cracklet prepare` keeps
+Only the flags you pass are applied, so a later plain `skiff prepare` keeps
 the new size. The restart would kill running microVMs, so prepare refuses
-while any run, and `cracklet new`/`start` refuse until the resize is done
-(a host-side lock in `~/.cracklet/lima.lock`). The disk can only grow;
+while any run, and `skiff new`/`start` refuse until the resize is done
+(a host-side lock in `~/.skiff/lima.lock`). The disk can only grow;
 shrinking means recreating the Lima VM.
 
 ## Usage
 
 ```sh
-cracklet new                    # boots vm1 (2 vCPUs, 1 GiB RAM, 2G disk)
-cracklet new dev --vcpus 4 --mem 2048 --disk 8G
-cracklet ls
-cracklet ls --json              # also: new --json, inspect --json
-cracklet inspect dev            # details of one VM
-cracklet ssh dev                # interactive root shell
-cracklet ssh dev uname -a       # run a command (a shell command line, like plain ssh)
-cracklet exec dev -- git commit -m "it's done"   # exact argv, every word quoted
-cracklet stop dev               # keep the disk
-cracklet start dev
-cracklet rm dev                 # stop and delete
-cracklet gc --owner paseo       # remove VMs a tool created and lost track of
+skiff new                    # boots vm1 (2 vCPUs, 1 GiB RAM, 2G disk)
+skiff new dev --vcpus 4 --mem 2048 --disk 8G
+skiff ls
+skiff ls --json              # also: new --json, inspect --json
+skiff inspect dev            # details of one VM
+skiff ssh dev                # interactive root shell
+skiff ssh dev uname -a       # run a command (a shell command line, like plain ssh)
+skiff exec dev -- git commit -m "it's done"   # exact argv, every word quoted
+skiff stop dev               # keep the disk
+skiff start dev
+skiff rm dev                 # stop and delete
+skiff gc --owner paseo       # remove VMs a tool created and lost track of
 ```
 
 ### Golden snapshots
 
-`cracklet new` does not boot: it restores a *golden snapshot*, a fully booted VM
-(sshd and the guest daemon `cracklet-envd` running) frozen together with its
-memory. The first `cracklet new` for a given `--vcpus`/`--mem` combination builds
+`skiff new` does not boot: it restores a *golden snapshot*, a fully booted VM
+(sshd and the guest daemon `skiff-envd` running) frozen together with its
+memory. The first `skiff new` for a given `--vcpus`/`--mem` combination builds
 that snapshot (about 15 s), every later one restores it in roughly 3 s.
 
 After the restore the clone still carries the snapshot's IP, hostname and
 clock. The agent sends the real identity over vsock (Firecracker's Unix socket
-with the `CONNECT 52` handshake) and `cracklet-envd` applies it with netlink and
+with the `CONNECT 52` handshake) and `skiff-envd` applies it with netlink and
 syscalls, without spawning a process: right after a restore every page the
 guest touches is a nested page fault, so even `ip addr add` costs hundreds of
 milliseconds there.
 
 `--fresh` forces a cold boot; a `--disk` other than the profile's image size
 implies it. Snapshots are keyed on the profile image, kernel, Firecracker version and the
-agent revision, so they rebuild automatically after `cracklet prepare` changes any
-of them. `cracklet-envd` is cross-compiled for linux/arm64 and embedded into cracklet
-(`make envd`). A cracklet installed with `go install ...@latest` has no embedded copy;
-`cracklet prepare` then cross-compiles the daemon from the module cache with your Go
+agent revision, so they rebuild automatically after `skiff prepare` changes any
+of them. `skiff-envd` is cross-compiled for linux/arm64 and embedded into skiff
+(`make envd`). A skiff installed with `go install ...@latest` has no embedded copy;
+`skiff prepare` then cross-compiles the daemon from the module cache with your Go
 toolchain, at the same module version as the CLI.
 
 ### Image profiles
@@ -115,8 +115,8 @@ and python3, 2G). `paseo` adds Node 22, `@getpaseo/cli`, Claude Code (native
 installer), git, gh and rsync on an 8G image. Build a profile once, then use it:
 
 ```sh
-cracklet prepare --profile paseo   # chroot install from apt/npm/claude.ai, a few minutes
-cracklet new agent --profile paseo # restores the paseo golden snapshot
+skiff prepare --profile paseo   # chroot install from apt/npm/claude.ai, a few minutes
+skiff new agent --profile paseo # restores the paseo golden snapshot
 ```
 
 A profile image is built at its full size because a golden snapshot can only
@@ -126,17 +126,17 @@ enabled, so the snapshot carries no daemon keypair; start it per VM with
 `systemctl enable --now paseo`. Package versions are the newest available when
 the image is built; a new base image or agent revision rebuilds the profile.
 
-### Owned VMs and `cracklet gc`
+### Owned VMs and `skiff gc`
 
 Tools that create VMs on your behalf label them with an owner and, if they keep a
-pool, a slot. cracklet records both together with the creation time in the VM's
+pool, a slot. skiff records both together with the creation time in the VM's
 directory, so the labels disappear with the VM:
 
 ```sh
-cracklet new paseo-3 --profile paseo --owner paseo --slot 3
-cracklet ls                             # OWNER shows paseo/3, AGE the time since creation
-cracklet gc --owner paseo --keep paseo-1 --keep paseo-2   # a tool reconciling its pool
-cracklet gc --older-than 7d --dry-run   # owned VMs older than a week
+skiff new paseo-3 --profile paseo --owner paseo --slot 3
+skiff ls                             # OWNER shows paseo/3, AGE the time since creation
+skiff gc --owner paseo --keep paseo-1 --keep paseo-2   # a tool reconciling its pool
+skiff gc --older-than 7d --dry-run   # owned VMs older than a week
 ```
 
 `gc` only ever removes VMs that have an owner; VMs created by hand have none and
@@ -150,10 +150,10 @@ reports `{"vms": [...], "host_state": [...], "dry_run": ...}`.
 ### Port forwarding
 
 ```sh
-cracklet new web -p 8080:80 -p 3000    # forwards at creation
-cracklet forward web 5432              # localhost:5432 -> web:5432
-cracklet forward web                   # list
-cracklet unforward web 5432
+skiff new web -p 8080:80 -p 3000    # forwards at creation
+skiff forward web 5432              # localhost:5432 -> web:5432
+skiff forward web                   # list
+skiff unforward web 5432
 ```
 
 Forwards appear as `localhost:PORT` on the Mac, persist across `stop`/`start`
@@ -165,50 +165,50 @@ dynamic port forwarding brings the socket to `127.0.0.1` on the Mac.
 To use plain `ssh`, add one line to `~/.ssh/config`:
 
 ```
-Include ~/.cracklet/ssh_config
+Include ~/.skiff/ssh_config
 ```
 
-Then `ssh dev.cracklet` works from anywhere, including `scp`, `rsync` and your IDE.
+Then `ssh dev.skiff` works from anywhere, including `scp`, `rsync` and your IDE.
 The alias uses the Lima VM as an SSH jump host (`ProxyCommand ssh -W`), so no
 port forwarding or `sudo` is needed on macOS.
 
 ### Capabilities: credentials and MCPs without copying secrets
 
 A microVM is isolated from your Mac on purpose. When an agent inside needs
-GitHub, Claude Code or an MCP server that only runs on the Mac, cracklet opens
+GitHub, Claude Code or an MCP server that only runs on the Mac, skiff opens
 one controlled hole: a **broker** that hands out *connections, never secrets*.
 
 ```sh
-cracklet secret set claude-token          # paste the output of `claude setup-token`
-cracklet secret set github-token          # a fine-grained token, limited to the repos the agent may use
-cracklet grant agent1 claude github ssh-agent
-cracklet ssh agent1                       # the broker lives as long as this session
-cracklet grants agent1
-cracklet revoke agent1 github
+skiff secret set claude-token          # paste the output of `claude setup-token`
+skiff secret set github-token          # a fine-grained token, limited to the repos the agent may use
+skiff grant agent1 claude github ssh-agent
+skiff ssh agent1                       # the broker lives as long as this session
+skiff grants agent1
+skiff revoke agent1 github
 ```
 
-While `cracklet ssh` is open, the broker listens on a Unix socket on the Mac and
+While `skiff ssh` is open, the broker listens on a Unix socket on the Mac and
 ssh forwards it to `127.0.0.1:7777` inside the guest (`-R`). Tools in the guest
 talk to that address with a per-VM placeholder token; the broker swaps it for
 the real credential from the macOS Keychain. The socket identifies the VM, so
 there is nothing in the guest worth stealing, and the hole closes with the
 terminal. `ssh-agent` is a built-in grant that adds `-A`; pair it with
 `ssh-add -c` to confirm every signature. For clients that only speak HTTP over
-a Unix socket, the guest also gets `/run/cracklet/broker.sock` while any
+a Unix socket, the guest also gets `/run/skiff/broker.sock` while any
 capability is granted: a systemd socket that relays to the same tunnel.
 
-When something other than `cracklet ssh` drives the guest, such as an editor or
+When something other than `skiff ssh` drives the guest, such as an editor or
 an agent runner with its own ssh session, keep the broker up with
-`cracklet tunnel agent1`. It holds only the forward, reconnects when the
+`skiff tunnel agent1`. It holds only the forward, reconnects when the
 connection drops, logs `tunnel=open|closed` to the audit log and ends with
-Ctrl-C or when the VM stops. `cracklet ssh agent1` keeps working alongside it
+Ctrl-C or when the VM stops. `skiff ssh agent1` keeps working alongside it
 and uses the running broker instead of forwarding a second time; if the session
 or tunnel that owns the broker ends first, the remaining session takes it over
 within a few seconds.
 
-Grants are the only policy: default deny, one file per VM in `~/.cracklet/vms/`,
-checked on every request and logged to `~/.cracklet/audit.log`. A denied request
-answers with the exact `cracklet grant` command that would allow it. A grant is
+Grants are the only policy: default deny, one file per VM in `~/.skiff/vms/`,
+checked on every request and logged to `~/.skiff/audit.log`. A denied request
+answers with the exact `skiff grant` command that would allow it. A grant is
 all or nothing per capability: what a granted VM can reach is what the
 credential behind it can reach. Limit that at the source, for GitHub with a
 fine-grained token restricted to the repositories the agent works on. GitHub
@@ -221,26 +221,26 @@ specific to Claude Code, GitHub or any other tool is a **capability file**:
 |-----------|-----------------------------------------------------------------------------|
 | `proxy`   | reverse-proxies `/<cap>/...` (or a routed `Host`) to an upstream and injects headers from secrets |
 | `mcp`     | runs a stdio MCP server on the Mac and serves it as an HTTP MCP endpoint     |
-| `exec`    | pipes the request through an external program (`cracklet-cap-<name>`)        |
+| `exec`    | pipes the request through an external program (`skiff-cap-<name>`)        |
 
 ```sh
-cracklet cap ls                           # embedded: claude, github; yours in ~/.cracklet/caps
-cracklet cap show claude                  # the TOML file
-cracklet cap show github --render --vm agent1   # what the guest receives
-cracklet cap init codex                   # commented skeleton, then: cracklet cap lint codex
-cracklet cap add https://example.com/gemini.toml   # shown before it is installed
+skiff cap ls                           # embedded: claude, github; yours in ~/.skiff/caps
+skiff cap show claude                  # the TOML file
+skiff cap show github --render --vm agent1   # what the guest receives
+skiff cap init codex                   # commented skeleton, then: skiff cap lint codex
+skiff cap add https://example.com/gemini.toml   # shown before it is installed
 ```
 
 A capability declares the primitive plus a `[guest]` section with environment
 variables, files, managed blocks inside shared files (such as `/etc/gitconfig`)
 and JSON merges, all templated with `.BrokerURL`, `.BrokerSocket`, `.PseudoToken`
 and `.VM`. Secrets (`keychain:`, `env:`, `cmd:`, `file:`) are only valid on the
-broker side; `cracklet cap lint` rejects them in guest sections. Header
+broker side; `skiff cap lint` rejects them in guest sections. Header
 templates can encode Basic credentials with
 `{{ secret "ref" | basicauth "user" }}`. A proxy can add `[[proxy.routes]]`:
 requests that reach the broker for another `host` (for example through
 `.BrokerSocket`) go to that route's upstream with its own headers. A user file in
-`~/.cracklet/caps/<name>.toml` replaces an embedded capability of the same name.
+`~/.skiff/caps/<name>.toml` replaces an embedded capability of the same name.
 See `examples/caps/` for an MCP bridge and an exec plugin.
 
 The embedded `github` capability serves git and the `gh` CLI with one token.
@@ -266,11 +266,11 @@ your account, so keep the broker personal.
 |------------------|-----------------------------------------------------------------------|
 | Kernel           | Firecracker CI `vmlinux-6.1.186` (aarch64)                            |
 | Root disk        | copy of the Ubuntu 24.04 base image, grown to `--disk` with resize2fs |
-| Network          | tap `cracklet<N>` on the Lima VM, guest IP `172.16.<N>.2/30`, NAT to the internet |
+| Network          | tap `skiff<N>` on the Lima VM, guest IP `172.16.<N>.2/30`, NAT to the internet |
 | Guest IP config  | kernel `ip=` boot argument, hostname via `systemd.hostname=`          |
-| Process          | transient systemd unit `cracklet-vm-<name>`, console in `console.log`      |
-| Port forwards    | `forwards` file per VM, socket units `cracklet-fwd-<name>-<port>`          |
-| State            | `/var/lib/cracklet/vms/<name>/` inside the Lima VM                         |
+| Process          | transient systemd unit `skiff-vm-<name>`, console in `console.log`      |
+| Port forwards    | `forwards` file per VM, socket units `skiff-fwd-<name>-<port>`          |
+| State            | `/var/lib/skiff/vms/<name>/` inside the Lima VM                         |
 
 Stopping uses a guest `reboot` over SSH (Firecracker on aarch64 has no ACPI
 power button) and falls back to SIGTERM after 30 seconds.
@@ -278,13 +278,13 @@ power button) and falls back to SIGTERM after 30 seconds.
 Each Firecracker process runs in a transient systemd unit with
 `NoNewPrivileges`, `PrivateTmp`, `ProtectHome`, a device allow-list
 (`/dev/kvm`, `/dev/net/tun`) and a `MemoryMax` of guest memory plus 256 MiB.
-Agent commands that change state are serialised with `flock`, and a `cracklet new`
+Agent commands that change state are serialised with `flock`, and a `skiff new`
 that fails half-way rolls back its disk, tap, hosts entry and unit.
 
 ### Network isolation
 
-Two dedicated iptables chains (`CRACKLET-FORWARD` for routed traffic,
-`CRACKLET-INPUT` for traffic addressed to the Lima VM itself) let microVMs reach
+Two dedicated iptables chains (`SKIFF-FORWARD` for routed traffic,
+`SKIFF-INPUT` for traffic addressed to the Lima VM itself) let microVMs reach
 the internet through NAT but:
 
 - microVMs cannot talk to each other (tap-to-tap traffic is dropped),
@@ -307,28 +307,28 @@ in `internal/agent/agent.sh`.
 
 Every microVM restored from the golden snapshot starts with the snapshot's
 kernel random state. The host agent sends 32 bytes from the Lima VM's
-`/dev/urandom` with the identity message; `cracklet-envd` credits them with
+`/dev/urandom` with the identity message; `skiff-envd` credits them with
 `RNDADDENTROPY` and forces a reseed with `RNDRESEEDCRNG`, so clones diverge
 immediately instead of at the kernel's next scheduled reseed.
 
 ## Troubleshooting
 
-- `cracklet doctor` explains what is missing on the host.
-- Console output of a VM: `limactl shell cracklet sudo cat /var/lib/cracklet/vms/<name>/console.log`
-- Agent logs: `limactl shell cracklet sudo journalctl -u cracklet-vm-<name>`
-- After a reboot of the Mac, the next `cracklet` command starts the stopped Lima VM, and
+- `skiff doctor` explains what is missing on the host.
+- Console output of a VM: `limactl shell skiff sudo cat /var/lib/skiff/vms/<name>/console.log`
+- Agent logs: `limactl shell skiff sudo journalctl -u skiff-vm-<name>`
+- After a reboot of the Mac, the next `skiff` command starts the stopped Lima VM, and
   the microVMs that were running come back (also at every boot of the Lima VM, through
-  `cracklet-restore.service`). VMs stopped with `cracklet stop` stay stopped. If one
-  fails to boot, the command warns; `cracklet start <name>` retries it.
-- `cracklet ls` shows `broken` for a VM whose metadata is damaged; `cracklet rm <name>` cleans it up.
-- `cracklet ssh` and `cracklet exec` mirror the remote exit status; exit 255 means the connection failed.
-- `cracklet ssh dev a b` joins its words into one shell command line, as ssh does, so
-  quotes and `$` are interpreted by the guest shell. Use `cracklet exec dev -- a b` from
+  `skiff-restore.service`). VMs stopped with `skiff stop` stay stopped. If one
+  fails to boot, the command warns; `skiff start <name>` retries it.
+- `skiff ls` shows `broken` for a VM whose metadata is damaged; `skiff rm <name>` cleans it up.
+- `skiff ssh` and `skiff exec` mirror the remote exit status; exit 255 means the connection failed.
+- `skiff ssh dev a b` joins its words into one shell command line, as ssh does, so
+  quotes and `$` are interpreted by the guest shell. Use `skiff exec dev -- a b` from
   scripts: it quotes every argument and the guest sees exactly that argv.
-- Ctrl-C during `cracklet new NAME` removes the half-created VM again (the agent inside
-  the Lima VM finishes or rolls back on its own, then cracklet runs `rm`). For an
-  auto-named VM, check `cracklet ls` afterwards.
-- Reset everything: `limactl delete -f cracklet && rm -rf ~/.cracklet`
+- Ctrl-C during `skiff new NAME` removes the half-created VM again (the agent inside
+  the Lima VM finishes or rolls back on its own, then skiff runs `rm`). For an
+  auto-named VM, check `skiff ls` afterwards.
+- Reset everything: `limactl delete -f skiff && rm -rf ~/.skiff`
 
 ## Why not Firecracker on the Virtualization framework directly?
 
@@ -337,7 +337,7 @@ framework (`drink7036290/firecracker`, branch `macos_avf`). It has been
 untouched since February 2025, disables most of Firecracker (no API server,
 no event loop, console on stdio) and needs a custom-built kernel. Nested
 virtualization keeps the upstream binary, API, snapshots and kernels intact,
-which is why cracklet builds on it.
+which is why skiff builds on it.
 
 ## Development
 
@@ -346,10 +346,10 @@ make envd     # cross-compile the guest daemon (needed before go build)
 make test     # unit tests (with -race); pure agent helpers run under bash too
 make cover    # coverage summary
 make lint     # gofmt, go vet, shellcheck
-make e2e      # boots a real microVM (requires cracklet prepare), cleans up afterwards
+make e2e      # boots a real microVM (requires skiff prepare), cleans up afterwards
 ```
 
-Layout: `cmd/cracklet` (entry point), `internal/cli` (cobra commands),
+Layout: `cmd/skiff` (entry point), `internal/cli` (cobra commands),
 `internal/app` (workflows), `internal/lima` (limactl wrapper + template),
 `internal/agent` (embedded guest script), `internal/host` (preflight),
 `internal/broker` (per-VM capability broker), `internal/cap` (capability files,
@@ -367,7 +367,7 @@ vulnerabilities privately. This project follows the
 
 ## License
 
-cracklet is licensed under the [Apache License 2.0](LICENSE).
+skiff is licensed under the [Apache License 2.0](LICENSE).
 Copyright 2026 IT-Labs GmbH. Firecracker, the guest kernel, the Ubuntu image
-and Lima are downloaded at `cracklet prepare` time and keep their own
+and Lima are downloaded at `skiff prepare` time and keep their own
 licenses; see [NOTICE](NOTICE).

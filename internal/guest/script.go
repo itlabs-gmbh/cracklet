@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/itlabs-gmbh/cracklet/internal/cap"
+	"github.com/itlabs-gmbh/skiff/internal/cap"
 )
 
 // State is what the guest reported before an apply: the previous manifest and
@@ -141,7 +141,7 @@ func (p Plan) staleFiles(st State) []string {
 
 // staleBlocks are managed sections a previous plan owned that this plan no
 // longer declares. The comment syntax is unknown by then, so the markers
-// are matched on their cracklet:<owner> tag alone.
+// are matched on their skiff:<owner> tag alone.
 func (p Plan) staleBlocks(st State) []Block {
 	current := map[string]bool{}
 	for _, l := range p.Manifest() {
@@ -222,7 +222,7 @@ func (p Plan) writeEnv(b *strings.Builder) {
 	rewriteSection(b, EnvFile, "^"+markerBegin+"$", "^"+markerEnd+"$", block.String())
 }
 
-// writeBlock replaces the section tagged cracklet:<owner> in a file with
+// writeBlock replaces the section tagged skiff:<owner> in a file with
 // content (an empty content just removes it). Markers are matched by their
 // tag so the comment syntax may change between versions.
 func writeBlock(b *strings.Builder, p, owner, comment, content string) {
@@ -248,18 +248,18 @@ func rewriteSection(b *strings.Builder, p, beginPat, endPat, section string) {
 	q := shQuote(p)
 	dir := shQuote(path.Dir(p))
 	b.WriteString("install -d -m 0755 " + dir + "\n")
-	b.WriteString("tmp=$(mktemp " + dir + "/.cracklet.XXXXXX)\n")
+	b.WriteString("tmp=$(mktemp " + dir + "/.skiff.XXXXXX)\n")
 	b.WriteString("if [ -f " + q + " ]; then cp -p " + q + " \"$tmp\"; sed '/" + beginPat + "/,/" + endPat + "/d' " + q + " > \"$tmp\"; else chmod 0644 \"$tmp\"; fi\n")
 	// $(...) strips trailing newlines, so the output is empty exactly when
 	// the file is empty or already ends in a newline.
 	b.WriteString("if [ -n \"$(tail -c1 \"$tmp\")\" ]; then echo >> \"$tmp\"; fi\n")
-	b.WriteString("base64 -d >> \"$tmp\" <<'CRACKLET_B64'\n")
+	b.WriteString("base64 -d >> \"$tmp\" <<'SKIFF_B64'\n")
 	b.WriteString(base64.StdEncoding.EncodeToString([]byte(section)) + "\n")
-	b.WriteString("CRACKLET_B64\n")
+	b.WriteString("SKIFF_B64\n")
 	b.WriteString("mv -f \"$tmp\" " + q + "\n")
 }
 
-func blockTag(owner string) string { return "cracklet:" + owner }
+func blockTag(owner string) string { return "skiff:" + owner }
 
 func blockMarkers(owner, comment string) (string, string) {
 	return comment + " >>> " + blockTag(owner) + " managed, do not edit", comment + " <<< " + blockTag(owner)
@@ -269,9 +269,9 @@ func blockMarkers(owner, comment string) (string, string) {
 // can terminate the heredoc early or be interpreted by the shell.
 func writeFile(b *strings.Builder, p, mode string, content []byte) {
 	b.WriteString("install -d -m 0755 " + shQuote(path.Dir(p)) + "\n")
-	b.WriteString("base64 -d > " + shQuote(p) + " <<'CRACKLET_B64'\n")
+	b.WriteString("base64 -d > " + shQuote(p) + " <<'SKIFF_B64'\n")
 	b.WriteString(base64.StdEncoding.EncodeToString(content) + "\n")
-	b.WriteString("CRACKLET_B64\n")
+	b.WriteString("SKIFF_B64\n")
 	b.WriteString("chmod " + shQuote(mode) + " " + shQuote(p) + "\n")
 }
 

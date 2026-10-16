@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/shquote"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/shquote"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
-// SSHProxyCommand implements backend.Backend: ssh runs cracklet itself, which
+// SSHProxyCommand implements backend.Backend: ssh runs skiff itself, which
 // resolves the machine's current vmnet address on every connection. ssh
 // expands % tokens in the line, so a % in the path is escaped.
 func (b *Backend) SSHProxyCommand() string {
@@ -35,7 +35,7 @@ func (b *Backend) Dial(ctx context.Context, name string, port int) (backend.Conn
 		return nil, err
 	}
 	if m.state() != vm.StateRunning || m.addr() == "" {
-		return nil, fmt.Errorf("VM '%s' is %s (cracklet start %s)", name, m.state(), name)
+		return nil, fmt.Errorf("VM '%s' is %s (skiff start %s)", name, m.state(), name)
 	}
 	return b.dial(ctx, net.JoinHostPort(m.addr(), strconv.Itoa(port)))
 }

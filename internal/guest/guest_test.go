@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itlabs-gmbh/cracklet/internal/cap"
+	"github.com/itlabs-gmbh/skiff/internal/cap"
 )
 
 var data = cap.TemplateData{VM: "agent1", BrokerURL: "http://127.0.0.1:7777", PseudoToken: "tok"}
@@ -116,10 +116,10 @@ func TestBlocksAreManagedPerOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, ">>> cracklet:old-cap ") || strings.Contains(script, "x;y") {
+	if !strings.Contains(script, ">>> skiff:old-cap ") || strings.Contains(script, "x;y") {
 		t.Errorf("stale block should be stripped, unsafe manifest entries ignored:\n%s", script)
 	}
-	if !strings.Contains(script, "sed '/^.* >>> cracklet:github .*$/,/^.* <<< cracklet:github$/d' '/etc/gitconfig'") {
+	if !strings.Contains(script, "sed '/^.* >>> skiff:github .*$/,/^.* <<< skiff:github$/d' '/etc/gitconfig'") {
 		t.Errorf("own block should be replaced:\n%s", script)
 	}
 	conflict := cap.Cap{Name: "other", Guest: cap.Guest{Files: []cap.File{{Path: "/etc/gitconfig", Content: "x"}}}}
@@ -142,7 +142,7 @@ func TestBlocksAreManagedPerOwner(t *testing.T) {
 	if _, err := Render([]cap.Cap{blockLike(), shared}, data); err != nil {
 		t.Errorf("different owners may share a file, got %v", err)
 	}
-	selfMarker := cap.Cap{Name: "m", Guest: cap.Guest{Blocks: []cap.Block{{Path: "/etc/m", Content: "# <<< cracklet:m\n"}}}}
+	selfMarker := cap.Cap{Name: "m", Guest: cap.Guest{Blocks: []cap.Block{{Path: "/etc/m", Content: "# <<< skiff:m\n"}}}}
 	if _, err := Render([]cap.Cap{selfMarker}, data); err == nil {
 		t.Errorf("content containing the own marker must be rejected")
 	}
@@ -272,7 +272,7 @@ func TestScriptsRunUnderBash(t *testing.T) {
 		t.Errorf("claude.json:\n%s", js)
 	}
 	git, _ := os.ReadFile(rooted("/etc/gitconfig"))
-	if !strings.Contains(string(git), "name = Keep Me\n# >>> cracklet:github managed") || !strings.Contains(string(git), "insteadOf = https://github.com/") {
+	if !strings.Contains(string(git), "name = Keep Me\n# >>> skiff:github managed") || !strings.Contains(string(git), "insteadOf = https://github.com/") {
 		t.Errorf("gitconfig should keep existing settings and gain the block on its own line:\n%s", git)
 	}
 	if info, _ := os.Stat(rooted("/etc/gitconfig")); info.Mode().Perm() != 0o600 {
@@ -283,7 +283,7 @@ func TestScriptsRunUnderBash(t *testing.T) {
 		t.Fatalf("second apply: %v\n%s", err, out)
 	}
 	git, _ = os.ReadFile(rooted("/etc/gitconfig"))
-	if strings.Count(string(git), "cracklet:github managed") != 1 || !strings.Contains(string(git), "name = Keep Me") {
+	if strings.Count(string(git), "skiff:github managed") != 1 || !strings.Contains(string(git), "name = Keep Me") {
 		t.Errorf("second apply should replace the block in place:\n%s", git)
 	}
 	manifest, _ := os.ReadFile(rooted(ManifestPath))
@@ -323,7 +323,7 @@ func TestFailedWriteKeepsOriginal(t *testing.T) {
 		t.Run(tool, func(t *testing.T) {
 			root := t.TempDir()
 			rooted := func(p string) string { return filepath.Join(root, p) }
-			_ = os.MkdirAll(rooted("/etc/cracklet"), 0o755)
+			_ = os.MkdirAll(rooted("/etc/skiff"), 0o755)
 			target := rooted("/etc/gitconfig")
 			original := "[user]\n\tname = Keep Me\n"
 			_ = os.WriteFile(target, []byte(original), 0o600)
@@ -353,7 +353,7 @@ func TestFailedWriteKeepsOriginal(t *testing.T) {
 			_, wasReached := os.Stat(reached)
 
 			got, _ := os.ReadFile(target)
-			withBlock := strings.HasPrefix(string(got), original) && strings.Contains(string(got), "<<< cracklet:github")
+			withBlock := strings.HasPrefix(string(got), original) && strings.Contains(string(got), "<<< skiff:github")
 			if string(got) != original && !withBlock {
 				t.Errorf("target must be either untouched or complete, got %q\n%s", got, out)
 			}
@@ -412,7 +412,7 @@ func decodeEnvBlock(t *testing.T, script string) string {
 	if anchor < 0 {
 		t.Fatalf("no env rewrite in:\n%s", script)
 	}
-	marker := "base64 -d >> \"$tmp\" <<'CRACKLET_B64'\n"
+	marker := "base64 -d >> \"$tmp\" <<'SKIFF_B64'\n"
 	i := strings.Index(script[anchor:], marker)
 	if i < 0 {
 		t.Fatalf("no env heredoc in:\n%s", script)
@@ -428,7 +428,7 @@ func decodeEnvBlock(t *testing.T, script string) string {
 
 func decodeHeredoc(t *testing.T, script, path string) string {
 	t.Helper()
-	marker := "base64 -d > '" + path + "' <<'CRACKLET_B64'\n"
+	marker := "base64 -d > '" + path + "' <<'SKIFF_B64'\n"
 	i := strings.Index(script, marker)
 	if i < 0 {
 		t.Fatalf("no heredoc for %s in:\n%s", path, script)

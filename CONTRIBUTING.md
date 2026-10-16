@@ -1,13 +1,13 @@
-# Contributing to cracklet
+# Contributing to skiff
 
-Thanks for taking the time to contribute. cracklet is a small project, so the
+Thanks for taking the time to contribute. skiff is a small project, so the
 rules are short. If something here is unclear, open an issue and ask.
 
 ## Before you start
 
 - **Bugs and small fixes:** open a pull request directly.
 - **New features or behaviour changes:** open an issue first so we can agree on
-  the approach before you invest time. cracklet deliberately stays small; not
+  the approach before you invest time. skiff deliberately stays small; not
   every feature fits.
 - **Security issues:** do **not** open a public issue. See [SECURITY.md](SECURITY.md).
 
@@ -17,13 +17,13 @@ You need an Apple Silicon Mac (M3 or newer) with macOS 15+ to run microVMs.
 Unit tests, `go vet` and `shellcheck` also run on Linux.
 
 ```sh
-git clone https://github.com/itlabs-gmbh/cracklet.git
-cd cracklet
+git clone https://github.com/itlabs-gmbh/skiff.git
+cd skiff
 make envd     # cross-compile the guest daemon so `make build` embeds it
-make build    # -> bin/cracklet
+make build    # -> bin/skiff
 make test     # unit tests with -race
 make lint     # gofmt, go vet, shellcheck
-make e2e      # boots a real microVM, needs `cracklet prepare` first
+make e2e      # boots a real microVM, needs `skiff prepare` first
 ```
 
 `make lint` and `make test` must pass before you open a pull request. CI runs
@@ -38,15 +38,15 @@ Tools: Go 1.26+, `shellcheck` (`brew install shellcheck`).
 
 | Path                | Purpose                                              |
 |---------------------|------------------------------------------------------|
-| `cmd/cracklet`      | CLI entry point                                      |
-| `cmd/cracklet-envd` | guest identity daemon, cross-compiled for linux/arm64 |
+| `cmd/skiff`      | CLI entry point                                      |
+| `cmd/skiff-envd` | guest identity daemon, cross-compiled for linux/arm64 |
 | `internal/cli`      | cobra commands                                       |
 | `internal/app`      | workflows (prepare, new, ssh, forward, ...)          |
 | `internal/lima`     | `limactl` wrapper and embedded Lima template         |
 | `internal/agent`    | bash agent that runs inside the Lima VM              |
-| `internal/host`     | host preflight checks (`cracklet doctor`)            |
+| `internal/host`     | host preflight checks (`skiff doctor`)            |
 | `internal/vm`       | VM spec and port-forward validation                  |
-| `internal/sshcfg`   | `~/.cracklet/ssh_config` rendering                   |
+| `internal/sshcfg`   | `~/.skiff/ssh_config` rendering                   |
 | `internal/config`   | pinned versions and SHA-256 digests                  |
 | `website/`          | static project website                               |
 
@@ -64,7 +64,7 @@ Tools: Go 1.26+, `shellcheck` (`brew install shellcheck`).
 - **Pinned artifacts:** bumping Firecracker, the kernel or the Ubuntu image
   means updating the SHA-256 digests in `internal/config` *and* noting it in
   the changelog, because it invalidates golden snapshots for all users.
-- **Security:** cracklet's network isolation rules are documented in the
+- **Security:** skiff's network isolation rules are documented in the
   README. A change that loosens them needs a written justification in the PR.
 
 ## Commit messages

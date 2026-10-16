@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
 // forwardTarget is where a host port leads.
@@ -80,7 +80,7 @@ func (b *Backend) Unforward(ctx context.Context, name string, hostPorts []int) (
 	return b.describe(ctx, name)
 }
 
-// recordOf loads the record of one of cracklet's existing machines for a
+// recordOf loads the record of one of skiff's existing machines for a
 // change; a corrupt record cannot be changed, only removed.
 func (b *Backend) recordOf(ctx context.Context, name string) (record, error) {
 	if _, err := b.machine(ctx, name); err != nil {

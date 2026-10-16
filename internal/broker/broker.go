@@ -1,6 +1,6 @@
 // Package broker is the one controlled hole in a microVM's isolation. It
 // listens on a per-VM Unix socket on the Mac (tunnelled into the guest by
-// `cracklet ssh -R`), checks the VM's grants and hands out connections,
+// `skiff ssh -R`), checks the VM's grants and hands out connections,
 // never secrets. It knows three primitives; everything else is a cap file.
 package broker
 
@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/itlabs-gmbh/cracklet/internal/cap"
-	"github.com/itlabs-gmbh/cracklet/internal/grant"
+	"github.com/itlabs-gmbh/skiff/internal/cap"
+	"github.com/itlabs-gmbh/skiff/internal/grant"
 )
 
 // SecretResolver resolves cap secret references.
@@ -27,7 +27,7 @@ type SecretResolver interface {
 }
 
 // GrantSource returns the VM's current grants; it is consulted per request so
-// a `cracklet grant` or `revoke` in another terminal applies to the next
+// a `skiff grant` or `revoke` in another terminal applies to the next
 // request of an already running broker.
 type GrantSource func() (grant.Set, error)
 
@@ -170,12 +170,12 @@ func (b *Broker) locate(w http.ResponseWriter, r *http.Request) (target, decisio
 	}
 	name, rest := splitCap(r.URL.Path)
 	if name == "" {
-		writeError(w, http.StatusNotFound, "no capability in path; the broker serves /<cap>/...", "cracklet cap ls")
+		writeError(w, http.StatusNotFound, "no capability in path; the broker serves /<cap>/...", "skiff cap ls")
 		return target{}, decision{status: http.StatusNotFound, reason: "no cap"}, false
 	}
 	c, ok := b.Caps[name]
 	if !ok {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("unknown capability %q", name), "cracklet cap ls")
+		writeError(w, http.StatusNotFound, fmt.Sprintf("unknown capability %q", name), "skiff cap ls")
 		return target{}, decision{cap: name, status: http.StatusNotFound, reason: "unknown cap"}, false
 	}
 	return target{cap: c, rest: rest}, decision{}, true

@@ -1,11 +1,11 @@
 # Claude Code in the guest talks to the Anthropic API through the broker on
 # the Mac, which swaps the guest's placeholder token for your real one. The
-# guest never sees the credential; the tunnel only exists while `cracklet ssh`
+# guest never sees the credential; the tunnel only exists while `skiff ssh`
 # is open.
 #
 # Store a long-lived subscription token once:
 #   claude setup-token            # prints the token after a browser login
-#   cracklet secret set claude-token
+#   skiff secret set claude-token
 #
 # Anthropic's terms allow signing in to the unmodified Claude Code binary with
 # your own subscription, including inside sandboxes you run yourself. Do not
@@ -17,7 +17,7 @@ description = "Anthropic API for Claude Code via the broker (your own subscripti
 [proxy]
 upstream = "https://api.anthropic.com"
 [proxy.headers]
-Authorization = "Bearer {{ secret \"keychain:cracklet/claude-token\" }}"
+Authorization = "Bearer {{ secret \"keychain:skiff/claude-token\" }}"
 
 [guest.env]
 ANTHROPIC_BASE_URL = "{{ .BrokerURL }}/claude"

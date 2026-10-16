@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/itlabs-gmbh/cracklet/internal/app"
+	"github.com/itlabs-gmbh/skiff/internal/app"
 )
 
 // annotationStdoutIsData marks commands whose stdout carries a byte stream,
@@ -18,9 +18,9 @@ func newDialCmd(get func() *app.App) *cobra.Command {
 		Use:    "_dial HOST PORT",
 		Short:  "ssh ProxyCommand: relay stdin/stdout to a port on a microVM",
 		Hidden: true,
-		Long: `_dial is the ProxyCommand in ~/.cracklet/ssh_config for backends whose guests
-the Mac reaches directly. ssh runs it as "cracklet _dial %h %p"; HOST is the
-alias <vm>.cracklet or a bare VM name.`,
+		Long: `_dial is the ProxyCommand in ~/.skiff/ssh_config for backends whose guests
+the Mac reaches directly. ssh runs it as "skiff _dial %h %p"; HOST is the
+alias <vm>.skiff or a bare VM name.`,
 		Args:        cobra.ExactArgs(2),
 		Annotations: map[string]string{annotationStdoutIsData: "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -36,11 +36,11 @@ alias <vm>.cracklet or a bare VM name.`,
 func newRelayCmd(get func() *app.App) *cobra.Command {
 	return &cobra.Command{
 		Use:    "_relay",
-		Short:  "Serve the port forwards of the container backend (started by cracklet itself)",
+		Short:  "Serve the port forwards of the container backend (started by skiff itself)",
 		Hidden: true,
 		Long: `_relay listens on 127.0.0.1:HOST for every forward of every microVM and joins
-each connection to the VM's guest port. cracklet starts it as a detached process
-whenever forwards exist and none runs (log: ~/.cracklet/relay.log); it exits on
+each connection to the VM's guest port. skiff starts it as a detached process
+whenever forwards exist and none runs (log: ~/.skiff/relay.log); it exits on
 its own once no forwards are left.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

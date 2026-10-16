@@ -1,4 +1,4 @@
-// Package cli defines the cracklet command tree.
+// Package cli defines the skiff command tree.
 package cli
 
 import (
@@ -12,10 +12,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/itlabs-gmbh/cracklet/internal/app"
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/runner"
+	"github.com/itlabs-gmbh/skiff/internal/app"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/runner"
 )
 
 // appBuilder constructs the App once the output writer is known. backendName
@@ -48,7 +48,7 @@ func Main() int {
 }
 
 // exitCode maps an error to a process exit status. Remote command failures
-// from `cracklet ssh` keep their status and stay silent, like plain ssh.
+// from `skiff ssh` keep their status and stay silent, like plain ssh.
 func exitCode(err error, stderr io.Writer) int {
 	if err == nil {
 		return 0
@@ -56,20 +56,20 @@ func exitCode(err error, stderr io.Writer) int {
 	var remote *app.RemoteExitError
 	if errors.As(err, &remote) {
 		if remote.Reason != "" {
-			fmt.Fprintln(stderr, "cracklet:", remote.Reason)
+			fmt.Fprintln(stderr, "skiff:", remote.Reason)
 		}
 		return remote.Code
 	}
-	fmt.Fprintln(stderr, "cracklet:", err)
+	fmt.Fprintln(stderr, "skiff:", err)
 	return 1
 }
 
 func newRoot(build appBuilder) *cobra.Command {
 	var a *app.App
 	root := &cobra.Command{
-		Use:   "cracklet",
+		Use:   "skiff",
 		Short: "Firecracker microVMs on your Mac",
-		Long: `cracklet runs real Firecracker microVMs on Apple Silicon. A single Lima VM with
+		Long: `skiff runs real Firecracker microVMs on Apple Silicon. A single Lima VM with
 nested virtualization hosts Firecracker; every microVM gets its own kernel,
 root disk, IP address and SSH access.`,
 		SilenceUsage:  true,

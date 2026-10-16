@@ -7,15 +7,15 @@ import (
 	"io"
 	"net"
 
-	"github.com/itlabs-gmbh/cracklet/internal/backend"
-	"github.com/itlabs-gmbh/cracklet/internal/config"
-	"github.com/itlabs-gmbh/cracklet/internal/sshcfg"
-	"github.com/itlabs-gmbh/cracklet/internal/vm"
+	"github.com/itlabs-gmbh/skiff/internal/backend"
+	"github.com/itlabs-gmbh/skiff/internal/config"
+	"github.com/itlabs-gmbh/skiff/internal/sshcfg"
+	"github.com/itlabs-gmbh/skiff/internal/vm"
 )
 
-// Dial is the body of `cracklet _dial`, the ssh ProxyCommand of backends whose
+// Dial is the body of `skiff _dial`, the ssh ProxyCommand of backends whose
 // guests the Mac can reach directly: it connects to port on the microVM that
-// host names (`<vm>.cracklet` as ssh passes %h, or a bare name) and relays
+// host names (`<vm>.skiff` as ssh passes %h, or a bare name) and relays
 // stdin to the guest and the guest to stdout until either side closes.
 func (a *App) Dial(ctx context.Context, host string, port int, stdin io.Reader, stdout io.Writer) error {
 	name := sshcfg.VMName(host, config.Instance)
@@ -79,7 +79,7 @@ func ignoreClosed(err error) error {
 	return fmt.Errorf("relay from guest: %w", err)
 }
 
-// Relay is the body of `cracklet _relay`, the detached process the backend
+// Relay is the body of `skiff _relay`, the detached process the backend
 // spawns to serve the port forwards of guests the Mac reaches directly. It runs
 // until ctx ends or the backend has no forwards left to serve.
 func (a *App) Relay(ctx context.Context) error {

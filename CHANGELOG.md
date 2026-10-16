@@ -7,6 +7,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **cracklet is now skiff.** The binary, the module path
+  (`github.com/itlabs-gmbh/skiff`), the state directory (`~/.skiff`,
+  `SKIFF_HOME`), the ssh alias (`ssh <vm>.skiff`), the guest image
+  (`skiff/guest`), the Lima instance, the guest-side paths
+  (`/run/skiff/broker.sock`, `/var/lib/skiff`) and the `SKIFF_*` environment
+  of capability hooks all change name. There is no migration: run
+  `skiff prepare` and recreate your VMs. The old `~/.cracklet` directory and a
+  Lima instance named `cracklet` can be deleted (`limactl delete cracklet`).
+  Entries below this one keep the old name.
+
 ### Added
 
 - A second backend on Apple's `container` (macOS 26, any Apple Silicon): one

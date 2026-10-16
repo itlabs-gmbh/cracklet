@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# cracklet agent: manages Firecracker microVMs inside the Lima VM. Runs as root and is
-# invoked by the cracklet CLI on macOS through `limactl shell`. Diagnostics go to
+# skiff agent: manages Firecracker microVMs inside the Lima VM. Runs as root and is
+# invoked by the skiff CLI on macOS through `limactl shell`. Diagnostics go to
 # stderr, machine-readable results (JSON) go to stdout.
 #
 # The script stays bash-3.2 compatible in its pure helpers so they can be unit
@@ -8,28 +8,28 @@
 set -euo pipefail
 export LC_ALL=C
 
-CRACKLET_ROOT=${CRACKLET_ROOT:-/var/lib/cracklet}
+SKIFF_ROOT=${SKIFF_ROOT:-/var/lib/skiff}
 FC_BIN=${FC_BIN:-/usr/local/bin/firecracker}
 HOSTS_FILE=${HOSTS_FILE:-/etc/hosts}
-SYSCTL_DROPIN=${SYSCTL_DROPIN:-/etc/sysctl.d/99-cracklet.conf}
+SYSCTL_DROPIN=${SYSCTL_DROPIN:-/etc/sysctl.d/99-skiff.conf}
 SYSTEMD_DIR=${SYSTEMD_DIR:-/etc/systemd/system}
-RESTORED_FLAG=${RESTORED_FLAG:-/run/cracklet/restored}   # restore's result; tmpfs, gone after every boot
-readonly CRACKLET_ROOT FC_BIN HOSTS_FILE SYSCTL_DROPIN SYSTEMD_DIR RESTORED_FLAG
-readonly IMAGES_DIR=$CRACKLET_ROOT/images
-readonly VMS_DIR=$CRACKLET_ROOT/vms
-readonly KEY_FILE=$CRACKLET_ROOT/id_ed25519
-readonly PUBKEY_FILE=$CRACKLET_ROOT/id_ed25519.pub
-readonly LOCK_FILE=$CRACKLET_ROOT/.lock
+RESTORED_FLAG=${RESTORED_FLAG:-/run/skiff/restored}   # restore's result; tmpfs, gone after every boot
+readonly SKIFF_ROOT FC_BIN HOSTS_FILE SYSCTL_DROPIN SYSTEMD_DIR RESTORED_FLAG
+readonly IMAGES_DIR=$SKIFF_ROOT/images
+readonly VMS_DIR=$SKIFF_ROOT/vms
+readonly KEY_FILE=$SKIFF_ROOT/id_ed25519
+readonly PUBKEY_FILE=$SKIFF_ROOT/id_ed25519.pub
+readonly LOCK_FILE=$SKIFF_ROOT/.lock
 readonly SUBNET_PREFIX=172.16          # every VM owns 172.16.<index>.0/30
 readonly NET=$SUBNET_PREFIX.0.0/16
-readonly TAP_PREFIX=cracklet
-readonly UNIT_PREFIX=cracklet-vm-
-readonly RESTORE_UNIT=cracklet-restore.service
-readonly FWD_UNIT_PREFIX=cracklet-fwd-
+readonly TAP_PREFIX=skiff
+readonly UNIT_PREFIX=skiff-vm-
+readonly RESTORE_UNIT=skiff-restore.service
+readonly FWD_UNIT_PREFIX=skiff-fwd-
 readonly PROXYD=/usr/lib/systemd/systemd-socket-proxyd
 readonly MIN_HOST_PORT=1024            # Lima exposes ports on the Mac as a normal user
-readonly CHAIN=CRACKLET-FORWARD        # guest -> elsewhere (routed traffic)
-readonly INPUT_CHAIN=CRACKLET-INPUT    # guest -> the Lima VM itself
+readonly CHAIN=SKIFF-FORWARD        # guest -> elsewhere (routed traffic)
+readonly INPUT_CHAIN=SKIFF-INPUT    # guest -> the Lima VM itself
 # Guests get internet only: private, link-local and loopback destinations are
 # rejected so they cannot reach the LAN or the Mac's own LAN address.
 readonly PRIVATE_NETS=(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16 127.0.0.0/8)
@@ -42,13 +42,13 @@ readonly PASEO_DISK_SIZE=8G
 readonly ROOTFS_REV=8                  # bump whenever customize_rootfs changes
 readonly PROFILE_REV=2                 # bump whenever profile_script or install_profile changes
 readonly GOLDEN_REV=2                  # bump whenever build_golden changes
-readonly SQUASHFS_CACHE=$CRACKLET_ROOT/images/ubuntu.squashfs   # kept for later profile builds
-readonly ENVD_BIN=$CRACKLET_ROOT/cracklet-envd   # guest identity daemon, pushed by cracklet prepare
-readonly GOLDEN_INDEX=0                # the golden VM boots as 172.16.0.2 on tap cracklet0
+readonly SQUASHFS_CACHE=$SKIFF_ROOT/images/ubuntu.squashfs   # kept for later profile builds
+readonly ENVD_BIN=$SKIFF_ROOT/skiff-envd   # guest identity daemon, pushed by skiff prepare
+readonly GOLDEN_INDEX=0                # the golden VM boots as 172.16.0.2 on tap skiff0
 readonly VSOCK_CID=3
 readonly VSOCK_PORT=52
 readonly FC_API_WAIT_SECONDS=10
-readonly HOSTS_MARKER='# cracklet-managed'
+readonly HOSTS_MARKER='# skiff-managed'
 readonly SSH_WAIT_SECONDS=60
 readonly STOP_WAIT_SECONDS=30
 readonly LOCK_WAIT_SECONDS=300
@@ -64,7 +64,7 @@ CHROOT_MOUNTS=()
 NEW_VM_NAME=
 NEW_VM_DONE=0
 
-log() { printf 'cracklet-agent: %s\n' "$*" >&2; }
+log() { printf 'skiff-agent: %s\n' "$*" >&2; }
 die() { log "error: $*"; exit 1; }
 
 # on_exit rolls back a VM whose creation did not finish and removes temp dirs.
@@ -191,7 +191,7 @@ wait_for_ssh() { # name ip
 
 add_host_entry() { # name ip
   remove_host_entry "$1"
-  echo "$2 $1.cracklet $1 $HOSTS_MARKER:$1" >> "$HOSTS_FILE"
+  echo "$2 $1.skiff $1 $HOSTS_MARKER:$1" >> "$HOSTS_FILE"
 }
 
 remove_host_entry() { # name
@@ -215,7 +215,7 @@ fetch() { # url dest
 }
 
 # vm_json never fails: a VM with missing metadata is reported as "broken" so
-# that one damaged directory cannot hide the healthy ones from `cracklet ls`.
+# that one damaged directory cannot hide the healthy ones from `skiff ls`.
 vm_json() { # name
   local name=$1 dir idx state config profile meta
   dir=$(vm_dir "$name"); idx=$(vm_index "$name"); config=$dir/config.json
@@ -240,7 +240,7 @@ vm_json() { # name
       mem_mib: ."machine-config".mem_size_mib, profile: $profile, forwards: $forwards} + $meta' "$config"
 }
 
-# write_meta records who manages a VM and when it was created, so cracklet gc
+# write_meta records who manages a VM and when it was created, so skiff gc
 # and tools that keep a pool of VMs can recognise the ones they lost track of.
 # The CLI stamps owned VMs with the Mac's clock, the one gc measures ages
 # with; the Lima clock can lag behind after the Mac slept.
@@ -295,7 +295,7 @@ cmd_prepare() { # FC_VERSION FC_SHA256 KERNEL_URL KERNEL_SHA256 ROOTFS_URL ROOTF
   local profiles=(base "$@")
   for profile in "${profiles[@]}"; do validate_profile "$profile"; done
   # profiles built earlier follow a new base image, or they would keep an old
-  # cracklet-envd and authorized_keys
+  # skiff-envd and authorized_keys
   for profile in "${PROFILES[@]}"; do
     if [[ $profile != base && -f $(profile_image "$profile") && " ${profiles[*]} " != *" $profile "* ]]; then
       profiles+=("$profile")
@@ -307,8 +307,8 @@ cmd_prepare() { # FC_VERSION FC_SHA256 KERNEL_URL KERNEL_SHA256 ROOTFS_URL ROOTF
   validate_url "$kernel_url"; validate_url "$rootfs_url"
   validate_sha "$fc_sha"; validate_sha "$kernel_sha"; validate_sha "$rootfs_sha"
   [[ -e /dev/kvm ]] || die "/dev/kvm is missing: nested virtualization is not active in this Lima VM"
-  [[ -f $PUBKEY_FILE && -f $KEY_FILE ]] || die "SSH key pair missing under $CRACKLET_ROOT"
-  [[ -x $ENVD_BIN ]] || die "guest daemon $ENVD_BIN missing (cracklet prepare pushes it)"
+  [[ -f $PUBKEY_FILE && -f $KEY_FILE ]] || die "SSH key pair missing under $SKIFF_ROOT"
+  [[ -x $ENVD_BIN ]] || die "guest daemon $ENVD_BIN missing (skiff prepare pushes it)"
   install -d -m 0700 "$IMAGES_DIR" "$VMS_DIR"
   install_packages
   install_firecracker "$fc_version" "$fc_sha"
@@ -320,7 +320,7 @@ cmd_prepare() { # FC_VERSION FC_SHA256 KERNEL_URL KERNEL_SHA256 ROOTFS_URL ROOTF
   install_restore_unit
   # golden snapshots from before profiles existed are named golden-VCPUS-MEM
   rm -rf "$IMAGES_DIR"/golden-[0-9]*
-  # the default VM size gets its golden snapshot now, so the first `cracklet new` is fast
+  # the default VM size gets its golden snapshot now, so the first `skiff new` is fast
   for profile in "${profiles[@]}"; do
     ensure_golden "$profile" "$vcpus" "$mem"
   done
@@ -440,17 +440,17 @@ customize_rootfs() { # root profile
 install_profile() { # root profile
   local root=$1 profile=$2
   log "installing the $profile profile (chroot, needs internet)"
-  profile_script "$profile" > "$root/tmp/cracklet-profile.sh"
+  profile_script "$profile" > "$root/tmp/skiff-profile.sh"
   # keep dpkg maintainer scripts from starting services in the build root
   printf '#!/bin/sh\nexit 101\n' > "$root/usr/sbin/policy-rc.d"
   chmod 0755 "$root/usr/sbin/policy-rc.d"
   chroot_mount "$root"
   if ! chroot "$root" /usr/bin/env -i HOME=/root PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-      LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive /bin/bash /tmp/cracklet-profile.sh >&2; then
+      LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive /bin/bash /tmp/skiff-profile.sh >&2; then
     die "installing the $profile profile failed (see the output above)"
   fi
   chroot_umount || die "could not unmount the build root"
-  rm -f "$root/usr/sbin/policy-rc.d" "$root/tmp/cracklet-profile.sh"
+  rm -f "$root/usr/sbin/policy-rc.d" "$root/tmp/skiff-profile.sh"
   case $profile in
     paseo) install_paseo_unit "$root" ;;
   esac
@@ -523,7 +523,7 @@ install_paseo_unit() { # root
   cat > "$root/etc/systemd/system/paseo.service" <<'UNIT'
 [Unit]
 Description=Paseo daemon
-After=network-online.target cracklet-envd.service
+After=network-online.target skiff-envd.service
 Wants=network-online.target
 
 [Service]
@@ -542,17 +542,17 @@ UNIT
 }
 
 # install_motd replaces Ubuntu's login banner (Landscape and Pro adverts, the
-# "system has been minimized" notice) with a short cracklet greeting. pam_motd
+# "system has been minimized" notice) with a short skiff greeting. pam_motd
 # runs the script on every login, so it can show the IP and uptime that a VM
-# restored from the golden snapshot only receives from cracklet-envd.
+# restored from the golden snapshot only receives from skiff-envd.
 install_motd() { # root
   local root=$1
   rm -f "$root"/etc/update-motd.d/* "$root/etc/motd"
   : > "$root/etc/legal"
   install -d -m 0755 "$root/etc/update-motd.d"
-  cat > "$root/etc/update-motd.d/00-cracklet" <<'MOTD'
+  cat > "$root/etc/update-motd.d/00-skiff" <<'MOTD'
 #!/bin/sh
-# cracklet login banner. Every value is best effort so a broken guest still
+# skiff login banner. Every value is best effort so a broken guest still
 # logs in; pam_motd captures the output, so colours are emitted unconditionally.
 O=$(printf '\033[38;5;208m') D=$(printf '\033[2m') B=$(printf '\033[1m') R=$(printf '\033[0m')
 host=$(hostname 2>/dev/null || echo '?')
@@ -572,7 +572,7 @@ cat <<'LOGO'
  / __/ __/ _ `/ __/  '_// / -_) __/
  \__/_/  \_,_/\__/_/\_\/_/\__/\__/
 LOGO
-printf '%s  %s⚡ cracklet · Firecracker microVM on macOS%s\n\n' "$R" "$D" "$R"
+printf '%s  %s⚡ skiff · Firecracker microVM on macOS%s\n\n' "$R" "$D" "$R"
 row() { printf "  ${D}%-7s${R} ${B}%-18s${R} ${D}%-7s${R} ${B}%s${R}\n" "$1" "$2" "$3" "$4"; }
 row host   "$host"      ip     "${ip:-?}"
 row vcpus  "$cpus"      memory "${mem:-?}"
@@ -580,29 +580,29 @@ row uptime "${up:-?}"   kernel "${kernel:-?}"
 row disk   "${disk:-?}" load   "${load:-?}"
 printf '\n  %soutbound internet only · no LAN · Ctrl-D to leave%s\n\n' "$D" "$R"
 MOTD
-  chmod 0755 "$root/etc/update-motd.d/00-cracklet"
+  chmod 0755 "$root/etc/update-motd.d/00-skiff"
 }
 
 # install_envd adds the guest identity daemon that applies IP, hostname and
 # clock after a snapshot restore (see build_golden / restore_vm).
 install_envd() { # root
   local root=$1
-  install -m 0755 "$ENVD_BIN" "$root/usr/local/bin/cracklet-envd"
-  cat > "$root/etc/systemd/system/cracklet-envd.service" <<'UNIT'
+  install -m 0755 "$ENVD_BIN" "$root/usr/local/bin/skiff-envd"
+  cat > "$root/etc/systemd/system/skiff-envd.service" <<'UNIT'
 [Unit]
-Description=cracklet guest identity service
+Description=skiff guest identity service
 DefaultDependencies=no
 After=sysinit.target
 
 [Service]
-ExecStart=/usr/local/bin/cracklet-envd
+ExecStart=/usr/local/bin/skiff-envd
 Restart=always
 RestartSec=1
 
 [Install]
 WantedBy=multi-user.target
 UNIT
-  ln -sfn /etc/systemd/system/cracklet-envd.service "$root/etc/systemd/system/multi-user.target.wants/cracklet-envd.service"
+  ln -sfn /etc/systemd/system/skiff-envd.service "$root/etc/systemd/system/multi-user.target.wants/skiff-envd.service"
 }
 
 # trim_boot removes everything from the first boot that a headless microVM
@@ -760,9 +760,9 @@ cmd_new() { # NAME|- VCPUS MEM_MIB DISK [snapshot|fresh [PROFILE [OWNER|- [SLOT|
   validate_int_range "$mem" "$MIN_MEM_MIB" "$MAX_MEM_MIB" memory
   validate_disk "$disk"
   image=$(profile_image "$profile")
-  [[ -f $IMAGES_DIR/vmlinux && -f $IMAGES_DIR/rootfs-base.ext4 ]] || die "images missing, run 'cracklet prepare' first"
-  [[ -f $image ]] || die "the $profile image is not built, run 'cracklet prepare --profile $profile' first"
-  profile_current "$profile" || die "the $profile image predates the base image, run 'cracklet prepare --profile $profile'"
+  [[ -f $IMAGES_DIR/vmlinux && -f $IMAGES_DIR/rootfs-base.ext4 ]] || die "images missing, run 'skiff prepare' first"
+  [[ -f $image ]] || die "the $profile image is not built, run 'skiff prepare --profile $profile' first"
+  profile_current "$profile" || die "the $profile image predates the base image, run 'skiff prepare --profile $profile'"
   install -d -m 0700 "$VMS_DIR"
   idx=$(allocate_index)
   if [[ $name == - ]]; then name=$(free_auto_name); fi
@@ -773,7 +773,7 @@ cmd_new() { # NAME|- VCPUS MEM_MIB DISK [snapshot|fresh [PROFILE [OWNER|- [SLOT|
   fi
   mkdir "$dir" 2>/dev/null || die "VM '$name' already exists"
   NEW_VM_NAME=$name                           # from here on, failures roll back
-  : > "$dir/creating"                         # keeps cracklet gc away until the VM is complete
+  : > "$dir/creating"                         # keeps skiff gc away until the VM is complete
   atomic_write "$dir/index" "$idx"
   atomic_write "$dir/profile" "$profile"
   write_meta "$name" "$owner" "$slot" "$created"   # early, so leftovers of a killed agent keep their owner
@@ -812,7 +812,7 @@ run_firecracker() { # name dir mem_mib firecracker-args...
   unit=$(vm_unit "$name")
   rm -f "$dir/fc.sock" "$dir/v.sock"
   systemctl reset-failed "$unit" 2>/dev/null || true
-  systemd-run --quiet --unit "$unit" --description "cracklet microVM $name" \
+  systemd-run --quiet --unit "$unit" --description "skiff microVM $name" \
     --working-directory "$dir" \
     --property StandardInput=null \
     --property "StandardOutput=truncate:$dir/console.log" \
@@ -844,8 +844,8 @@ wait_for_api() { # dir
 }
 
 # --- golden snapshot ---------------------------------------------------------
-# A golden snapshot is a fully booted VM (sshd and cracklet-envd running) frozen with
-# its memory. `cracklet new` restores it in a fraction of the cold-boot time and then
+# A golden snapshot is a fully booted VM (sshd and skiff-envd running) frozen with
+# its memory. `skiff new` restores it in a fraction of the cold-boot time and then
 # hands the VM its real identity over vsock.
 
 golden_dir() { echo "$IMAGES_DIR/golden-$1-$2-$3"; }   # profile vcpus mem
@@ -899,7 +899,7 @@ identity_json() { # name idx
     '{ip: $ip, prefix: 30, gateway: $gw, hostname: $host, iface: "eth0", unix_time: $now, seed: $seed}'
 }
 
-# send_identity talks to cracklet-envd through Firecracker's vsock Unix socket
+# send_identity talks to skiff-envd through Firecracker's vsock Unix socket
 # (CONNECT <port> handshake) and expects an "OK" reply.
 send_identity() { # dir json
   python3 - "$1/v.sock" "$VSOCK_PORT" "$2" <<'PYEOF'
@@ -919,7 +919,7 @@ while time.time() < deadline:
         answer = s.recv(512).decode().strip()
         if answer.startswith("OK"):
             sys.exit(0)
-        sys.exit("cracklet-envd rejected identity: " + answer)
+        sys.exit("skiff-envd rejected identity: " + answer)
     except OSError as e:
         last = str(e)
         time.sleep(0.1)
@@ -960,7 +960,7 @@ start_vm() { # name
   local name=$1 dir idx tap unit ip mem
   dir=$(vm_dir "$name"); idx=$(vm_index "$name"); unit=$(vm_unit "$name")
   if ! is_index "$idx" || [[ ! -s $dir/config.json ]]; then
-    die "VM '$name' is incomplete; remove it with 'cracklet rm $name'"
+    die "VM '$name' is incomplete; remove it with 'skiff rm $name'"
   fi
   tap=$(idx_tap "$idx"); ip=$(idx_ip "$idx")
   if unit_active "$name"; then
@@ -1010,12 +1010,12 @@ cmd_stop()  { require_vm "$1"; stop_vm "$1"; rm -f "$(vm_dir "$1")/autostart"; v
 # The microVM units are transient, so a restart of the Lima VM (a reboot of
 # the Mac) stops every microVM. A VM that was started and not stopped again
 # carries an autostart marker; a crash or a failed boot keeps it, only
-# `cracklet stop` removes it.
+# `skiff stop` removes it.
 
 mark_autostart() { : > "$(vm_dir "$1")/autostart"; }
 
 # cmd_restore boots the marked VMs once per boot of the Lima VM. It runs from
-# cracklet-restore.service at boot and from the CLI after it started the Lima
+# skiff-restore.service at boot and from the CLI after it started the Lima
 # VM; whichever comes second waits for the agent lock and gets the first
 # one's result, so the CLI still warns about a VM the boot unit could not start.
 # Prints {"started": [...], "failed": [...]}.
@@ -1054,7 +1054,7 @@ install_restore_unit() {
   install -d -m 0755 "$SYSTEMD_DIR"
   cat > "$SYSTEMD_DIR/$RESTORE_UNIT" <<UNIT
 [Unit]
-Description=Restart the cracklet microVMs that ran before the Lima VM stopped
+Description=Restart the skiff microVMs that ran before the Lima VM stopped
 Wants=network-online.target
 After=network-online.target
 
@@ -1069,7 +1069,7 @@ UNIT
   systemctl enable --quiet "$RESTORE_UNIT"
 }
 
-# cmd_rm with OWNER and CREATED is cracklet gc's removal: it runs under the
+# cmd_rm with OWNER and CREATED is skiff gc's removal: it runs under the
 # agent lock and removes the VM only if it is still the one gc listed, never
 # one that was removed and recreated under the same name in the meantime.
 # Prints "removed", or "gone" when someone else removed the VM first.
@@ -1118,7 +1118,7 @@ apply_forward() { # name host guest
   idx=$(vm_index "$name"); unit=$(fwd_unit "$name" "$host")
   systemctl stop "$unit.socket" "$unit.service" 2>/dev/null || true
   systemctl reset-failed "$unit.socket" "$unit.service" 2>/dev/null || true
-  systemd-run --quiet --unit "$unit" --description "cracklet forward $name :$host -> :$guest" \
+  systemd-run --quiet --unit "$unit" --description "skiff forward $name :$host -> :$guest" \
     --socket-property "ListenStream=0.0.0.0:$host" \
     --socket-property NoDelay=yes \
     --property NoNewPrivileges=yes \
@@ -1204,12 +1204,12 @@ agent_busy() { ! flock -n "$LOCK_FILE" true 2>/dev/null; }
 
 acquire_lock() {
   exec 9>"$LOCK_FILE"
-  flock -w "$LOCK_WAIT_SECONDS" 9 || die "another cracklet operation is still running"
+  flock -w "$LOCK_WAIT_SECONDS" 9 || die "another skiff operation is still running"
 }
 
 main() {
   [[ $EUID -eq 0 ]] || die "the agent must run as root"
-  install -d -m 0700 "$CRACKLET_ROOT"
+  install -d -m 0700 "$SKIFF_ROOT"
   local cmd=${1:-}
   if [[ -n $cmd ]]; then shift; fi
   trap on_exit EXIT

@@ -1,6 +1,6 @@
 // Package cap defines capabilities: declarative descriptions of how the
 // broker on the Mac hands a connection into a microVM and what the guest needs
-// to use it. cracklet's core knows three primitives (proxy, mcp, exec); every
+// to use it. skiff's core knows three primitives (proxy, mcp, exec); every
 // harness-specific detail lives in a TOML file, never in Go code.
 package cap
 

@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/itlabs-gmbh/cracklet/internal/app"
+	"github.com/itlabs-gmbh/skiff/internal/app"
 )
 
 func newGCCmd(get func() *app.App) *cobra.Command {
@@ -18,23 +18,23 @@ func newGCCmd(get func() *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gc",
 		Short: "Remove orphaned microVMs and leftover host state",
-		Long: `gc removes microVMs that a tool created with 'cracklet new --owner' and no
+		Long: `gc removes microVMs that a tool created with 'skiff new --owner' and no
 longer tracks. Only VMs with an owner are ever collected, so VMs made by hand
 are safe. --owner and --older-than select which owned VMs go; without either,
 gc removes no VM and only deletes the grants and tokens on the Mac of VMs that
 no longer exist.
 
 A tool that keeps a pool of VMs reconciles with
-  cracklet gc --owner NAME --keep VM --keep VM ...
+  skiff gc --owner NAME --keep VM --keep VM ...
 listing every VM it still tracks. VMs it is creating right now are not in its
-list yet; protect them with --keep or --older-than. VMs that 'cracklet new' is
+list yet; protect them with --keep or --older-than. VMs that 'skiff new' is
 still building are never collected.
 
 If removing one VM fails, gc carries on with the others and exits non-zero;
 --json then still prints what was removed.`,
-		Example: "  cracklet gc --owner paseo --dry-run\n" +
-			"  cracklet gc --older-than 7d\n" +
-			"  cracklet gc --owner paseo --keep paseo-1 --keep paseo-2",
+		Example: "  skiff gc --owner paseo --dry-run\n" +
+			"  skiff gc --older-than 7d\n" +
+			"  skiff gc --owner paseo --keep paseo-1 --keep paseo-2",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			age, err := parseAge(olderThan)

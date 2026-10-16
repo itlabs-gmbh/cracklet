@@ -12,8 +12,8 @@ import (
 func newGrantCmd(get func() *app.App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "grant NAME CAP...",
-		Short: "Let a microVM use capabilities through the broker",
-		Long: `grant allows a microVM to use capabilities. The guest is configured right
+		Short: "Let a VM use capabilities through the broker",
+		Long: `grant allows a VM to use capabilities. The guest is configured right
 away; the broker itself runs on the Mac for as long as 'skiff ssh NAME' is open
 and hands out connections, never secrets. Default is deny.
 
@@ -33,7 +33,7 @@ the agent should work on.`,
 func newRevokeCmd(get func() *app.App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "revoke NAME CAP...",
-		Short: "Withdraw capabilities from a microVM",
+		Short: "Withdraw capabilities from a VM",
 		Long: `revoke withdraws grants and removes their guest configuration. Nothing is
 withdrawn when one of the capabilities is not granted.`,
 		Example: "  skiff revoke agent1 github\n" +
@@ -49,7 +49,7 @@ withdrawn when one of the capabilities is not granted.`,
 func newGrantsCmd(get func() *app.App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "grants NAME",
-		Short: "Show what a microVM may use",
+		Short: "Show what a VM may use",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			set, err := get().Grants(args[0])

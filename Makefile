@@ -5,7 +5,7 @@ ENVD := internal/envdbin/bin/skiff-envd
 
 .PHONY: build install test cover lint e2e clean envd
 
-# The guest identity daemon is cross-compiled for the microVMs and embedded into skiff.
+# The guest identity daemon of the deprecated Lima backend, cross-compiled and embedded into skiff.
 envd: $(ENVD)
 
 $(ENVD): $(wildcard cmd/skiff-envd/*.go) $(wildcard internal/envd/*.go) go.mod
@@ -29,7 +29,7 @@ lint:
 	go vet ./...
 	shellcheck -s bash internal/agent/agent.sh
 
-# Boots a real microVM; needs a prepared host (skiff prepare). Always cleans up.
+# Boots a real VM; needs a prepared host (skiff prepare). Always cleans up.
 e2e: build
 	./bin/$(BINARY) new e2e-smoke --mem 512 \
 	  && ./bin/$(BINARY) ssh e2e-smoke uname -a \

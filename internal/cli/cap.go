@@ -16,7 +16,7 @@ import (
 func newCapCmd(get func() *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cap",
-		Short: "Manage capabilities (what the broker can hand into a microVM)",
+		Short: "Manage capabilities (what the broker can hand into a VM)",
 		Long: `Capabilities are TOML files. skiff ships a few (claude, github); your own
 live in ~/.skiff/caps/<name>.toml and override embedded ones of the same name.
 A capability says how something is handed into the guest; 'skiff grant' says whether.`,
